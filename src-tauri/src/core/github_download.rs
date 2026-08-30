@@ -25,6 +25,89 @@ pub struct GithubDownloadOptions<'a> {
     pub proxy_url: &'a str,
 }
 
+/// Fetch one UTF-8 text file from a GitHub repository without cloning it.
+/// Returns `Ok(None)` when the path does not exist.
+pub fn fetch_github_text_file(
+    owner: &str,
+    repo: &str,
+    branch: Option<&str>,
+    path: &str,
+    max_bytes: usize,
+    token: Option<&str>,
+    proxy_url: &str,
+) -> Result<Option<String>> {
+    fetch_github_text_file_inner(
+        "https://api.github.com",
+        owner,
+        repo,
+        branch,
+        path,
+        max_bytes,
+        token,
+        proxy_url,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fetch_github_text_file_inner(
+    api_base_url: &str,
+    owner: &str,
+    repo: &str,
+    branch: Option<&str>,
+    path: &str,
+    max_bytes: usize,
+    token: Option<&str>,
+    proxy_url: &str,
+) -> Result<Option<String>> {
+    let client = github_http_client(proxy_url, Some(20))?;
+    let encoded_path = path
+        .split('/')
+        .map(|segment| urlencoding::encode(segment).into_owned())
+        .collect::<Vec<_>>()
+        .join("/");
+    let mut url = format!(
+        "{}/repos/{}/{}/contents/{}",
+        api_base_url.trim_end_matches('/'),
+        urlencoding::encode(owner),
+        urlencoding::encode(repo),
+        encoded_path
+    );
+    if let Some(branch) = branch {
+        url.push_str("?ref=");
+        url.push_str(&urlencoding::encode(branch));
+    }
+
+    let mut request = client
+        .get(&url)
+        .header("User-Agent", "skills-hub")
+        .header("Accept", "application/vnd.github.raw+json");
+    if let Some(token) = token {
+        request = request.header("Authorization", format!("Bearer {}", token));
+    }
+    let response = request
+        .send()
+        .with_context(|| format!("request GitHub file: {}", path))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let response = check_github_response(response, &url)?;
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes as u64)
+    {
+        anyhow::bail!("PREVIEW_TOO_LARGE|SKILL.md is larger than the preview limit.");
+    }
+    let bytes = response
+        .bytes()
+        .with_context(|| format!("read GitHub file: {}", path))?;
+    if bytes.len() > max_bytes {
+        anyhow::bail!("PREVIEW_TOO_LARGE|SKILL.md is larger than the preview limit.");
+    }
+    let content = String::from_utf8(bytes.to_vec())
+        .with_context(|| format!("GitHub file is not UTF-8 text: {}", path))?;
+    Ok(Some(content))
+}
+
 /// Download a directory from a GitHub repo using the Contents API.
 ///
 /// `owner`/`repo`: repository coordinates
@@ -189,24 +272,28 @@ pub fn parse_github_api_params(
         return None;
     }
 
-    // Extract owner/repo from clone_url like https://github.com/owner/repo.git
-    let url = clone_url.trim_end_matches('/').trim_end_matches(".git");
-    let prefix = "https://github.com/";
-    if !url.starts_with(prefix) {
-        return None;
-    }
-    let rest = &url[prefix.len()..];
-    let parts: Vec<&str> = rest.split('/').collect();
-    if parts.len() < 2 {
-        return None;
-    }
+    let (owner, repo) = parse_github_repo_coordinates(clone_url)?;
 
     Some((
-        parts[0].to_string(),
-        parts[1].to_string(),
+        owner,
+        repo,
         branch.unwrap_or("main").to_string(),
         subpath.to_string(),
     ))
+}
+
+/// Extract `owner` and `repo` from a normalized GitHub clone URL.
+pub fn parse_github_repo_coordinates(clone_url: &str) -> Option<(String, String)> {
+    let url = clone_url.trim_end_matches('/').trim_end_matches(".git");
+    let prefix = "https://github.com/";
+    let rest = url.strip_prefix(prefix)?;
+    let mut parts = rest.split('/');
+    let owner = parts.next()?;
+    let repo = parts.next()?;
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some((owner.to_string(), repo.to_string()))
 }
 
 #[cfg(test)]
@@ -256,6 +343,56 @@ mod tests {
             Some("path"),
         );
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn fetch_github_text_file_reads_raw_content() {
+        let mut server = mockito::Server::new();
+        let _mock = server
+            .mock("GET", "/repos/acme/demo/contents/skills/example/SKILL.md")
+            .with_status(200)
+            .with_body("---\nname: example\n---\nInstructions")
+            .create();
+
+        let content = fetch_github_text_file_inner(
+            &server.url(),
+            "acme",
+            "demo",
+            None,
+            "skills/example/SKILL.md",
+            1024,
+            None,
+            "",
+        )
+        .unwrap();
+
+        assert_eq!(
+            content.as_deref(),
+            Some("---\nname: example\n---\nInstructions")
+        );
+    }
+
+    #[test]
+    fn fetch_github_text_file_returns_none_for_missing_path() {
+        let mut server = mockito::Server::new();
+        let _mock = server
+            .mock("GET", "/repos/acme/demo/contents/SKILL.md")
+            .with_status(404)
+            .create();
+
+        let content = fetch_github_text_file_inner(
+            &server.url(),
+            "acme",
+            "demo",
+            None,
+            "SKILL.md",
+            1024,
+            None,
+            "",
+        )
+        .unwrap();
+
+        assert_eq!(content, None);
     }
 
     #[test]

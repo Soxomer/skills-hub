@@ -8,7 +8,7 @@ const DB_FILE_NAME: &str = "skills_hub.db";
 const LEGACY_APP_IDENTIFIERS: &[&str] = &["com.tauri.dev", "com.tauri.dev.skillshub"];
 
 // Schema versioning: bump when making changes and add a migration step.
-const SCHEMA_VERSION: i32 = 6;
+const SCHEMA_VERSION: i32 = 8;
 
 // Minimal schema for MVP: skills, skill_targets, settings, discovered_skills(optional).
 const SCHEMA_V1: &str = r#"
@@ -155,6 +155,7 @@ impl SkillStore {
                 // V3: add source_subpath column
                 conn.execute_batch("ALTER TABLE skills ADD COLUMN source_subpath TEXT NULL;")?;
                 migrate_skill_targets_to_v4(conn)?;
+                migrate_setups_to_v8(conn, false)?;
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             } else if user_version < SCHEMA_VERSION {
                 // Incremental migrations
@@ -172,6 +173,9 @@ impl SkillStore {
                 }
                 if user_version < 6 {
                     migrate_skill_enabled_to_v6(conn)?;
+                }
+                if user_version < 8 {
+                    migrate_setups_to_v8(conn, user_version == 7)?;
                 }
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             } else if user_version > SCHEMA_VERSION {
@@ -718,7 +722,7 @@ impl SkillStore {
         })
     }
 
-    fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+    pub(crate) fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         let conn = Connection::open(&self.db_path)
             .with_context(|| format!("failed to open db at {:?}", self.db_path))?;
         // Enforce foreign key constraints on every connection (rusqlite PRAGMA is per-connection).
@@ -781,6 +785,82 @@ fn migrate_tags_to_v5(conn: &Connection) -> Result<()> {
 
 fn migrate_skill_enabled_to_v6(conn: &Connection) -> Result<()> {
     conn.execute_batch("ALTER TABLE skills ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;")?;
+    Ok(())
+}
+
+fn migrate_setups_to_v8(conn: &Connection, discard_profile_poc: bool) -> Result<()> {
+    if discard_profile_poc {
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS profile_revisions;
+             DROP TABLE IF EXISTS projects;
+             DROP TABLE IF EXISTS profile_skills;
+             DROP TABLE IF EXISTS profiles;",
+        )?;
+    }
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS setups (
+           id TEXT PRIMARY KEY,
+           name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+           current_revision_id TEXT NULL,
+           created_at INTEGER NOT NULL,
+           updated_at INTEGER NOT NULL,
+           FOREIGN KEY(current_revision_id) REFERENCES setup_revisions(id) ON DELETE RESTRICT
+         );
+
+         CREATE TABLE IF NOT EXISTS setup_revisions (
+           id TEXT PRIMARY KEY,
+           setup_id TEXT NOT NULL,
+           revision_number INTEGER NOT NULL,
+           created_at INTEGER NOT NULL,
+           UNIQUE(setup_id, revision_number),
+           FOREIGN KEY(setup_id) REFERENCES setups(id) ON DELETE CASCADE
+         );
+
+         CREATE TABLE IF NOT EXISTS setup_revision_skills (
+           revision_id TEXT NOT NULL,
+           skill_id TEXT NOT NULL,
+           tool TEXT NOT NULL,
+           created_at INTEGER NOT NULL,
+           PRIMARY KEY (revision_id, skill_id, tool),
+           FOREIGN KEY(revision_id) REFERENCES setup_revisions(id) ON DELETE CASCADE,
+           FOREIGN KEY(skill_id) REFERENCES skills(id) ON DELETE RESTRICT
+         );
+
+         CREATE TABLE IF NOT EXISTS projects (
+           id TEXT PRIMARY KEY,
+           path TEXT NOT NULL UNIQUE,
+           assigned_setup_revision_id TEXT NULL,
+           applied_setup_revision_id TEXT NULL,
+           created_at INTEGER NOT NULL,
+           updated_at INTEGER NOT NULL,
+           FOREIGN KEY(assigned_setup_revision_id) REFERENCES setup_revisions(id) ON DELETE SET NULL,
+           FOREIGN KEY(applied_setup_revision_id) REFERENCES setup_revisions(id) ON DELETE SET NULL
+         );
+
+         CREATE TABLE IF NOT EXISTS apply_operations (
+           id TEXT PRIMARY KEY,
+           project_id TEXT NOT NULL,
+           previous_assigned_revision_id TEXT NULL,
+           previous_applied_revision_id TEXT NULL,
+           applied_revision_id TEXT NULL,
+           previous_targets_json TEXT NOT NULL,
+           created_at INTEGER NOT NULL,
+           rolled_back_at INTEGER NULL,
+           FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+           FOREIGN KEY(previous_assigned_revision_id) REFERENCES setup_revisions(id) ON DELETE SET NULL,
+           FOREIGN KEY(previous_applied_revision_id) REFERENCES setup_revisions(id) ON DELETE SET NULL,
+           FOREIGN KEY(applied_revision_id) REFERENCES setup_revisions(id) ON DELETE SET NULL
+         );
+
+         CREATE INDEX IF NOT EXISTS idx_setup_revisions_setup
+         ON setup_revisions(setup_id, revision_number DESC);
+
+         CREATE INDEX IF NOT EXISTS idx_setup_revision_skills_revision
+         ON setup_revision_skills(revision_id);
+
+         CREATE INDEX IF NOT EXISTS idx_apply_operations_project
+         ON apply_operations(project_id, created_at DESC);",
+    )?;
     Ok(())
 }
 

@@ -31,8 +31,11 @@ pub fn current_scheduler_config(schedule: AutoUpdateSchedule) -> Result<Schedule
 pub fn scheduler_executable_for_current_exe(current_exe: &Path) -> Result<PathBuf> {
     #[cfg(debug_assertions)]
     {
-        let path = current_exe.to_string_lossy();
-        if path.contains("/target/debug/") {
+        let debug_dir = Path::new("target").join("debug");
+        if current_exe
+            .parent()
+            .is_some_and(|parent| parent.ends_with(&debug_dir))
+        {
             let runner = current_exe.with_file_name("skills-hub-autoupdate-runner");
             std::fs::copy(current_exe, &runner)
                 .with_context(|| format!("copy auto update runner to {:?}", runner))?;

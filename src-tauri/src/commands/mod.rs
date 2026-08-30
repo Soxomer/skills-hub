@@ -25,7 +25,8 @@ use crate::core::github_search::{search_github_repos, RepoSummary};
 use crate::core::installer::{
     import_existing_local_skill, install_git_skill, install_git_skill_from_selection,
     install_local_skill, install_local_skill_from_selection, list_git_skills, list_local_skills,
-    update_managed_skill_from_source, GitSkillCandidate, InstallResult, LocalSkillCandidate,
+    preview_git_skill, update_managed_skill_from_source, GitSkillCandidate, GitSkillPreview,
+    InstallResult, LocalSkillCandidate,
 };
 use crate::core::network_proxy::{
     app_http_client, get_github_proxy_config as get_github_proxy_config_core,
@@ -909,6 +910,22 @@ pub async fn list_git_skills_cmd(
         .await
         .map_err(|err| err.to_string())?
         .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn preview_git_skill_cmd(
+    store: State<'_, SkillStore>,
+    repoUrl: String,
+    skillName: Option<String>,
+) -> Result<GitSkillPreview, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        preview_git_skill(&store, &repoUrl, skillName.as_deref())
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
 }
 
 #[tauri::command]

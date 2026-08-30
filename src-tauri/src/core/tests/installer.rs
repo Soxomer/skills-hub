@@ -167,6 +167,29 @@ body
 }
 
 #[test]
+fn preview_paths_use_an_explicit_skill_subpath() {
+    let paths = super::git_skill_preview_paths(Some("skills/example"), Some("ignored")).unwrap();
+
+    assert_eq!(paths, vec!["skills/example/SKILL.md"]);
+}
+
+#[test]
+fn preview_paths_cover_common_repository_layouts() {
+    let paths = super::git_skill_preview_paths(None, Some("example")).unwrap();
+
+    assert_eq!(paths.first().map(String::as_str), Some("SKILL.md"));
+    assert!(paths.contains(&"skills/example/SKILL.md".to_string()));
+    assert!(paths.contains(&".claude/skills/example/SKILL.md".to_string()));
+}
+
+#[test]
+fn preview_paths_reject_repository_traversal() {
+    let error = super::git_skill_preview_paths(Some("../outside"), Some("example")).unwrap_err();
+
+    assert!(error.to_string().starts_with("PREVIEW_INVALID_PATH|"));
+}
+
+#[test]
 fn parses_skill_md_frontmatter_literal_description() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("SKILL.md");
@@ -915,12 +938,7 @@ fn collect_skill_dirs_finds_skills_under_explicit_container() {
     let dirs = super::collect_skill_dirs(dir.path());
     let rels: Vec<String> = dirs
         .iter()
-        .map(|p| {
-            p.strip_prefix(dir.path())
-                .unwrap_or(p)
-                .to_string_lossy()
-                .to_string()
-        })
+        .map(|p| super::path_to_slash(p.strip_prefix(dir.path()).unwrap_or(p)))
         .collect();
     assert_eq!(rels, vec!["technical-writer".to_string()]);
 }
@@ -945,12 +963,7 @@ fn collect_skill_dirs_finds_multiple_skills_under_explicit_container() {
     let dirs = super::collect_skill_dirs(dir.path());
     let rels: Vec<String> = dirs
         .iter()
-        .map(|p| {
-            p.strip_prefix(dir.path())
-                .unwrap_or(p)
-                .to_string_lossy()
-                .to_string()
-        })
+        .map(|p| super::path_to_slash(p.strip_prefix(dir.path()).unwrap_or(p)))
         .collect();
     assert_eq!(
         rels,
@@ -977,12 +990,7 @@ fn collect_skill_dirs_scans_named_skill_containers_but_not_generic_dirs() {
     let dirs = super::collect_skill_dirs(dir.path());
     let rels: Vec<String> = dirs
         .iter()
-        .map(|p| {
-            p.strip_prefix(dir.path())
-                .unwrap_or(p)
-                .to_string_lossy()
-                .to_string()
-        })
+        .map(|p| super::path_to_slash(p.strip_prefix(dir.path()).unwrap_or(p)))
         .collect();
     assert_eq!(rels, vec!["agent-skills/visible-skill".to_string()]);
 }

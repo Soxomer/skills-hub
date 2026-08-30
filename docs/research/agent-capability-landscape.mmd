@@ -1,0 +1,43 @@
+flowchart LR
+  subgraph Sources["Catalog and governance references"]
+    AV["Agentver\nteam product surface"]
+    SH["iFlytek SkillHub\ncompany skill registry"]
+    AR["Agentic Registry\nversioned artifact control plane"]
+    THR["ToolHive Registry\naccess-controlled catalogs"]
+  end
+
+  subgraph Core["Agent Harness Manager target"]
+    CAT["Company and user library"]
+    PROF["Profiles, inheritance, and policy"]
+    REC["Previewable safe reconciler"]
+    BASE["Baseline and revision store"]
+  end
+
+  subgraph Distribution["Distribution references"]
+    AP["Agent Packs\nlocks, receipts, rollback"]
+    TH["ToolHive\nscopes, OCI, multi-client sync"]
+    CTL["agentctl\nplan, apply, drift"]
+    AG["AGHub\ndesktop lifecycle UX"]
+  end
+
+  subgraph Outcomes["Measured agent setups"]
+    TARGETS["Codex, Claude, Cursor, and others"]
+    EVAL["agent-skill-eval\nreal-harness benchmark"]
+    EVIDENCE["Trigger, quality, cost, and conflict evidence"]
+  end
+
+  AV --> CAT
+  SH --> CAT
+  AR --> CAT
+  THR --> CAT
+  CAT --> PROF
+  PROF --> REC
+  BASE <--> REC
+  AP --> REC
+  TH --> REC
+  CTL --> REC
+  AG --> REC
+  REC --> TARGETS
+  TARGETS --> EVAL
+  EVAL --> EVIDENCE
+  EVIDENCE -. informs .-> PROF
