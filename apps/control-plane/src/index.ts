@@ -1,5 +1,7 @@
 import { PROTOCOL_VERSION } from '@ahm/contracts'
 
+export * from './persistence.js'
+
 export interface ControlPlaneBoundary {
   protocolVersion: typeof PROTOCOL_VERSION
   transport: 'not-configured'

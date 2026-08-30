@@ -6,3 +6,8 @@ rust-version.workspace = true
 
 [dependencies]
 ahm-domain = { path = "../ahm-domain" }
+rusqlite.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

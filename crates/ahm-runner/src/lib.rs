@@ -1,5 +1,7 @@
 use ahm_domain::{ProtocolVersion, PROTOCOL_VERSION};
 
+pub mod state;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RunnerBoundary {
     pub protocol_version: ProtocolVersion,

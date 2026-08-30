@@ -1,6 +1,6 @@
 # Web Control Plane and Local Runner — Implementation Plan
 
-Status: tickets 1–3 complete; contract review required before ticket 4
+Status: tickets 1–4 complete; standalone runner extraction is next
 
 Last updated: 2026-08-30
 
@@ -144,7 +144,7 @@ Demo: all milestone flows work in a normal browser with the runner installed.
   Acceptance: TypeScript and Rust parse and serialize the same golden fixtures; unknown fields and unsupported versions have defined behavior.
   Verify: Contract tests in both runtimes.
 
-- [ ] **4. Split shared and device-local persistence**
+- [x] **4. Split shared and device-local persistence**
   Roadmap ref: Product boundary.
   What to build: Add PostgreSQL control-plane migrations for organization-visible records and narrow runner SQLite to local mappings, ownership, journal, and delivery state.
   Acceptance: No absolute project or agent path is stored in PostgreSQL; no organization authorization decision depends on runner SQLite.
@@ -195,6 +195,7 @@ must not expand this milestone.
 
 ## 9. First handoff
 
-Tickets 1–3 preserve the passing baseline, establish the workspace boundaries,
-and share protocol fixtures between TypeScript and Rust. PostgreSQL, runner
-networking, and UI migration remain blocked until these contracts are reviewed.
+Tickets 1–4 preserve the passing baseline, establish the workspace boundaries,
+share protocol fixtures between TypeScript and Rust, and separate shared
+PostgreSQL state from runner-local SQLite state. Runner networking and UI
+migration remain deferred while ticket 5 extracts the standalone runner.

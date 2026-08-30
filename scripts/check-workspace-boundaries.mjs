@@ -93,6 +93,24 @@ rejectSourcePatterns('crates/ahm-domain/src', [
 ])
 rejectSourcePatterns('crates/ahm-runner/src', [[/\btauri\b/i, 'may not use Tauri']])
 
+const controlPlaneMigration = readFileSync(
+  join(repositoryRoot, 'apps/control-plane/migrations/0001_control_plane.sql'),
+  'utf8',
+)
+for (const forbiddenColumn of [
+  'absolute_path',
+  'checkout_path',
+  'filesystem_path',
+  'local_path',
+  'target_path',
+]) {
+  if (new RegExp(`\\b${forbiddenColumn}\\b`, 'i').test(controlPlaneMigration)) {
+    violations.push(
+      `control-plane persistence may not contain device-local column ${forbiddenColumn}`,
+    )
+  }
+}
+
 if (violations.length > 0) {
   for (const violation of violations) {
     console.error(`Boundary violation: ${violation}`)

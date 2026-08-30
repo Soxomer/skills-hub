@@ -84,6 +84,10 @@ impl IsoTimestamp {
         }
         Ok(Self(value))
     }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl<'de> Deserialize<'de> for IsoTimestamp {
@@ -137,6 +141,8 @@ impl fmt::Display for ContractValueError {
         formatter.write_str(self.0)
     }
 }
+
+impl std::error::Error for ContractValueError {}
 
 pub type OrganizationId = Identifier;
 pub type UserId = Identifier;

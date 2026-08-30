@@ -20,6 +20,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:contracts": "npm run test --workspace @ahm/contracts",
+    "test:control-plane": "npm run test --workspace @ahm/control-plane",
     "boundary:check": "node scripts/check-workspace-boundaries.mjs",
     "cli": "cargo run --manifest-path src-tauri/Cargo.toml --bin ahm --",
     "cli:build": "cargo build --manifest-path src-tauri/Cargo.toml --bin ahm",

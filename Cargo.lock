@@ -44,6 +44,9 @@ name = "ahm-runner"
 version = "0.1.0"
 dependencies = [
  "ahm-domain",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

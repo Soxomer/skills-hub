@@ -40,5 +40,26 @@ contracts, domain, and runner targets build independently from root commands.
 - Version `1.0` is the only supported version. Unsupported versions fail validation; capability negotiation returns no compatible version.
 - Plan destinations are project-relative and reject drive-qualified, rooted, and parent-traversing paths.
 
-Networking, persistence splitting, and UI migration begin only after these
-contracts are reviewed.
+Persistence ownership is defined below. Networking and UI migration remain
+deferred until the standalone runner is extracted.
+
+## Persistence ownership
+
+| Control-plane PostgreSQL | Runner SQLite |
+| --- | --- |
+| Organizations, users, and membership | Local device credential |
+| Logical projects | `ProjectInstanceId` to absolute checkout path |
+| Setups, immutable revisions, and assignments | Scan cache |
+| Portable artifact references | Materializations and physical target paths |
+| Runner jobs and plan approvals | Operation and rollback journal |
+| Portable receipts and audit events | Pending result-delivery outbox |
+
+The control-plane migration is
+`apps/control-plane/migrations/0001_control_plane.sql`. Its schema tests execute
+the migration and reject every machine-local path column. The runner migration
+lives in `crates/ahm-runner/src/state.rs`; its schema tests reject shared Setup,
+assignment, approval, and organization tables.
+
+The combined legacy SQLite schema remains migration input until ticket 5 moves
+scan, plan, apply, rollback, and the `ahm` CLI into the standalone runner. It is
+not the storage model for the browser product.
