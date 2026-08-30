@@ -6,8 +6,18 @@ rust-version.workspace = true
 
 [dependencies]
 ahm-domain = { path = "../ahm-domain" }
+anyhow.workspace = true
+clap.workspace = true
+dirs.workspace = true
+hex.workspace = true
+junction.workspace = true
+log.workspace = true
 rusqlite.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+walkdir.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

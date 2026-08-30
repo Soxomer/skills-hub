@@ -1,8 +1,8 @@
 use std::fs;
 
-use crate::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
-use crate::core::sync_engine::SyncMode;
-use crate::core::tool_adapters::{
+use crate::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
+use crate::sync_engine::SyncMode;
+use crate::tool_adapters::{
     adapter_by_key, adapters_sharing_project_skills_dir, adapters_sharing_skills_dir,
     default_tool_adapters, load_tool_config, project_relative_skills_dir, resolve_project_path,
     save_tool_config, scan_tool_dir, supports_project_scope, CustomToolConfig, ToolAdapter,

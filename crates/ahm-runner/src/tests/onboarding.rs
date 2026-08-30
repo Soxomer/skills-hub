@@ -123,7 +123,7 @@ fn skips_disabled_scan_directory() {
 #[test]
 fn persists_and_sanitizes_scan_config() {
     let dir = tempfile::tempdir().unwrap();
-    let store = crate::core::skill_store::SkillStore::new(dir.path().join("test.db"));
+    let store = crate::skill_store::SkillStore::new(dir.path().join("test.db"));
     store.ensure_schema().unwrap();
     let cursor_key = super::tool_scan_source_key(".cursor/skills");
 

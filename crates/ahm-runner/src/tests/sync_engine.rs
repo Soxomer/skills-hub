@@ -1,6 +1,6 @@
 use std::fs;
 
-use crate::core::sync_engine::{
+use crate::sync_engine::{
     copy_dir_recursive, sync_dir_for_tool_with_overwrite, sync_dir_hybrid,
     sync_dir_hybrid_with_overwrite, sync_dir_with_mode_with_overwrite, SyncMode,
 };
@@ -149,8 +149,8 @@ fn copy_overwrite_replaces_broken_symlink_target() {
     // Create a broken symlink at the target path.
     symlink(dst_dir.path().join("missing"), &target).unwrap();
 
-    let out = crate::core::sync_engine::sync_dir_copy_with_overwrite(src_dir.path(), &target, true)
-        .unwrap();
+    let out =
+        crate::sync_engine::sync_dir_copy_with_overwrite(src_dir.path(), &target, true).unwrap();
 
     assert!(matches!(out.mode_used, SyncMode::Copy));
     assert!(target.join("s/a.txt").exists());

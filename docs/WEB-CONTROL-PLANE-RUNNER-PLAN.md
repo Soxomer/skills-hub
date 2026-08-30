@@ -1,8 +1,8 @@
 # Web Control Plane and Local Runner — Implementation Plan
 
-Status: tickets 1–4 complete; standalone runner extraction is next
+Status: tickets 1–5 complete; enrollment and outbound transport are next
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 ## 1. Outcome
 
@@ -150,7 +150,7 @@ Demo: all milestone flows work in a normal browser with the runner installed.
   Acceptance: No absolute project or agent path is stored in PostgreSQL; no organization authorization decision depends on runner SQLite.
   Verify: Migration tests, schema inspection, and persistence boundary tests.
 
-- [ ] **5. Extract the standalone runner**
+- [x] **5. Extract the standalone runner**
   Roadmap ref: Increment A.
   What to build: Move scanning, planning, application, rollback, adapters, and local journal behind the runner interface. Preserve CLI commands for local administration.
   Acceptance: The runner has no Tauri dependency and all filesystem mutations pass through the same execution service.
@@ -195,7 +195,10 @@ must not expand this milestone.
 
 ## 9. First handoff
 
-Tickets 1–4 preserve the passing baseline, establish the workspace boundaries,
-share protocol fixtures between TypeScript and Rust, and separate shared
-PostgreSQL state from runner-local SQLite state. Runner networking and UI
-migration remain deferred while ticket 5 extracts the standalone runner.
+Tickets 1–5 preserve the passing baseline, establish the workspace boundaries,
+share protocol fixtures between TypeScript and Rust, separate shared PostgreSQL
+state from runner-local SQLite state, and move scan, plan, apply, rollback,
+adapters, recovery primitives, and the `ahm` CLI into `ahm-runner`. The legacy
+desktop now consumes runner-owned modules through thin path-resolution wrappers.
+Runner networking and UI migration remain deferred; ticket 6 adds enrollment
+and outbound job transport.

@@ -1,11 +1,12 @@
 use std::path::PathBuf;
 
-use anyhow::Result;
-use app_lib::core::setup_service::{
+use ahm_runner::execution::RunnerExecutionService;
+use ahm_runner::setup_service::{
     default_cli_db_path, ApplyActionKind, ApplyPlan, DefaultSetupCandidateKind,
     DefaultSetupCaptureResult, DefaultSetupPreview, Project, ProjectStatus, SetupDetail,
-    SetupService, SkillSummary,
+    SkillSummary,
 };
+use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 
@@ -177,12 +178,12 @@ fn main() {
 
 fn run(cli: Cli) -> Result<i32> {
     let db_path = cli.db.map(Ok).unwrap_or_else(default_cli_db_path)?;
-    let service = SetupService::open(db_path)?;
+    let runner = RunnerExecutionService::open(db_path)?;
+    let service = runner.local_admin();
 
     match cli.command {
         Command::Scan(args) => {
-            let preview = service
-                .preview_default_setup(&scan_home(args.home)?, &project_path(args.project)?)?;
+            let preview = runner.scan(&scan_home(args.home)?, &project_path(args.project)?)?;
             emit_default_preview(&preview, cli.json)?;
         }
         Command::Skill(args) => match args.command {
@@ -301,7 +302,7 @@ fn run(cli: Cli) -> Result<i32> {
         }
         Command::Plan(args) => {
             let project = project_path(args.project)?;
-            let plan = service.plan(&project, args.setup.as_deref())?;
+            let plan = runner.plan(&project, args.setup.as_deref())?;
             emit_plan(&plan, cli.json)?;
             if !plan.conflicts.is_empty() {
                 return Ok(3);
@@ -309,7 +310,7 @@ fn run(cli: Cli) -> Result<i32> {
         }
         Command::Sync(args) => {
             let project = project_path(args.project)?;
-            let result = service.sync(&project, args.setup.as_deref())?;
+            let result = runner.apply(&project, args.setup.as_deref())?;
             if cli.json {
                 print_json(&result)?;
             } else {
@@ -319,7 +320,7 @@ fn run(cli: Cli) -> Result<i32> {
         }
         Command::Rollback(args) => {
             let project = project_path(args.project)?;
-            let result = service.rollback(&project)?;
+            let result = runner.rollback(&project)?;
             if cli.json {
                 print_json(&result)?;
             } else {

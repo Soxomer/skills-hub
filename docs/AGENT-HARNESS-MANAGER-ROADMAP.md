@@ -676,12 +676,13 @@ Before expanding the Catalog, variant, or evaluation model, establish the final 
 2. create independent web, control-plane, contract, domain, and runner build targets;
 3. define protocol version 1 with cross-language fixtures;
 4. separate PostgreSQL control-plane state from runner-local SQLite state;
-5. prove a read-only browser-to-runner scan;
-6. prove plan, explicit approval, apply receipt, and manual Use Default through the same path;
-7. delete the Tauri/native application and packaging after browser parity is reached.
+5. extract scan, plan, apply, rollback, adapters, recovery, and the CLI into the standalone runner;
+6. prove a read-only browser-to-runner scan;
+7. prove plan, explicit approval, apply receipt, and manual Use Default through the same path;
+8. delete the Tauri/native application and packaging after browser parity is reached.
 
-The first four tickets in
-[`WEB-CONTROL-PLANE-RUNNER-PLAN.md`](./WEB-CONTROL-PLANE-RUNNER-PLAN.md) are complete. Shared PostgreSQL and device-local SQLite ownership are separated; standalone runner extraction is next, while networking and UI migration remain deferred.
+The first five tickets in
+[`WEB-CONTROL-PLANE-RUNNER-PLAN.md`](./WEB-CONTROL-PLANE-RUNNER-PLAN.md) are complete. Shared PostgreSQL and device-local SQLite ownership are separated, and the standalone runner now owns filesystem execution and the CLI. Enrollment and outbound job transport are next; UI migration remains deferred.
 
 ## 16. Inspiration and reusable patterns
 

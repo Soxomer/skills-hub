@@ -1,6 +1,14 @@
 use ahm_domain::{ProtocolVersion, PROTOCOL_VERSION};
 
+pub mod central_repo;
+pub mod content_hash;
+pub mod execution;
+pub mod onboarding;
+pub mod setup_service;
+pub mod skill_store;
 pub mod state;
+pub mod sync_engine;
+pub mod tool_adapters;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RunnerBoundary {

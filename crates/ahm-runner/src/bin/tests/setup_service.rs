@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use app_lib::core::setup_service::{ApplyActionKind, DefaultSetupCandidateKind, SetupService};
-use app_lib::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
+use ahm_runner::setup_service::{ApplyActionKind, DefaultSetupCandidateKind, SetupService};
+use ahm_runner::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 use tempfile::TempDir;
 
 fn managed_skill(store: &SkillStore, root: &Path, id: &str, name: &str) -> SkillRecord {

@@ -41,7 +41,21 @@ contracts, domain, and runner targets build independently from root commands.
 - Plan destinations are project-relative and reject drive-qualified, rooted, and parent-traversing paths.
 
 Persistence ownership is defined below. Networking and UI migration remain
-deferred until the standalone runner is extracted.
+deferred while enrollment and outbound job transport are built.
+
+## Standalone execution ownership
+
+`crates/ahm-runner` owns the `ahm` CLI, discovery scanner, Setup execution
+service, filesystem reconciliation planner, apply and rollback behavior, tool
+adapters, content hashing, local persistence, and recovery primitives. CLI
+scan, plan, sync, and rollback commands enter through `RunnerExecutionService`.
+
+The legacy desktop depends on the runner crate and retains only native app-data
+path resolution wrappers for the modules that still serve old screens. The
+boundary check rejects native-runtime imports and legacy application imports in
+the runner. A real-process CLI integration test exercises scan, plan, apply, and
+rollback in temporary home and project directories while preserving unmanaged
+content.
 
 ## Persistence ownership
 
@@ -60,6 +74,6 @@ the migration and reject every machine-local path column. The runner migration
 lives in `crates/ahm-runner/src/state.rs`; its schema tests reject shared Setup,
 assignment, approval, and organization tables.
 
-The combined legacy SQLite schema remains migration input until ticket 5 moves
-scan, plan, apply, rollback, and the `ahm` CLI into the standalone runner. It is
-not the storage model for the browser product.
+The combined legacy SQLite schema remains local migration input for existing CLI
+users. It is not the storage model for the browser product; organization-visible
+records use control-plane PostgreSQL, while new worker state uses runner SQLite.

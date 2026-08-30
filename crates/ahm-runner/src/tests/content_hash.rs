@@ -1,6 +1,6 @@
 use std::fs;
 
-use crate::core::content_hash::hash_dir;
+use crate::content_hash::hash_dir;
 
 #[test]
 fn hash_changes_with_content_and_ignores_git_dir() {

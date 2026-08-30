@@ -44,9 +44,19 @@ name = "ahm-runner"
 version = "0.1.0"
 dependencies = [
  "ahm-domain",
+ "anyhow",
+ "clap",
+ "dirs 5.0.1",
+ "hex",
+ "junction",
+ "log",
  "rusqlite",
+ "serde",
  "serde_json",
+ "sha2",
  "tempfile",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]
@@ -159,8 +169,8 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 name = "app"
 version = "0.9.1"
 dependencies = [
+ "ahm-runner",
  "anyhow",
- "clap",
  "dirs 5.0.1",
  "embed-resource",
  "git2",

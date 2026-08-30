@@ -91,7 +91,11 @@ rejectSourcePatterns('crates/ahm-domain/src', [
   [/\bstd::(?:fs|process)\b/, 'may not use filesystem or process APIs'],
   [/\btauri\b/i, 'may not use Tauri'],
 ])
-rejectSourcePatterns('crates/ahm-runner/src', [[/\btauri\b/i, 'may not use Tauri']])
+rejectSourcePatterns('crates/ahm-runner/src', [
+  [/(?:\buse\s+tauri\b|\btauri::|#\[tauri)/i, 'may not use Tauri'],
+  [/\bapp_lib::/, 'may not import the legacy application crate'],
+  [/src-tauri/i, 'may not import files from the legacy application'],
+])
 
 const controlPlaneMigration = readFileSync(
   join(repositoryRoot, 'apps/control-plane/migrations/0001_control_plane.sql'),

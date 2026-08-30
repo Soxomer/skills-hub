@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
+use crate::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 use rusqlite::Connection;
 
 fn make_store() -> (tempfile::TempDir, SkillStore) {
