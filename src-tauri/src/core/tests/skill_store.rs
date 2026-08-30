@@ -38,6 +38,91 @@ fn schema_is_idempotent() {
 }
 
 #[test]
+fn migrates_v8_setups_to_default_snapshot_schema() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("test.db");
+    let conn = Connection::open(&db).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE skills (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          central_path TEXT NOT NULL UNIQUE
+        );
+        CREATE TABLE setups (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          current_revision_id TEXT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE setup_revisions (
+          id TEXT PRIMARY KEY,
+          setup_id TEXT NOT NULL,
+          revision_number INTEGER NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+        CREATE TABLE setup_revision_skills (
+          revision_id TEXT NOT NULL,
+          skill_id TEXT NOT NULL,
+          tool TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (revision_id, skill_id, tool)
+        );
+        CREATE INDEX idx_setup_revision_skills_revision
+          ON setup_revision_skills(revision_id);
+        CREATE TABLE projects (
+          id TEXT PRIMARY KEY,
+          path TEXT NOT NULL UNIQUE,
+          assigned_setup_revision_id TEXT NULL,
+          applied_setup_revision_id TEXT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        INSERT INTO skills (id, name, central_path)
+          VALUES ('skill', 'Legacy', '/central/legacy');
+        INSERT INTO setups (id, name, current_revision_id, created_at, updated_at)
+          VALUES ('setup', 'Legacy Setup', 'revision', 1, 1);
+        INSERT INTO setup_revisions (id, setup_id, revision_number, created_at)
+          VALUES ('revision', 'setup', 1, 1);
+        INSERT INTO setup_revision_skills (revision_id, skill_id, tool, created_at)
+          VALUES ('revision', 'skill', 'codex', 1);
+        PRAGMA user_version = 8;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let store = SkillStore::new(db.clone());
+    store.ensure_schema().unwrap();
+    let conn = Connection::open(db).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 10);
+    let migrated: (String, String, Option<String>) = conn
+        .query_row(
+            "SELECT rs.target_name, s.kind, s.initial_revision_id
+             FROM setup_revision_skills rs CROSS JOIN setups s",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(migrated.0, "Legacy");
+    assert_eq!(migrated.1, "custom");
+    assert!(migrated.2.is_none());
+    let has_default_project_id = conn
+        .prepare("SELECT default_project_id FROM setups")
+        .is_ok();
+    assert!(has_default_project_id);
+    conn.execute(
+        "INSERT INTO setup_revision_skills
+         (revision_id, skill_id, tool, created_at, target_name)
+         VALUES ('revision', 'skill', 'codex', 1, 'Legacy Alias')",
+        [],
+    )
+    .unwrap();
+}
+
+#[test]
 fn migrates_v3_targets_to_global_scope() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db = dir.path().join("test.db");

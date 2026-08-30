@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -6,14 +6,16 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::central_repo::{ensure_central_repo, resolve_central_repo_path_for_home};
 use super::content_hash::hash_dir;
+use super::onboarding::{build_onboarding_plan_for_home, OnboardingVariant};
 use super::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 use super::sync_engine::{
-    remove_path_any, sync_dir_with_mode_with_overwrite, SyncMode, SyncOutcome,
+    copy_dir_recursive, remove_path_any, sync_dir_with_mode_with_overwrite, SyncMode, SyncOutcome,
 };
 use super::tool_adapters::{
-    adapter_by_key, is_builtin_tool_enabled, load_tool_config, project_relative_skills_dir,
-    supports_project_scope,
+    adapter_by_key, default_tool_adapters, is_builtin_tool_enabled, load_tool_config,
+    project_relative_skills_dir, scan_tool_dir, supports_project_scope,
 };
 
 const APP_IDENTIFIER: &str = "com.qufei1993.skillshub";
@@ -36,6 +38,8 @@ pub struct SetupSummary {
     pub revision_id: String,
     pub revision_number: i64,
     pub skill_target_count: usize,
+    pub is_default: bool,
+    pub initial_revision_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -45,6 +49,7 @@ pub struct SetupItem {
     pub skill_id: String,
     pub skill_name: String,
     pub tool: String,
+    pub target_name: String,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -54,10 +59,54 @@ pub struct SetupDetail {
     pub items: Vec<SetupItem>,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultSetupCandidateKind {
+    KnownSkill,
+    PluginSkill,
+    LocalContent,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct DefaultSetupCandidate {
+    pub selection_key: String,
+    pub name: String,
+    pub tool: String,
+    pub source_tool: String,
+    pub source_path: String,
+    pub fingerprint: Option<String>,
+    pub classification: DefaultSetupCandidateKind,
+    pub has_conflict: bool,
+    pub is_link: bool,
+    pub plugin_name: Option<String>,
+    pub plugin_version: Option<String>,
+    pub capturable: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct DefaultSetupPreview {
+    pub project_path: String,
+    pub total_tools_scanned: usize,
+    pub total_skills_found: usize,
+    pub candidates: Vec<DefaultSetupCandidate>,
+    pub existing_default: Option<SetupSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct DefaultSetupCaptureResult {
+    pub setup: SetupDetail,
+    pub captured_candidates: usize,
+    pub snapshot_count: usize,
+    pub excluded_candidates: usize,
+    pub external_candidates: usize,
+}
+
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct Project {
     pub id: String,
     pub path: String,
+    pub default_setup: Option<SetupSummary>,
     pub assigned_setup: Option<SetupSummary>,
     pub applied_setup: Option<SetupSummary>,
     pub created_at: i64,
@@ -245,11 +294,382 @@ impl SetupService {
             .collect())
     }
 
+    pub fn preview_default_setup(
+        &self,
+        home: &Path,
+        project_path: &Path,
+    ) -> Result<DefaultSetupPreview> {
+        let project = self.resolve_project(project_path)?;
+        let home = normalize_existing_directory(home, "home directory")?;
+        let central_repo = resolve_central_repo_path_for_home(&self.store, &home)?;
+        let plan = build_onboarding_plan_for_home(&self.store, &home, &central_repo)?;
+        let known_hashes = self
+            .store
+            .list_skills()?
+            .into_iter()
+            .filter_map(|skill| skill.content_hash)
+            .collect::<HashSet<_>>();
+        let mut candidates = self.managed_default_candidates(&project.path)?;
+        for group in plan.groups {
+            for variant in group.variants {
+                candidates.push(self.default_candidate(variant, group.has_conflict, &known_hashes));
+            }
+        }
+        let project_variants = self.project_onboarding_variants(&home, Path::new(&project.path))?;
+        let project_tool_count = project_variants
+            .iter()
+            .map(|variant| variant.tool.as_str())
+            .collect::<HashSet<_>>()
+            .len();
+        for variant in project_variants {
+            candidates.push(self.default_candidate(variant, false, &known_hashes));
+        }
+        let mut fingerprints_by_name = HashMap::<String, HashSet<String>>::new();
+        for candidate in &candidates {
+            if let Some(fingerprint) = &candidate.fingerprint {
+                fingerprints_by_name
+                    .entry(candidate.name.to_ascii_lowercase())
+                    .or_default()
+                    .insert(fingerprint.clone());
+            }
+        }
+        for candidate in &mut candidates {
+            candidate.has_conflict = fingerprints_by_name
+                .get(&candidate.name.to_ascii_lowercase())
+                .is_some_and(|fingerprints| fingerprints.len() > 1);
+        }
+        let mut unique_candidates = BTreeMap::new();
+        for candidate in candidates {
+            unique_candidates
+                .entry(candidate.selection_key.clone())
+                .or_insert(candidate);
+        }
+        let mut candidates = unique_candidates.into_values().collect::<Vec<_>>();
+        candidates.sort_by(|left, right| {
+            left.name
+                .to_ascii_lowercase()
+                .cmp(&right.name.to_ascii_lowercase())
+                .then_with(|| left.tool.cmp(&right.tool))
+                .then_with(|| left.source_path.cmp(&right.source_path))
+        });
+        Ok(DefaultSetupPreview {
+            project_path: project.path,
+            total_tools_scanned: plan.total_tools_scanned + project_tool_count,
+            total_skills_found: candidates.len(),
+            candidates,
+            existing_default: project.default_setup,
+        })
+    }
+
+    pub fn capture_default_setup(
+        &self,
+        home: &Path,
+        project_path: &Path,
+        excluded_selection_keys: &[String],
+    ) -> Result<DefaultSetupCaptureResult> {
+        let project = self.resolve_project(project_path)?;
+        let preview = self.preview_default_setup(home, project_path)?;
+        if let Some(existing) = preview.existing_default {
+            anyhow::bail!(
+                "Default Setup already exists at revision {}; edit it by creating a new revision",
+                existing.revision_number
+            );
+        }
+
+        let known_keys = preview
+            .candidates
+            .iter()
+            .map(|candidate| candidate.selection_key.as_str())
+            .collect::<HashSet<_>>();
+        let exclusions = excluded_selection_keys
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        let unknown = exclusions
+            .difference(&known_keys)
+            .copied()
+            .collect::<Vec<_>>();
+        if !unknown.is_empty() {
+            anyhow::bail!("unknown scan selection key(s): {}", unknown.join(", "));
+        }
+
+        let selected = preview
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.capturable && !exclusions.contains(candidate.selection_key.as_str())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let excluded_candidates = preview
+            .candidates
+            .iter()
+            .filter(|candidate| exclusions.contains(candidate.selection_key.as_str()))
+            .count();
+        let external_candidates = preview
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                !candidate.capturable && !exclusions.contains(candidate.selection_key.as_str())
+            })
+            .count();
+
+        let home = normalize_existing_directory(home, "home directory")?;
+        let central_repo = resolve_central_repo_path_for_home(&self.store, &home)?;
+        ensure_central_repo(&central_repo)?;
+        let mut snapshots = HashMap::<String, SkillRecord>::new();
+        let mut created_paths = Vec::<PathBuf>::new();
+        for candidate in &selected {
+            let fingerprint = candidate
+                .fingerprint
+                .as_ref()
+                .context("capturable scan candidate is missing a fingerprint")?;
+            if snapshots.contains_key(fingerprint) {
+                continue;
+            }
+            let source = Path::new(&candidate.source_path);
+            let snapshot_path = unique_snapshot_path(&central_repo, fingerprint);
+            if let Err(error) = copy_dir_recursive(source, &snapshot_path).with_context(|| {
+                format!(
+                    "capture onboarding snapshot {} -> {}",
+                    source.display(),
+                    snapshot_path.display()
+                )
+            }) {
+                let _ = remove_path_any(&snapshot_path);
+                for path in created_paths.iter().rev() {
+                    let _ = remove_path_any(path);
+                }
+                return Err(error);
+            }
+            created_paths.push(snapshot_path.clone());
+            let now = now_ms();
+            snapshots.insert(
+                fingerprint.clone(),
+                SkillRecord {
+                    id: Uuid::new_v4().to_string(),
+                    name: candidate.name.clone(),
+                    description: None,
+                    source_type: "onboarding_snapshot".to_string(),
+                    source_ref: Some(candidate.source_path.clone()),
+                    source_subpath: None,
+                    source_revision: candidate.plugin_version.clone(),
+                    central_path: snapshot_path.to_string_lossy().to_string(),
+                    content_hash: Some(fingerprint.clone()),
+                    created_at: now,
+                    updated_at: now,
+                    last_sync_at: None,
+                    last_seen_at: now,
+                    enabled: true,
+                    status: "ok".to_string(),
+                },
+            );
+        }
+
+        let setup_id = Uuid::new_v4().to_string();
+        let revision_id = Uuid::new_v4().to_string();
+        let setup_name = default_setup_name(&project);
+        let now = now_ms();
+        let db_result = self.store.with_conn(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            for record in snapshots.values() {
+                insert_skill_record(&tx, record)?;
+            }
+            tx.execute(
+                "INSERT INTO setups
+                 (id, name, current_revision_id, created_at, updated_at, kind,
+                  initial_revision_id, default_project_id)
+                 VALUES (?1, ?2, NULL, ?3, ?3, 'default', NULL, ?4)",
+                params![setup_id, setup_name, now, project.id],
+            )
+            .context("create the project's Default Setup")?;
+            tx.execute(
+                "INSERT INTO setup_revisions (id, setup_id, revision_number, created_at)
+                 VALUES (?1, ?2, 1, ?3)",
+                params![revision_id, setup_id, now],
+            )?;
+            for candidate in &selected {
+                let fingerprint = candidate
+                    .fingerprint
+                    .as_ref()
+                    .context("capturable scan candidate is missing a fingerprint")?;
+                let skill = snapshots
+                    .get(fingerprint)
+                    .context("onboarding snapshot record is missing")?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO setup_revision_skills
+                     (revision_id, skill_id, tool, created_at, target_name)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![revision_id, skill.id, candidate.tool, now, candidate.name],
+                )?;
+            }
+            tx.execute(
+                "UPDATE setups
+                 SET current_revision_id = ?1, initial_revision_id = ?1, updated_at = ?2
+                 WHERE id = ?3",
+                params![revision_id, now, setup_id],
+            )?;
+            tx.execute(
+                "INSERT INTO settings (key, value) VALUES ('onboarding_completed', 'true')
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [],
+            )?;
+            tx.commit()?;
+            Ok(())
+        });
+        if let Err(error) = db_result {
+            for path in created_paths.iter().rev() {
+                let _ = remove_path_any(path);
+            }
+            return Err(error.context("save Default Setup snapshot"));
+        }
+
+        Ok(DefaultSetupCaptureResult {
+            setup: self.get_setup(&setup_id)?,
+            captured_candidates: selected.len(),
+            snapshot_count: snapshots.len(),
+            excluded_candidates,
+            external_candidates,
+        })
+    }
+
+    fn default_candidate(
+        &self,
+        variant: OnboardingVariant,
+        has_conflict: bool,
+        known_hashes: &HashSet<String>,
+    ) -> DefaultSetupCandidate {
+        let source_tool = variant.tool;
+        let tool = if source_tool == "claude_code_plugin" {
+            "claude_code".to_string()
+        } else {
+            source_tool.clone()
+        };
+        let mut reason = variant
+            .fingerprint
+            .is_none()
+            .then(|| "content fingerprint could not be computed".to_string());
+        if reason.is_none() {
+            reason = self
+                .resolve_project_tool(&tool)
+                .err()
+                .map(|error| error.to_string());
+        }
+        let source_path = variant.path.to_string_lossy().to_string();
+        let classification = if variant.plugin_name.is_some() {
+            DefaultSetupCandidateKind::PluginSkill
+        } else if variant
+            .fingerprint
+            .as_ref()
+            .is_some_and(|fingerprint| known_hashes.contains(fingerprint))
+        {
+            DefaultSetupCandidateKind::KnownSkill
+        } else {
+            DefaultSetupCandidateKind::LocalContent
+        };
+        DefaultSetupCandidate {
+            selection_key: scan_selection_key(&source_tool, &variant.path),
+            name: variant.name,
+            tool,
+            source_tool,
+            source_path,
+            fingerprint: variant.fingerprint,
+            classification,
+            has_conflict,
+            is_link: variant.is_link,
+            plugin_name: variant.plugin_name,
+            plugin_version: variant.plugin_version,
+            capturable: reason.is_none(),
+            reason,
+        }
+    }
+
+    fn managed_default_candidates(&self, project_path: &str) -> Result<Vec<DefaultSetupCandidate>> {
+        let mut candidates = Vec::new();
+        for skill in self.store.list_skills()? {
+            for target in self.store.list_skill_targets(&skill.id)? {
+                let belongs_to_project = target.scope == "project"
+                    && target.project_path.as_deref() == Some(project_path);
+                if target.scope != "global" && !belongs_to_project {
+                    continue;
+                }
+                let source_path = PathBuf::from(&target.target_path);
+                let fingerprint = hash_dir(&source_path).ok();
+                let mut reason = if source_path.is_dir() {
+                    fingerprint
+                        .is_none()
+                        .then(|| "content fingerprint could not be computed".to_string())
+                } else {
+                    Some("managed target is missing from disk".to_string())
+                };
+                if reason.is_none() {
+                    reason = self
+                        .resolve_project_tool(&target.tool)
+                        .err()
+                        .map(|error| error.to_string());
+                }
+                let target_name = source_path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_else(|| skill.name.clone());
+                candidates.push(DefaultSetupCandidate {
+                    selection_key: scan_selection_key(&target.tool, &source_path),
+                    name: target_name,
+                    tool: target.tool.clone(),
+                    source_tool: target.tool,
+                    source_path: source_path.to_string_lossy().to_string(),
+                    fingerprint,
+                    classification: DefaultSetupCandidateKind::KnownSkill,
+                    has_conflict: false,
+                    is_link: std::fs::symlink_metadata(&source_path)
+                        .is_ok_and(|metadata| metadata.file_type().is_symlink()),
+                    plugin_name: None,
+                    plugin_version: skill.source_revision.clone(),
+                    capturable: reason.is_none(),
+                    reason,
+                });
+            }
+        }
+        Ok(candidates)
+    }
+
+    fn project_onboarding_variants(
+        &self,
+        home: &Path,
+        project_path: &Path,
+    ) -> Result<Vec<OnboardingVariant>> {
+        let mut variants = Vec::new();
+        for adapter in default_tool_adapters() {
+            if !supports_project_scope(&adapter) || !home.join(adapter.relative_detect_dir).exists()
+            {
+                continue;
+            }
+            let skills_dir = project_path.join(project_relative_skills_dir(&adapter));
+            if !skills_dir.is_dir() {
+                continue;
+            }
+            for detected in scan_tool_dir(&adapter, &skills_dir)? {
+                variants.push(OnboardingVariant {
+                    tool: detected.tool.as_key().to_string(),
+                    name: detected.name,
+                    fingerprint: hash_dir(&detected.path).ok(),
+                    path: detected.path,
+                    is_link: detected.is_link,
+                    link_target: detected.link_target,
+                    plugin_name: None,
+                    plugin_version: None,
+                    plugin_scope: Some("project".to_string()),
+                });
+            }
+        }
+        Ok(variants)
+    }
+
     pub fn list_setups(&self) -> Result<Vec<SetupSummary>> {
         self.store.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT s.id, s.name, r.id, r.revision_number, COUNT(rs.skill_id),
-                        s.created_at, s.updated_at
+                        s.created_at, s.updated_at, s.kind, s.initial_revision_id
                  FROM setups s
                  INNER JOIN setup_revisions r ON r.id = s.current_revision_id
                  LEFT JOIN setup_revision_skills rs ON rs.revision_id = r.id
@@ -310,8 +730,9 @@ impl SetupService {
                 params![revision_id, setup_id, now],
             )?;
             tx.execute(
-                "INSERT INTO setup_revision_skills (revision_id, skill_id, tool, created_at)
-                 SELECT ?1, skill_id, tool, ?2
+                "INSERT INTO setup_revision_skills
+                 (revision_id, skill_id, tool, created_at, target_name)
+                 SELECT ?1, skill_id, tool, ?2, target_name
                  FROM setup_revision_skills WHERE revision_id = ?3",
                 params![revision_id, now, source.revision_id],
             )?;
@@ -333,7 +754,7 @@ impl SetupService {
     fn setup_detail(&self, setup: &SetupSummary) -> Result<SetupDetail> {
         let items = self.store.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT rs.skill_id, s.name, rs.tool
+                "SELECT rs.skill_id, s.name, rs.tool, COALESCE(rs.target_name, s.name)
                  FROM setup_revision_skills rs
                  INNER JOIN skills s ON s.id = rs.skill_id
                  WHERE rs.revision_id = ?1
@@ -344,6 +765,7 @@ impl SetupService {
                     skill_id: row.get(0)?,
                     skill_name: row.get(1)?,
                     tool: row.get(2)?,
+                    target_name: row.get(3)?,
                 })
             })?;
             rows.collect::<std::result::Result<Vec<_>, _>>()
@@ -373,8 +795,9 @@ impl SetupService {
             for tool in tools {
                 tx.execute(
                     "INSERT OR IGNORE INTO setup_revision_skills
-                     (revision_id, skill_id, tool, created_at) VALUES (?1, ?2, ?3, ?4)",
-                    params![revision_id, skill.id, tool, now],
+                     (revision_id, skill_id, tool, created_at, target_name)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![revision_id, skill.id, tool, now, skill.name],
                 )?;
             }
             Ok(())
@@ -427,8 +850,9 @@ impl SetupService {
                 params![revision_id, setup.id, revision_number, now],
             )?;
             tx.execute(
-                "INSERT INTO setup_revision_skills (revision_id, skill_id, tool, created_at)
-                 SELECT ?1, skill_id, tool, ?2
+                "INSERT INTO setup_revision_skills
+                 (revision_id, skill_id, tool, created_at, target_name)
+                 SELECT ?1, skill_id, tool, ?2, target_name
                  FROM setup_revision_skills WHERE revision_id = ?3",
                 params![revision_id, now, setup.revision_id],
             )?;
@@ -478,6 +902,22 @@ impl SetupService {
     pub fn assign_setup(&self, project_path: &Path, setup_selector: &str) -> Result<Project> {
         let project = self.resolve_project(project_path)?;
         let setup = self.resolve_setup(setup_selector)?;
+        self.store.with_conn(|conn| {
+            conn.execute(
+                "UPDATE projects
+                 SET assigned_setup_revision_id = ?1, updated_at = ?2 WHERE id = ?3",
+                params![setup.revision_id, now_ms(), project.id],
+            )?;
+            Ok(())
+        })?;
+        self.project_by_id(&project.id)
+    }
+
+    pub fn assign_default_setup(&self, project_path: &Path) -> Result<Project> {
+        let project = self.resolve_project(project_path)?;
+        let setup = project
+            .default_setup
+            .context("project has no captured Default Setup")?;
         self.store.with_conn(|conn| {
             conn.execute(
                 "UPDATE projects
@@ -661,7 +1101,7 @@ impl SetupService {
         self.store.with_conn(|conn| {
             conn.query_row(
                 "SELECT s.id, s.name, r.id, r.revision_number, COUNT(rs.skill_id),
-                        s.created_at, s.updated_at
+                        s.created_at, s.updated_at, s.kind, s.initial_revision_id
                  FROM setups s
                  INNER JOIN setup_revisions r ON r.id = s.current_revision_id
                  LEFT JOIN setup_revision_skills rs ON rs.revision_id = r.id
@@ -785,9 +1225,11 @@ impl SetupService {
                 .as_deref()
                 .map(|revision_id| setup_by_revision_id(conn, revision_id))
                 .transpose()?;
+            let default_setup = default_setup_by_project_id(conn, &row.0)?;
             Ok(Project {
                 id: row.0,
                 path: row.1,
+                default_setup,
                 assigned_setup,
                 applied_setup,
                 created_at: row.4,
@@ -812,12 +1254,12 @@ impl SetupService {
             if !source.is_dir() {
                 anyhow::bail!("managed skill directory not found: {:?}", source);
             }
-            validate_skill_name(&skill.name)?;
+            validate_skill_name(&item.target_name)?;
             let tool = self.resolve_project_tool(&item.tool)?;
             let relative = validate_relative_path(&tool.relative_skills_dir.to_string_lossy())?;
             let target = PathBuf::from(&project.path)
                 .join(relative)
-                .join(&skill.name);
+                .join(&item.target_name);
             let key = path_key(&target);
             if let Some(existing) = desired_by_path.get_mut(&key) {
                 if existing.skill.id != skill.id {
@@ -1253,13 +1695,15 @@ fn setup_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SetupSummary> {
         skill_target_count: row.get::<_, i64>(4)? as usize,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
+        is_default: row.get::<_, String>(7)? == "default",
+        initial_revision_id: row.get(8)?,
     })
 }
 
 fn setup_by_revision_id(conn: &rusqlite::Connection, revision_id: &str) -> Result<SetupSummary> {
     conn.query_row(
         "SELECT s.id, s.name, r.id, r.revision_number, COUNT(rs.skill_id),
-                s.created_at, s.updated_at
+                s.created_at, s.updated_at, s.kind, s.initial_revision_id
          FROM setup_revisions r
          INNER JOIN setups s ON s.id = r.setup_id
          LEFT JOIN setup_revision_skills rs ON rs.revision_id = r.id
@@ -1270,6 +1714,26 @@ fn setup_by_revision_id(conn: &rusqlite::Connection, revision_id: &str) -> Resul
     )
     .optional()?
     .with_context(|| format!("setup revision not found: {revision_id}"))
+}
+
+fn default_setup_by_project_id(
+    conn: &rusqlite::Connection,
+    project_id: &str,
+) -> Result<Option<SetupSummary>> {
+    conn.query_row(
+        "SELECT s.id, s.name, r.id, r.revision_number, COUNT(rs.skill_id),
+                s.created_at, s.updated_at, s.kind, s.initial_revision_id
+         FROM setups s
+         INNER JOIN setup_revisions r ON r.id = s.current_revision_id
+         LEFT JOIN setup_revision_skills rs ON rs.revision_id = r.id
+         WHERE s.kind = 'default' AND s.default_project_id = ?1
+         GROUP BY s.id, s.name, r.id, r.revision_number, s.created_at, s.updated_at,
+                  s.kind, s.initial_revision_id",
+        params![project_id],
+        setup_from_row,
+    )
+    .optional()
+    .map_err(Into::into)
 }
 
 fn target_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SkillTargetRecord> {
@@ -1339,6 +1803,34 @@ fn insert_target(conn: &rusqlite::Connection, record: &SkillTargetRecord) -> Res
             record.status,
             record.last_error,
             record.synced_at
+        ],
+    )?;
+    Ok(())
+}
+
+fn insert_skill_record(conn: &rusqlite::Connection, record: &SkillRecord) -> Result<()> {
+    conn.execute(
+        "INSERT INTO skills (
+           id, name, description, source_type, source_ref, source_subpath, source_revision,
+           central_path, content_hash, created_at, updated_at, last_sync_at, last_seen_at,
+           enabled, status
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        params![
+            record.id,
+            record.name,
+            record.description,
+            record.source_type,
+            record.source_ref,
+            record.source_subpath,
+            record.source_revision,
+            record.central_path,
+            record.content_hash,
+            record.created_at,
+            record.updated_at,
+            record.last_sync_at,
+            record.last_seen_at,
+            record.enabled,
+            record.status
         ],
     )?;
     Ok(())
@@ -1425,6 +1917,16 @@ fn normalize_name(value: &str, kind: &str) -> Result<String> {
     Ok(value.to_string())
 }
 
+fn default_setup_name(project: &Project) -> String {
+    let project_name = Path::new(&project.path)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| "project".to_string());
+    let short_id = project.id.get(..8).unwrap_or(&project.id);
+    format!("Default — {project_name} [{short_id}]")
+}
+
 fn validate_skill_name(name: &str) -> Result<()> {
     let path = Path::new(name);
     if name.trim().is_empty() || path.components().count() != 1 || matches!(name, "." | "..") {
@@ -1462,6 +1964,15 @@ fn normalize_project_path(path: &Path) -> Result<PathBuf> {
     )?))
 }
 
+fn normalize_existing_directory(path: &Path, label: &str) -> Result<PathBuf> {
+    if !path.is_dir() {
+        anyhow::bail!("{label} does not exist: {}", path.display());
+    }
+    Ok(clean_canonical_path(path.canonicalize().with_context(
+        || format!("resolve {label} {}", path.display()),
+    )?))
+}
+
 #[cfg(windows)]
 fn clean_canonical_path(path: PathBuf) -> PathBuf {
     let value = path.to_string_lossy();
@@ -1487,6 +1998,21 @@ fn path_key(path: &Path) -> String {
     }
     #[cfg(not(windows))]
     value
+}
+
+fn scan_selection_key(tool: &str, path: &Path) -> String {
+    format!("{tool}|{}", path_key(path))
+}
+
+fn unique_snapshot_path(central_repo: &Path, fingerprint: &str) -> PathBuf {
+    let digest = fingerprint.get(..12).unwrap_or(fingerprint);
+    loop {
+        let suffix = Uuid::new_v4().simple().to_string();
+        let path = central_repo.join(format!("snapshot-{digest}-{}", &suffix[..8]));
+        if !path.exists() {
+            return path;
+        }
+    }
 }
 
 fn merge_sync_modes(left: SyncMode, right: SyncMode) -> Result<SyncMode> {

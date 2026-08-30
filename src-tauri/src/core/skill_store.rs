@@ -8,7 +8,7 @@ const DB_FILE_NAME: &str = "skills_hub.db";
 const LEGACY_APP_IDENTIFIERS: &[&str] = &["com.tauri.dev", "com.tauri.dev.skillshub"];
 
 // Schema versioning: bump when making changes and add a migration step.
-const SCHEMA_VERSION: i32 = 8;
+const SCHEMA_VERSION: i32 = 10;
 
 // Minimal schema for MVP: skills, skill_targets, settings, discovered_skills(optional).
 const SCHEMA_V1: &str = r#"
@@ -156,6 +156,8 @@ impl SkillStore {
                 conn.execute_batch("ALTER TABLE skills ADD COLUMN source_subpath TEXT NULL;")?;
                 migrate_skill_targets_to_v4(conn)?;
                 migrate_setups_to_v8(conn, false)?;
+                migrate_default_setup_to_v9(conn)?;
+                migrate_project_defaults_to_v10(conn)?;
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             } else if user_version < SCHEMA_VERSION {
                 // Incremental migrations
@@ -176,6 +178,12 @@ impl SkillStore {
                 }
                 if user_version < 8 {
                     migrate_setups_to_v8(conn, user_version == 7)?;
+                }
+                if user_version < 9 {
+                    migrate_default_setup_to_v9(conn)?;
+                }
+                if user_version < 10 {
+                    migrate_project_defaults_to_v10(conn)?;
                 }
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             } else if user_version > SCHEMA_VERSION {
@@ -860,6 +868,53 @@ fn migrate_setups_to_v8(conn: &Connection, discard_profile_poc: bool) -> Result<
 
          CREATE INDEX IF NOT EXISTS idx_apply_operations_project
          ON apply_operations(project_id, created_at DESC);",
+    )?;
+    Ok(())
+}
+
+fn migrate_default_setup_to_v9(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "ALTER TABLE setups ADD COLUMN kind TEXT NOT NULL DEFAULT 'custom';
+         ALTER TABLE setups ADD COLUMN initial_revision_id TEXT NULL;
+
+         ALTER TABLE setup_revision_skills RENAME TO setup_revision_skills_v8;
+
+         CREATE TABLE setup_revision_skills (
+           revision_id TEXT NOT NULL,
+           skill_id TEXT NOT NULL,
+           tool TEXT NOT NULL,
+           created_at INTEGER NOT NULL,
+           target_name TEXT NOT NULL,
+           PRIMARY KEY (revision_id, skill_id, tool, target_name),
+           FOREIGN KEY(revision_id) REFERENCES setup_revisions(id) ON DELETE CASCADE,
+           FOREIGN KEY(skill_id) REFERENCES skills(id) ON DELETE RESTRICT
+         );
+
+         INSERT INTO setup_revision_skills
+           (revision_id, skill_id, tool, created_at, target_name)
+         SELECT rs.revision_id, rs.skill_id, rs.tool, rs.created_at, s.name
+         FROM setup_revision_skills_v8 rs
+         INNER JOIN skills s ON s.id = rs.skill_id;
+
+         DROP TABLE setup_revision_skills_v8;
+
+         CREATE INDEX idx_setup_revision_skills_revision
+         ON setup_revision_skills(revision_id);
+
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_setups_single_default
+         ON setups(kind) WHERE kind = 'default';",
+    )?;
+    Ok(())
+}
+
+fn migrate_project_defaults_to_v10(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "DROP INDEX IF EXISTS idx_setups_single_default;
+         ALTER TABLE setups ADD COLUMN default_project_id TEXT NULL;
+
+         CREATE UNIQUE INDEX idx_setups_default_project
+         ON setups(default_project_id)
+         WHERE kind = 'default' AND default_project_id IS NOT NULL;",
     )?;
     Ok(())
 }

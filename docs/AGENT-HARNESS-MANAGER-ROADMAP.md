@@ -20,8 +20,8 @@ This document is the source of truth for the product model and implementation se
 
 The first useful product is deliberately narrow:
 
-1. Scan the user's current agent configuration.
-2. Capture it as an editable **Default Setup** with an immutable first revision.
+1. Select or register a project and scan the agent configuration relevant to it.
+2. Capture it as that project's editable **Default Setup** with an immutable first revision.
 3. Let the user compose another Setup from plugins and standalone skills.
 4. Assign either Setup to a project.
 5. Resolve the Setup into agent-specific materializations with a safe preview.
@@ -65,6 +65,16 @@ A logical project has one active Setup assignment. Its physical representation m
 
 Every generated materialization must have an ownership record so the manager only replaces or removes files it owns.
 
+### 3.7 Default Setup is project-scoped
+
+Every registered project owns its own Default Setup. There is no singleton Default shared by all projects. A project's first accepted scan becomes that project's retained initial Default revision; editing or selecting Default in one project does not modify another project's Default.
+
+### 3.8 The product is web-controlled and locally executed
+
+The primary product UI is a hosted web application backed by a shared control plane. A constrained `ahm` runner executes scans, plans, materialization, rollback, and drift checks wherever the project filesystem exists. The browser never writes directly to a workstation, and the control plane never sends arbitrary shell commands or absolute filesystem paths.
+
+Tauri is a temporary application shell rather than the long-term product boundary. It receives no product-only execution behavior that cannot be reused by the standalone runner.
+
 ## 4. Domain model
 
 | Concept | Meaning | Mutability |
@@ -74,7 +84,7 @@ Every generated materialization must have an ownership record so the manager onl
 | Standalone Skill | A skill consumed without a plugin container for ecosystem compatibility. | Imported versions are immutable |
 | Setup | A named composition the user edits over time. | Mutable pointer to revisions |
 | Setup Revision | An exact resolved selection of releases, variants, skills, targets, and configuration. | Immutable |
-| Default Setup | The user-visible Setup created during onboarding from the detected machine state. | Editable through new revisions |
+| Default Setup | The project-owned Setup created during that project's onboarding from the detected state. Exactly one may belong to each project. | Editable through new revisions; initial revision retained |
 | Project Assignment | The active Setup Revision selected for a project. | Mutable pointer |
 | Materialization | Agent-specific files, links, copies, merges, or native registrations produced from an assignment. | Replaceable, with ownership records |
 | Evaluation Run | Static or dynamic evidence generated against an exact Setup Revision and harness configuration. | Immutable result |
@@ -160,21 +170,22 @@ Important distinctions:
 6. A Setup change creates a new revision; existing Evaluation Runs continue to point to the old revision.
 7. AI-generated modifications are proposals until a user or authorized policy accepts them.
 8. Upstream updates are explicit and never silently alter a variant or active Setup Revision.
-9. The first detected machine state remains recoverable even if Default Setup is later edited.
+9. Each project's first detected state remains recoverable even if that project's Default Setup is later edited.
 10. Static analysis, dynamic evaluation, and trust policy remain distinct forms of evidence.
 
 ## 7. Primary user flows
 
-### 7.1 First-run scan and Default Setup
+### 7.1 Project onboarding scan and Default Setup
 
-1. Scan supported agent locations and native configuration.
-2. Classify detected entries as known artifacts, unresolved local content, or conflicts.
-3. Show a review screen before adopting anything.
-4. Snapshot the accepted state as the first immutable Default Setup Revision.
-5. Record which existing paths are adopted as managed and which remain external.
-6. Assign Default Setup to the selected scope only after confirmation.
+1. Select or register the project being onboarded.
+2. Scan supported agent locations and native configuration for that project context.
+3. Classify detected entries as known artifacts, unresolved local content, or conflicts.
+4. Show a review screen before adopting anything.
+5. Snapshot the accepted state as the project's first immutable Default Setup Revision.
+6. Record which existing paths are adopted as managed and which remain external.
+7. Associate Default with that project only after confirmation.
 
-The first snapshot is always retained. Editing Default Setup creates another revision; it does not rewrite the onboarding snapshot.
+Each project has exactly one Default Setup. Its first snapshot is always retained. Editing it creates another revision; it does not rewrite that project's onboarding snapshot or another project's Default.
 
 ### 7.2 Create and assign a Setup
 
@@ -299,15 +310,17 @@ Evaluation runs must be disposable and isolated from the user's active project m
 
 AI may explain findings, propose configuration changes, or draft Plugin Variants. It must not silently change a published artifact, active assignment, company policy, or trusted provenance record.
 
-## 10. CLI direction
+## 10. Runner and CLI direction
 
-The CLI and desktop UI are consumers of the same Rust application core. Command names below establish intent; exact syntax may evolve during implementation.
+The CLI is the local administration surface of the `ahm` runner. The hosted web UI reaches the same constrained execution behavior through versioned declarative jobs rather than Tauri IPC. Command names below establish intent; exact syntax may evolve during implementation.
 
 ```text
-ahm scan
+ahm scan [--project <path>]
 ahm status [--project <path>]
 
 ahm setup list
+ahm setup default preview [--project <path>]
+ahm setup default capture [--project <path>]
 ahm setup view <setup>
 ahm setup create <name>
 ahm setup clone <setup[@revision]> --name <name>
@@ -339,7 +352,7 @@ Safety behavior:
 - Destructive conflicts require an explicit resolution; `--force` must never imply deletion of unmanaged content.
 - Commands support structured output for future GitHub CLI, CI, and company-policy integrations.
 
-## 11. Desktop UI direction
+## 11. Web UI direction
 
 ### 11.1 Navigation model
 
@@ -392,10 +405,10 @@ standalone CLI, and future local agent share behavior.
 | Materialization planner | Diff desired state against owned and unmanaged physical state. |
 | Agent adapters | Translate plans into each agent's links, copies, config merges, or native operations. |
 | Operation journal | Record plans, writes, ownership, failures, recovery, and drift. |
-| Web control plane | Store organization-visible catalogs, Setup assignments, approvals, and status without handling local filesystem paths. |
-| Local executor | Resolve device-local project paths and perform constrained plan/sync operations. The CLI is the first host; a background agent will reuse it later. |
+| Web control plane | Store organization-visible catalogs, Setup assignments, approvals, jobs, and status without handling local filesystem paths. PostgreSQL is its relational source of truth. |
+| Local runner | Resolve device-local project paths and perform constrained scan, plan, sync, rollback, and drift operations. SQLite retains only device-local mappings, ownership, recovery, and delivery state. |
 | Evaluation orchestrator | Create isolated runs and retain reproducible evidence. |
-| Tauri command layer | Expose application services to the desktop UI. |
+| Tauri command layer | Temporary adapter for the legacy desktop shell during web cutover; it must not become a second execution implementation. |
 | CLI command layer | Expose the same application services to shells and automation. |
 
 The Tauri command layer and CLI must not independently implement resolution or switching rules.
@@ -406,12 +419,16 @@ The first delivery model follows the Tessl pattern: `ahm` is installed locally,
 the user selects or receives a Setup, and `ahm plan` / `ahm sync` reconcile it
 inside the selected project. The browser never writes directly to a workstation.
 
-The later company delivery model adds an optional background agent around the
-same local executor. It registers a device, maintains local
+The company delivery model runs the same executable as an optional background
+service. It registers a device, maintains local
 `ProjectInstance -> absolute path` mappings, receives declarative Setup Revision
 assignments over an outbound authenticated connection, and reports plans and
 results. It does not accept arbitrary shell commands or server-supplied absolute
 paths.
+
+The detailed split, protocol constraints, delivery increments, and handoff-ready
+ticket sequence are defined in
+[`WEB-CONTROL-PLANE-RUNNER-PLAN.md`](./WEB-CONTROL-PLANE-RUNNER-PLAN.md).
 
 ## 13. Conceptual persistence model
 
@@ -462,7 +479,7 @@ Goal: complete the first end-to-end product wedge.
 
 Deliverables:
 
-- first-scan snapshot and Default Setup creation;
+- per-project first-scan snapshot and Default Setup creation;
 - immutable Setup Revisions;
 - project-to-revision assignment;
 - read-only plan/diff;
@@ -550,7 +567,7 @@ Acceptance:
 - it cannot modify the user's active project state;
 - a user can compare two exact Setup Revisions and inspect evidence behind the score.
 
-### Phase 6 — Productized desktop experience
+### Phase 6 — Productized web experience
 
 Goal: make composition, switching, and evaluation understandable without the CLI.
 
@@ -621,9 +638,9 @@ Proposed ticket sequence:
 
    Add revision records and exact selected items while preserving current data through migration.
 
-3. **First-scan Default Setup snapshot**
+3. **Per-project first-scan Default Setup snapshot**
 
-   Convert accepted onboarding discoveries into a retained initial Default revision, including unresolved local content handling.
+   Convert accepted onboarding discoveries into a retained initial Default revision owned by one registered project, including unresolved local content handling. Each project has an independent Default.
 
 4. **Deterministic resolver**
 
@@ -641,15 +658,30 @@ Proposed ticket sequence:
 
    Implement plan, use Setup, and use Default through the shared service and CLI.
 
-8. **Desktop project switcher integration**
+8. **Web project switcher integration**
 
-   Expose the same preview and actions in the current UI, with English and Chinese translations.
+   Expose the same preview and actions in the browser-based UI through the control-plane and runner protocol, with English and Chinese translations.
 
 9. **Cross-platform and schema verification**
 
    Cover idempotency, unmanaged conflicts, partial failure, drift, Windows fallbacks, and Unix symlinks.
 
-The milestone is complete only when a disposable project can move from its detected Default Setup to another Setup and back through both the shared backend and at least one consumer, without losing unmanaged content.
+The milestone is complete only when two disposable projects can retain independent Defaults, and each can move from its own detected Default Setup to another Setup and back through both the shared backend and at least one consumer, without losing unmanaged content.
+
+### 15.1 Next milestone — web control plane and local runner split
+
+Before expanding the Catalog, variant, or evaluation model, establish the final deployment boundary:
+
+1. checkpoint the current passing local vertical slice;
+2. create independent web, control-plane, contract, domain, and runner build targets;
+3. define protocol version 1 with cross-language fixtures;
+4. separate PostgreSQL control-plane state from runner-local SQLite state;
+5. prove a read-only browser-to-runner scan;
+6. prove plan, explicit approval, apply receipt, and manual Use Default through the same path;
+7. demote the Tauri application after browser parity is reached.
+
+The next agent should implement only the first three tickets from
+[`WEB-CONTROL-PLANE-RUNNER-PLAN.md`](./WEB-CONTROL-PLANE-RUNNER-PLAN.md) before requesting review. This keeps the first handoff focused on boundaries and contracts rather than mixing repository migration, networking, persistence, and UI changes in one step.
 
 ## 16. Inspiration and reusable patterns
 

@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use app_lib::core::setup_service::{ApplyActionKind, SetupService};
-use app_lib::core::skill_store::{SkillRecord, SkillStore};
+use app_lib::core::setup_service::{ApplyActionKind, DefaultSetupCandidateKind, SetupService};
+use app_lib::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 use tempfile::TempDir;
 
 fn managed_skill(store: &SkillStore, root: &Path, id: &str, name: &str) -> SkillRecord {
@@ -39,6 +39,13 @@ fn setup() -> (TempDir, SkillStore, SetupService) {
     store.ensure_schema().unwrap();
     let service = SetupService::from_store(store.clone()).unwrap();
     (temp, store, service)
+}
+
+fn registered_project(temp: &TempDir, service: &SetupService, name: &str) -> std::path::PathBuf {
+    let project = temp.path().join(name);
+    std::fs::create_dir_all(&project).unwrap();
+    service.add_project(&project).unwrap();
+    project
 }
 
 #[test]
@@ -197,5 +204,233 @@ fn drifted_copy_target_blocks_setup_switch() {
     assert_eq!(
         std::fs::read_to_string(target_file).unwrap(),
         "locally edited"
+    );
+}
+
+#[test]
+fn default_preview_is_read_only_and_capture_retains_the_initial_revision() {
+    let (temp, _store, service) = setup();
+    let project = registered_project(&temp, &service, "project");
+    let home = temp.path().join("home");
+    let cursor = home.join(".cursor/skills/shared");
+    let codex = home.join(".codex/skills/shared");
+    std::fs::create_dir_all(&cursor).unwrap();
+    std::fs::create_dir_all(&codex).unwrap();
+    std::fs::write(cursor.join("SKILL.md"), "same content").unwrap();
+    std::fs::write(codex.join("SKILL.md"), "same content").unwrap();
+
+    let preview = service.preview_default_setup(&home, &project).unwrap();
+    assert_eq!(preview.total_tools_scanned, 2);
+    assert_eq!(preview.candidates.len(), 2);
+    assert!(preview.candidates.iter().all(|item| item.capturable));
+    assert!(!home.join(".skillshub").exists(), "preview must not write");
+
+    let captured = service.capture_default_setup(&home, &project, &[]).unwrap();
+    assert_eq!(captured.captured_candidates, 2);
+    assert_eq!(captured.snapshot_count, 1);
+    assert!(captured.setup.setup.is_default);
+    assert_eq!(captured.setup.setup.revision_number, 1);
+    assert_eq!(
+        captured.setup.setup.initial_revision_id.as_deref(),
+        Some(captured.setup.setup.revision_id.as_str())
+    );
+    assert_eq!(captured.setup.items.len(), 2);
+    assert!(captured
+        .setup
+        .items
+        .iter()
+        .all(|item| item.target_name == "shared"));
+    let snapshots = std::fs::read_dir(home.join(".skillshub"))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(
+        std::fs::read_to_string(snapshots[0].path().join("SKILL.md")).unwrap(),
+        "same content"
+    );
+    assert_eq!(
+        std::fs::read_to_string(cursor.join("SKILL.md")).unwrap(),
+        "same content"
+    );
+    let first_item = captured.setup.items.first().unwrap();
+    let edited = service
+        .remove_setup_skill(
+            &captured.setup.setup.id,
+            &first_item.skill_id,
+            std::slice::from_ref(&first_item.tool),
+        )
+        .unwrap();
+    assert_eq!(edited.setup.revision_number, 2);
+    assert_eq!(
+        edited.setup.initial_revision_id,
+        captured.setup.setup.initial_revision_id
+    );
+    assert!(service.capture_default_setup(&home, &project, &[]).is_err());
+}
+
+#[test]
+fn default_capture_preserves_conflicting_agent_content_as_distinct_snapshots() {
+    let (temp, _store, service) = setup();
+    let project = registered_project(&temp, &service, "project");
+    let home = temp.path().join("home");
+    let cursor = home.join(".cursor/skills/same-name");
+    let codex = home.join(".codex/skills/same-name");
+    std::fs::create_dir_all(&cursor).unwrap();
+    std::fs::create_dir_all(&codex).unwrap();
+    std::fs::write(cursor.join("SKILL.md"), "cursor version").unwrap();
+    std::fs::write(codex.join("SKILL.md"), "codex version").unwrap();
+
+    let preview = service.preview_default_setup(&home, &project).unwrap();
+    assert_eq!(preview.candidates.len(), 2);
+    assert!(preview.candidates.iter().all(|item| item.has_conflict));
+
+    let captured = service.capture_default_setup(&home, &project, &[]).unwrap();
+    assert_eq!(captured.snapshot_count, 2);
+    assert_eq!(captured.setup.items.len(), 2);
+    assert!(captured
+        .setup
+        .items
+        .iter()
+        .all(|item| item.target_name == "same-name"));
+    assert_ne!(
+        captured.setup.items[0].skill_id,
+        captured.setup.items[1].skill_id
+    );
+}
+
+#[test]
+fn default_capture_excludes_only_explicit_selection_keys() {
+    let (temp, _store, service) = setup();
+    let project = registered_project(&temp, &service, "project");
+    let home = temp.path().join("home");
+    for name in ["keep", "leave-external"] {
+        let skill = home.join(".codex/skills").join(name);
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(skill.join("SKILL.md"), name).unwrap();
+    }
+
+    let preview = service.preview_default_setup(&home, &project).unwrap();
+    let excluded = preview
+        .candidates
+        .iter()
+        .find(|item| item.name == "leave-external")
+        .unwrap()
+        .selection_key
+        .clone();
+    assert!(service
+        .capture_default_setup(&home, &project, &["missing|selection".to_string()])
+        .is_err());
+    let captured = service
+        .capture_default_setup(&home, &project, std::slice::from_ref(&excluded))
+        .unwrap();
+    assert_eq!(captured.excluded_candidates, 1);
+    assert_eq!(captured.captured_candidates, 1);
+    assert_eq!(captured.setup.items[0].target_name, "keep");
+}
+
+#[test]
+fn default_preview_includes_existing_managed_global_targets_once() {
+    let (temp, store, service) = setup();
+    let project = registered_project(&temp, &service, "project");
+    let home = temp.path().join("home");
+    let skill = managed_skill(
+        &store,
+        &temp.path().join("library"),
+        "managed-skill",
+        "managed",
+    );
+    let target = home.join(".codex/skills/managed");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("SKILL.md"), "managed target state").unwrap();
+    store
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "managed-target".to_string(),
+            skill_id: skill.id,
+            tool: "codex".to_string(),
+            scope: "global".to_string(),
+            project_path: None,
+            target_path: target.to_string_lossy().to_string(),
+            mode: "copy".to_string(),
+            status: "ok".to_string(),
+            last_error: None,
+            synced_at: Some(1),
+        })
+        .unwrap();
+
+    let preview = service.preview_default_setup(&home, &project).unwrap();
+    assert_eq!(preview.candidates.len(), 1);
+    assert_eq!(
+        preview.candidates[0].classification,
+        DefaultSetupCandidateKind::KnownSkill
+    );
+    assert_eq!(preview.candidates[0].source_path, target.to_string_lossy());
+}
+
+#[test]
+fn each_project_owns_and_selects_its_own_default_setup() {
+    let (temp, _store, service) = setup();
+    let home = temp.path().join("home");
+    let source = home.join(".codex/skills/baseline");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(source.join("SKILL.md"), "baseline").unwrap();
+    let project_a = registered_project(&temp, &service, "project-a");
+    let project_b = registered_project(&temp, &service, "project-b");
+    let local_a = project_a.join(".agents/skills/only-a");
+    let local_b = project_b.join(".agents/skills/only-b");
+    std::fs::create_dir_all(&local_a).unwrap();
+    std::fs::create_dir_all(&local_b).unwrap();
+    std::fs::write(local_a.join("SKILL.md"), "project a").unwrap();
+    std::fs::write(local_b.join("SKILL.md"), "project b").unwrap();
+
+    let default_a = service
+        .capture_default_setup(&home, &project_a, &[])
+        .unwrap();
+    let default_b = service
+        .capture_default_setup(&home, &project_b, &[])
+        .unwrap();
+    assert_ne!(default_a.setup.setup.id, default_b.setup.setup.id);
+    assert_ne!(
+        default_a.setup.setup.initial_revision_id,
+        default_b.setup.setup.initial_revision_id
+    );
+    assert!(default_a
+        .setup
+        .items
+        .iter()
+        .any(|item| item.target_name == "only-a"));
+    assert!(!default_a
+        .setup
+        .items
+        .iter()
+        .any(|item| item.target_name == "only-b"));
+    assert!(default_b
+        .setup
+        .items
+        .iter()
+        .any(|item| item.target_name == "only-b"));
+    assert!(!default_b
+        .setup
+        .items
+        .iter()
+        .any(|item| item.target_name == "only-a"));
+
+    let selected_a = service.assign_default_setup(&project_a).unwrap();
+    let selected_b = service.assign_default_setup(&project_b).unwrap();
+    assert_eq!(
+        selected_a.assigned_setup.unwrap().id,
+        default_a.setup.setup.id
+    );
+    assert_eq!(
+        selected_b.assigned_setup.unwrap().id,
+        default_b.setup.setup.id
+    );
+    assert_eq!(
+        selected_a.default_setup.unwrap().id,
+        default_a.setup.setup.id
+    );
+    assert_eq!(
+        selected_b.default_setup.unwrap().id,
+        default_b.setup.setup.id
     );
 }

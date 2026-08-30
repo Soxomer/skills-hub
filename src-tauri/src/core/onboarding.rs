@@ -67,6 +67,14 @@ pub fn build_onboarding_plan<R: tauri::Runtime>(
     let home =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to resolve home directory"))?;
     let central = resolve_central_repo_path(app, store)?;
+    build_onboarding_plan_for_home(store, &home, &central)
+}
+
+pub fn build_onboarding_plan_for_home(
+    store: &SkillStore,
+    home: &Path,
+    central_repo: &Path,
+) -> Result<OnboardingPlan> {
     let mut managed_targets = store
         .list_all_skill_target_paths()
         .unwrap_or_default()
@@ -81,15 +89,15 @@ pub fn build_onboarding_plan<R: tauri::Runtime>(
             ));
         }
     }
-    let claude_config_dir = resolve_claude_config_dir(&home);
+    let claude_config_dir = resolve_claude_config_dir(home);
     let disabled_source_keys = load_discovery_scan_config(store)?
         .disabled_source_keys
         .into_iter()
         .collect::<HashSet<_>>();
     build_onboarding_plan_with_claude_dir(
-        &home,
+        home,
         &claude_config_dir,
-        Some(&central),
+        Some(central_repo),
         Some(&managed_targets),
         &disabled_source_keys,
     )
@@ -300,7 +308,7 @@ fn build_onboarding_plan_with_claude_dir(
             .push(variant);
     }
 
-    let groups: Vec<OnboardingGroup> = grouped
+    let mut groups: Vec<OnboardingGroup> = grouped
         .into_iter()
         .map(|(name, variants)| {
             let mut uniq = variants
@@ -318,6 +326,18 @@ fn build_onboarding_plan_with_claude_dir(
             }
         })
         .collect();
+    groups.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+    });
+    for group in &mut groups {
+        group.variants.sort_by(|left, right| {
+            left.tool
+                .cmp(&right.tool)
+                .then_with(|| left.path.cmp(&right.path))
+        });
+    }
 
     Ok(OnboardingPlan {
         total_tools_scanned: scanned,

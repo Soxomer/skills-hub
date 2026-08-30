@@ -101,13 +101,15 @@ The POC should prove the backend boundary and the complete setup-switching
 loop without requiring new UI.
 
 1. List the skills already known to Skills Hub.
-2. Create and inspect a named setup.
-3. Add skills and tool targets to that setup.
-4. Register a project and assign the setup.
-5. Preview the resulting filesystem changes.
-6. Synchronize the setup using existing materialization behavior.
-7. Switch to another setup or an empty setup.
-8. Roll back the last synchronization operation.
+2. Register a project.
+3. Preview its current machine state without modifying it.
+4. Capture accepted discoveries as that project's retained first Default Setup revision.
+5. Create and inspect another named setup.
+6. Add skills and tool targets to that setup.
+7. Preview the resulting filesystem changes.
+8. Synchronize the setup using existing materialization behavior.
+9. Switch to another setup or Default.
+10. Roll back the last synchronization operation.
 
 The POC is successful when an automated test performs that loop in temporary
 directories and proves that unmanaged files are never removed.
@@ -137,13 +139,17 @@ From the repository root:
 
 ```text
 npm run cli -- --help
+npm run cli -- project add .
+npm run cli -- scan
+npm run cli -- setup default preview
+npm run cli -- setup default capture
 npm run cli -- skill list
 npm run cli -- setup create weekly-test
 npm run cli -- setup add-skill weekly-test <skill-id-or-name> --tool codex cursor
-npm run cli -- project add .
 npm run cli -- project use weekly-test
 npm run cli -- plan
 npm run cli -- sync
+npm run cli -- project use-default
 npm run cli -- status
 npm run cli -- rollback
 ```
@@ -156,6 +162,14 @@ or set `AHM_DB` to use a disposable database. Every command also accepts
 touch the filesystem. `plan` previews reconciliation. `sync` records an
 operation and materializes the selected revision. `rollback` restores the
 managed target snapshot from immediately before the latest sync.
+
+`scan` and `setup default preview` are read-only and operate on the registered
+project selected by `--project` or the current directory. `setup default capture`
+copies accepted content into immutable central snapshots, preserves conflicting
+same-name content as distinct snapshots, records the original target name, and
+retains that project's first Default revision even when later revisions are
+created. Every project owns an independent Default Setup. Use
+the repeatable `--exclude <selection-key>` option to leave discoveries external.
 
 Exit codes are `0` for success, `1` for an internal/runtime failure, `2` for
 invalid input or a missing resource, and `3` for a safety conflict.
@@ -173,8 +187,9 @@ invalid input or a missing resource, and `3` for a safety conflict.
 - A failed filesystem or database operation attempts to restore the previous
   materializations.
 - Automated temporary-directory tests cover immutable revision assignment,
-  sync, empty-setup switching,
-  rollback, unmanaged collisions, and drifted Cursor copies.
+  read-only scanning, Default capture, managed and unresolved discoveries,
+  conflicting content, explicit exclusions, sync, empty-setup switching,
+  rollback, unmanaged collisions, schema migration, and drifted Cursor copies.
 
 ## Deferred work
 

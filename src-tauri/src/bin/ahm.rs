@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use app_lib::core::setup_service::{
-    default_cli_db_path, ApplyActionKind, ApplyPlan, Project, ProjectStatus, SetupDetail,
+    default_cli_db_path, ApplyActionKind, ApplyPlan, DefaultSetupCandidateKind,
+    DefaultSetupCaptureResult, DefaultSetupPreview, Project, ProjectStatus, SetupDetail,
     SetupService, SkillSummary,
 };
 use clap::{Args, Parser, Subcommand};
@@ -29,6 +30,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Scan the current machine without changing it.
+    Scan(ScanArgs),
     /// Inspect the central skill library.
     Skill(SkillArgs),
     /// Create and edit reusable skill setups.
@@ -43,6 +46,16 @@ enum Command {
     Sync(SetupProjectArgs),
     /// Restore the state before the latest synchronization.
     Rollback(ProjectPathArgs),
+}
+
+#[derive(Debug, Args)]
+struct ScanArgs {
+    /// Home directory to scan. Defaults to the current user's home.
+    #[arg(long)]
+    home: Option<PathBuf>,
+    /// Registered project whose Default Setup is being reviewed.
+    #[arg(long)]
+    project: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -87,6 +100,29 @@ enum SetupCommand {
         #[arg(long = "tool", num_args = 1..)]
         tools: Vec<String>,
     },
+    /// Preview or capture the retained Default Setup.
+    Default {
+        #[command(subcommand)]
+        command: DefaultSetupCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum DefaultSetupCommand {
+    /// Preview the machine state that can become Default.
+    Preview(ScanArgs),
+    /// Capture accepted discoveries as the immutable first Default revision.
+    Capture {
+        /// Home directory to scan. Defaults to the current user's home.
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Registered project that will own this Default Setup.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Selection key to leave external. Repeat for multiple discoveries.
+        #[arg(long = "exclude")]
+        exclusions: Vec<String>,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -104,6 +140,11 @@ enum ProjectCommand {
     /// Select a setup for a project without applying it yet.
     Use {
         setup: String,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Select the current Default Setup revision without applying it yet.
+    UseDefault {
         #[arg(long)]
         project: Option<PathBuf>,
     },
@@ -139,6 +180,11 @@ fn run(cli: Cli) -> Result<i32> {
     let service = SetupService::open(db_path)?;
 
     match cli.command {
+        Command::Scan(args) => {
+            let preview = service
+                .preview_default_setup(&scan_home(args.home)?, &project_path(args.project)?)?;
+            emit_default_preview(&preview, cli.json)?;
+        }
         Command::Skill(args) => match args.command {
             SkillCommand::List => {
                 let skills = service.list_skills()?;
@@ -191,6 +237,27 @@ fn run(cli: Cli) -> Result<i32> {
                     cli.json,
                 )?;
             }
+            SetupCommand::Default { command } => match command {
+                DefaultSetupCommand::Preview(args) => {
+                    let preview = service.preview_default_setup(
+                        &scan_home(args.home)?,
+                        &project_path(args.project)?,
+                    )?;
+                    emit_default_preview(&preview, cli.json)?;
+                }
+                DefaultSetupCommand::Capture {
+                    home,
+                    project,
+                    exclusions,
+                } => {
+                    let result = service.capture_default_setup(
+                        &scan_home(home)?,
+                        &project_path(project)?,
+                        &exclusions,
+                    )?;
+                    emit_default_capture(&result, cli.json)?;
+                }
+            },
         },
         Command::Project(args) => match args.command {
             ProjectCommand::List => {
@@ -212,6 +279,11 @@ fn run(cli: Cli) -> Result<i32> {
             ProjectCommand::Use { setup, project } => {
                 let project = project_path(project)?;
                 let project = service.assign_setup(&project, &setup)?;
+                emit_project(&project, cli.json)?;
+            }
+            ProjectCommand::UseDefault { project } => {
+                let project = project_path(project)?;
+                let project = service.assign_default_setup(&project)?;
                 emit_project(&project, cli.json)?;
             }
         },
@@ -264,6 +336,11 @@ fn project_path(path: Option<PathBuf>) -> Result<PathBuf> {
     Ok(path.map(Ok).unwrap_or_else(std::env::current_dir)?)
 }
 
+fn scan_home(path: Option<PathBuf>) -> Result<PathBuf> {
+    path.map(Ok)
+        .unwrap_or_else(|| dirs::home_dir().ok_or_else(|| anyhow::anyhow!("home not found")))
+}
+
 fn print_json(value: &impl Serialize) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
@@ -283,19 +360,84 @@ fn print_skills(skills: &[SkillSummary]) {
     }
 }
 
+fn emit_default_preview(preview: &DefaultSetupPreview, json: bool) -> Result<()> {
+    if json {
+        return print_json(preview);
+    }
+    println!(
+        "Scanned {} tool contexts for {} and found {} skill placements.",
+        preview.total_tools_scanned, preview.project_path, preview.total_skills_found
+    );
+    if let Some(default) = &preview.existing_default {
+        println!(
+            "Default already exists at revision {} (initial revision {}).",
+            default.revision_number,
+            default.initial_revision_id.as_deref().unwrap_or("unknown")
+        );
+    }
+    for candidate in &preview.candidates {
+        let classification = match candidate.classification {
+            DefaultSetupCandidateKind::KnownSkill => "known skill",
+            DefaultSetupCandidateKind::PluginSkill => "plugin skill",
+            DefaultSetupCandidateKind::LocalContent => "local content",
+        };
+        let state = if candidate.capturable {
+            if candidate.has_conflict {
+                "capturable, conflicting content"
+            } else {
+                "capturable"
+            }
+        } else {
+            candidate.reason.as_deref().unwrap_or("external")
+        };
+        println!(
+            "{} -> {}\t{}\t{}\t{}",
+            candidate.name, candidate.tool, classification, state, candidate.source_path
+        );
+        println!("  selection: {}", candidate.selection_key);
+    }
+    if preview.candidates.is_empty() {
+        println!("No unmanaged skills were discovered.");
+    }
+    Ok(())
+}
+
+fn emit_default_capture(result: &DefaultSetupCaptureResult, json: bool) -> Result<()> {
+    if json {
+        return print_json(result);
+    }
+    emit_setup(&result.setup, false)?;
+    println!(
+        "Captured {} placements into {} immutable snapshots; {} excluded, {} left external.",
+        result.captured_candidates,
+        result.snapshot_count,
+        result.excluded_candidates,
+        result.external_candidates
+    );
+    Ok(())
+}
+
 fn emit_setup(setup: &SetupDetail, json: bool) -> Result<()> {
     if json {
         return print_json(setup);
     }
     println!(
-        "{}@{}\t{} targets\t{}",
+        "{}@{}{}\t{} targets\t{}",
         setup.setup.name,
         setup.setup.revision_number,
+        if setup.setup.is_default {
+            " [default]"
+        } else {
+            ""
+        },
         setup.items.len(),
         setup.setup.id
     );
     for item in &setup.items {
-        println!("  {} -> {} ({})", item.skill_name, item.tool, item.skill_id);
+        println!(
+            "  {} -> {}/{} ({})",
+            item.skill_name, item.tool, item.target_name, item.skill_id
+        );
     }
     Ok(())
 }
@@ -310,6 +452,11 @@ fn emit_project(project: &Project, json: bool) -> Result<()> {
 }
 
 fn print_project(project: &Project) {
+    let default = project
+        .default_setup
+        .as_ref()
+        .map(|setup| format!("{}@{}", setup.name, setup.revision_number))
+        .unwrap_or_else(|| "none".to_string());
     let assigned = project
         .assigned_setup
         .as_ref()
@@ -321,8 +468,8 @@ fn print_project(project: &Project) {
         .map(|setup| format!("{}@{}", setup.name, setup.revision_number))
         .unwrap_or_else(|| "none".to_string());
     println!(
-        "{}\tselected={}\tapplied={}",
-        project.path, assigned, applied
+        "{}\tdefault={}\tselected={}\tapplied={}",
+        project.path, default, assigned, applied
     );
 }
 

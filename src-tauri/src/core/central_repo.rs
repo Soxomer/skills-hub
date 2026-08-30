@@ -27,6 +27,13 @@ pub fn resolve_central_repo_path<R: tauri::Runtime>(
     Ok(base.join(CENTRAL_DIR_NAME))
 }
 
+pub fn resolve_central_repo_path_for_home(store: &SkillStore, home: &Path) -> Result<PathBuf> {
+    if let Some(path) = store.get_setting("central_repo_path")? {
+        return Ok(PathBuf::from(path));
+    }
+    Ok(home.join(CENTRAL_DIR_NAME))
+}
+
 pub fn ensure_central_repo(path: &Path) -> Result<()> {
     std::fs::create_dir_all(path).with_context(|| format!("create {:?}", path))?;
     Ok(())
