@@ -1,6 +1,6 @@
-# Skills Hub CLI and Profiles POC
+# Agent Harness Manager CLI and Setups POC
 
-Status: working design brief
+Status: implemented POC
 
 This document preserves the product context from the conversation that started
 this fork. It is deliberately a design checkpoint, not a final specification.
@@ -14,7 +14,7 @@ it becomes cumbersome to:
 - see which skills exist across the system;
 - activate or deactivate related skills together;
 - assign a reusable set of skills to a project;
-- try a different workflow for a week and then roll back;
+- switch between exact configurations without polluting every project;
 - compare collections such as Firstmate without polluting every project; and
 - understand which files are owned by the manager versus the user.
 
@@ -45,48 +45,48 @@ the first POC.
 ## Core concepts
 
 - **Skill library**: canonical skill sources managed once by Skills Hub.
-- **Profile**: a named desired set of skills and their agent/tool targets.
+- **Setup**: a named configuration whose edits create immutable revisions.
+- **Setup Revision**: an exact, immutable set of skills and agent/tool targets.
 - **Project**: a registered local root path.
-- **Assignment**: the profile currently selected for a project.
-- **Apply operation**: a previewable reconciliation from the project's current
-  managed state to the selected profile.
-- **Revision**: enough recorded state to explain or roll back an apply.
+- **Assignment**: the exact Setup Revision currently selected for a project.
+- **Sync operation**: a previewable reconciliation from the project's current
+  managed state to its selected revision.
+- **Operation journal**: enough recorded state to recover from or roll back a sync.
 
-Profiles must not be implemented as tags. Tags classify skills; profiles encode
+Setups must not be implemented as tags. Tags classify skills; setups encode
 desired state, including membership, targets, and eventually version choices.
 
 ## Initial CLI sketch
 
-The executable name is not decided. `skills-hub` is used below only as a
-placeholder.
+The executable is named `ahm`.
 
 ```text
-skills-hub profile list
-skills-hub profile view <name>
-skills-hub profile create <name>
-skills-hub profile clone <source> <name>
-skills-hub profile add-skill <profile> <skill> --tool <tool>...
-skills-hub profile remove-skill <profile> <skill>
+ahm setup list
+ahm setup view <name>
+ahm setup create <name>
+ahm setup clone <source> <name>
+ahm setup add-skill <setup> <skill> --tool <tool>...
+ahm setup remove-skill <setup> <skill>
 
-skills-hub project list
-skills-hub project add <path>
-skills-hub project use <profile> [--project <path>]
+ahm project list
+ahm project add <path>
+ahm project use <setup> [--project <path>]
 
-skills-hub status [--project <path>]
-skills-hub apply [<profile>] [--project <path>] [--dry-run]
-skills-hub rollback [--project <path>]
+ahm status [--project <path>]
+ahm plan [<setup>] [--project <path>]
+ahm sync [<setup>] [--project <path>]
+ahm rollback [--project <path>]
 ```
 
-Open design questions include naming, whether `project use` should apply
-immediately, how much interactivity is appropriate, and which commands need
-`--json` in the POC.
+`project use` pins the Setup's current immutable revision without writing to the
+filesystem. `sync` performs the materialization as a separate explicit action.
 
 ## CLI behavior principles
 
 - Default the project path to the current working directory when unambiguous.
 - Make mutations idempotent and show the intended filesystem diff before a
   destructive replacement.
-- Support a non-mutating dry run for reconciliation.
+- Keep planning non-mutating and separate from synchronization.
 - Keep human-readable output concise while reserving a path to structured JSON.
 - Return stable, documented exit codes for automation.
 - Never remove unmanaged skill directories or user-authored files.
@@ -97,50 +97,97 @@ immediately, how much interactivity is appropriate, and which commands need
 
 ## POC scope
 
-The POC should prove the backend boundary and the complete profile-switching
+The POC should prove the backend boundary and the complete setup-switching
 loop without requiring new UI.
 
 1. List the skills already known to Skills Hub.
-2. Create and inspect a named profile.
-3. Add skills and tool targets to that profile.
-4. Register a project and assign the profile.
+2. Create and inspect a named setup.
+3. Add skills and tool targets to that setup.
+4. Register a project and assign the setup.
 5. Preview the resulting filesystem changes.
-6. Apply the profile using existing synchronization behavior.
-7. Switch to another profile or an empty profile.
-8. Roll back the last apply.
+6. Synchronize the setup using existing materialization behavior.
+7. Switch to another setup or an empty setup.
+8. Roll back the last synchronization operation.
 
 The POC is successful when an automated test performs that loop in temporary
 directories and proves that unmanaged files are never removed.
 
-## Architecture checkpoint
+## Architecture decision
 
 Before implementation, inspect how much of the current Rust core can be exposed
 without Tauri. Prefer a small, independently testable application/service layer
 shared by the CLI and Tauri commands. Avoid making the CLI call Tauri IPC or
 directly duplicate synchronization and database behavior.
 
-Two implementation shapes should be compared before choosing one:
+Two implementation shapes were compared:
 
 1. Add a CLI binary to the existing Rust package and expose reusable core APIs.
 2. Introduce a Rust workspace with explicit core, CLI, and Tauri application
    crates.
 
-The first may make a faster POC; the second may provide a cleaner long-term
-boundary. The choice should be based on the current module dependencies rather
-than decided in advance.
+The POC uses the first shape. Most of the existing Rust core, including the
+tool adapters and synchronization engine, was already independent of Tauri.
+The new `setup_service` module is an application boundary shared through the
+library, while `src/bin/ahm.rs` is a standalone consumer. A workspace
+split remains possible later without changing the command model or database.
+
+## Running the POC
+
+From the repository root:
+
+```text
+npm run cli -- --help
+npm run cli -- skill list
+npm run cli -- setup create weekly-test
+npm run cli -- setup add-skill weekly-test <skill-id-or-name> --tool codex cursor
+npm run cli -- project add .
+npm run cli -- project use weekly-test
+npm run cli -- plan
+npm run cli -- sync
+npm run cli -- status
+npm run cli -- rollback
+```
+
+The CLI uses the desktop app's SQLite database by default. Pass `--db <path>`
+or set `AHM_DB` to use a disposable database. Every command also accepts
+`--json` for structured output.
+
+`project use` selects an exact immutable revision but deliberately does not
+touch the filesystem. `plan` previews reconciliation. `sync` records an
+operation and materializes the selected revision. `rollback` restores the
+managed target snapshot from immediately before the latest sync.
+
+Exit codes are `0` for success, `1` for an internal/runtime failure, `2` for
+invalid input or a missing resource, and `3` for a safety conflict.
+
+## Implemented safety boundary
+
+- Only project-scoped paths recorded in `skill_targets` are candidates for
+  removal.
+- An existing path with no matching ownership record is an unmanaged conflict;
+  it is never overwritten.
+- Links and junctions must still point at the canonical managed source.
+- Copy targets must still hash to the managed source; local drift blocks the
+  operation.
+- The complete plan is validated before filesystem mutation begins.
+- A failed filesystem or database operation attempts to restore the previous
+  materializations.
+- Automated temporary-directory tests cover immutable revision assignment,
+  sync, empty-setup switching,
+  rollback, unmanaged collisions, and drifted Cursor copies.
 
 ## Deferred work
 
-- profile editing in the Tauri UI;
+- setup editing in the Tauri UI;
 - workflow packs containing hooks, repositories, launchers, or dependencies;
 - version pinning and lockfiles;
 - benchmark prompts and skill-selection telemetry;
-- import/export and shareable profile manifests;
+- import/export and shareable setup manifests;
 - a GitHub CLI extension; and
 - upstream contribution strategy after the POC is validated.
 
 ## Next design session
 
-Start by mapping the current Rust dependency boundary and then settle the CLI
-grammar with concrete example sessions. Do not begin the database migration or
-feature implementation until that design is reviewed.
+Exercise the POC against real disposable projects and decide which parts of the
+setup model should become visible in the Tauri UI. Import/export, setup
+manifests, and benchmark workflows remain intentionally deferred.

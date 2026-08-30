@@ -514,7 +514,8 @@ fn now_ms() -> i64 {
 }
 
 fn derive_name_from_repo_url(repo_url: &str) -> String {
-    let mut name = repo_url
+    let normalized = repo_url.replace('\\', "/");
+    let mut name = normalized
         .split('/')
         .next_back()
         .unwrap_or("skill")
@@ -527,6 +528,10 @@ fn derive_name_from_repo_url(repo_url: &str) -> String {
     } else {
         name
     }
+}
+
+fn path_to_slash(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 /// Scan base directories used for skill discovery.
@@ -664,11 +669,7 @@ fn scan_skill_candidates_in_dir(repo_dir: &Path) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for p in collect_skill_dirs(repo_dir) {
         let (name, _) = extract_skill_info(&p, repo_dir);
-        let rel = p
-            .strip_prefix(repo_dir)
-            .unwrap_or(&p)
-            .to_string_lossy()
-            .to_string();
+        let rel = path_to_slash(p.strip_prefix(repo_dir).unwrap_or(&p));
         out.push((name, rel));
     }
     out
@@ -1074,11 +1075,7 @@ pub fn list_git_skills<R: tauri::Runtime>(
         } else if dir.is_dir() {
             for p in collect_skill_dirs(&dir) {
                 let (name, desc) = extract_skill_info(&p, &repo_dir);
-                let rel = p
-                    .strip_prefix(&repo_dir)
-                    .unwrap_or(&p)
-                    .to_string_lossy()
-                    .to_string();
+                let rel = path_to_slash(p.strip_prefix(&repo_dir).unwrap_or(&p));
                 out.push(GitSkillCandidate {
                     name,
                     description: desc,
@@ -1104,11 +1101,7 @@ pub fn list_git_skills<R: tauri::Runtime>(
 
     for p in collect_skill_dirs(&repo_dir) {
         let (name, desc) = extract_skill_info(&p, &repo_dir);
-        let rel = p
-            .strip_prefix(&repo_dir)
-            .unwrap_or(&p)
-            .to_string_lossy()
-            .to_string();
+        let rel = path_to_slash(p.strip_prefix(&repo_dir).unwrap_or(&p));
         out.push(GitSkillCandidate {
             name,
             description: desc,
@@ -1174,11 +1167,7 @@ pub fn list_local_skills(base_path: &Path) -> Result<Vec<LocalSkillCandidate>> {
                     continue;
                 }
                 let skill_md = p.join("SKILL.md");
-                let rel = p
-                    .strip_prefix(base_path)
-                    .unwrap_or(&p)
-                    .to_string_lossy()
-                    .to_string();
+                let rel = path_to_slash(p.strip_prefix(base_path).unwrap_or(&p));
                 if skill_md.exists() {
                     match parse_skill_md_with_reason(&skill_md) {
                         Ok((name, desc)) => {
@@ -1250,11 +1239,7 @@ pub fn list_local_skills(base_path: &Path) -> Result<Vec<LocalSkillCandidate>> {
             if is_hidden_dir_name(&dir_name) || is_known_root_scan_dir(&dir_name) {
                 continue;
             }
-            let rel = p
-                .strip_prefix(base_path)
-                .unwrap_or(&p)
-                .to_string_lossy()
-                .to_string();
+            let rel = path_to_slash(p.strip_prefix(base_path).unwrap_or(&p));
             if p.join("SKILL.md").exists() {
                 match parse_skill_md_with_reason(&p.join("SKILL.md")) {
                     Ok((name, desc)) => {
@@ -1284,11 +1269,8 @@ pub fn list_local_skills(base_path: &Path) -> Result<Vec<LocalSkillCandidate>> {
                         if !sub_p.is_dir() {
                             continue;
                         }
-                        let sub_rel = sub_p
-                            .strip_prefix(base_path)
-                            .unwrap_or(&sub_p)
-                            .to_string_lossy()
-                            .to_string();
+                        let sub_rel =
+                            path_to_slash(sub_p.strip_prefix(base_path).unwrap_or(&sub_p));
                         if sub_p.join("SKILL.md").exists() {
                             match parse_skill_md_with_reason(&sub_p.join("SKILL.md")) {
                                 Ok((name, desc)) => {

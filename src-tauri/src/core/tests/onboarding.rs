@@ -230,17 +230,17 @@ fn discovers_user_scoped_claude_plugin_skills() {
               "plugins": {{
                 "standard@official": [{{
                   "scope": "user",
-                  "installPath": "{}",
+                  "installPath": {},
                   "version": "1.0.0"
                 }}],
                 "custom@community": [{{
                   "scope": "user",
-                  "installPath": "{}",
+                  "installPath": {},
                   "version": "2.0.0"
                 }}],
                 "root@community": [{{
                   "scope": "user",
-                  "installPath": "{}",
+                  "installPath": {},
                   "version": "3.0.0"
                 }}],
                 "broken@community": [{{
@@ -250,15 +250,15 @@ fn discovers_user_scoped_claude_plugin_skills() {
                 "project-only@official": [{{
                   "scope": "project",
                   "projectPath": "/tmp/project",
-                  "installPath": "{}",
+                  "installPath": {},
                   "version": "1.0.0"
                 }}]
               }}
             }}"#,
-            standard_plugin.display(),
-            custom_plugin.display(),
-            root_plugin.display(),
-            project_plugin.display()
+            serde_json::to_string(&standard_plugin).unwrap(),
+            serde_json::to_string(&custom_plugin).unwrap(),
+            serde_json::to_string(&root_plugin).unwrap(),
+            serde_json::to_string(&project_plugin).unwrap()
         ),
     )
     .unwrap();
@@ -337,12 +337,12 @@ fn ignores_duplicate_and_escaping_claude_plugin_skill_paths() {
               "plugins": {{
                 "demo@community": [{{
                   "scope": "user",
-                  "installPath": "{}",
+                  "installPath": {},
                   "version": "1.0.0"
                 }}]
               }}
             }}"#,
-            plugin.display()
+            serde_json::to_string(&plugin).unwrap()
         ),
     )
     .unwrap();

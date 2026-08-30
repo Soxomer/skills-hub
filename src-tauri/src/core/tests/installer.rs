@@ -938,12 +938,7 @@ fn collect_skill_dirs_finds_skills_under_explicit_container() {
     let dirs = super::collect_skill_dirs(dir.path());
     let rels: Vec<String> = dirs
         .iter()
-        .map(|p| {
-            p.strip_prefix(dir.path())
-                .unwrap_or(p)
-                .to_string_lossy()
-                .to_string()
-        })
+        .map(|p| super::path_to_slash(p.strip_prefix(dir.path()).unwrap_or(p)))
         .collect();
     assert_eq!(rels, vec!["technical-writer".to_string()]);
 }
@@ -968,12 +963,7 @@ fn collect_skill_dirs_finds_multiple_skills_under_explicit_container() {
     let dirs = super::collect_skill_dirs(dir.path());
     let rels: Vec<String> = dirs
         .iter()
-        .map(|p| {
-            p.strip_prefix(dir.path())
-                .unwrap_or(p)
-                .to_string_lossy()
-                .to_string()
-        })
+        .map(|p| super::path_to_slash(p.strip_prefix(dir.path()).unwrap_or(p)))
         .collect();
     assert_eq!(
         rels,
@@ -1000,12 +990,7 @@ fn collect_skill_dirs_scans_named_skill_containers_but_not_generic_dirs() {
     let dirs = super::collect_skill_dirs(dir.path());
     let rels: Vec<String> = dirs
         .iter()
-        .map(|p| {
-            p.strip_prefix(dir.path())
-                .unwrap_or(p)
-                .to_string_lossy()
-                .to_string()
-        })
+        .map(|p| super::path_to_slash(p.strip_prefix(dir.path()).unwrap_or(p)))
         .collect();
     assert_eq!(rels, vec!["agent-skills/visible-skill".to_string()]);
 }
