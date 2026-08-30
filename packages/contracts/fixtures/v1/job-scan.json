@@ -1,0 +1,17 @@
+{
+  "protocolVersion": "1.0",
+  "jobId": "job_scan_01",
+  "idempotencyKey": "idem_scan_01",
+  "organizationId": "org_01",
+  "deviceId": "device_01",
+  "projectInstanceId": "project_instance_01",
+  "issuedAt": "2026-08-31T08:00:00Z",
+  "expiresAt": "2026-08-31T08:05:00Z",
+  "job": {
+    "kind": "scanProject",
+    "payload": {
+      "projectId": "project_01",
+      "includeUnmanaged": true
+    }
+  }
+}

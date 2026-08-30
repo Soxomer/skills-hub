@@ -1,0 +1,17 @@
+{
+  "protocolVersion": "1.0",
+  "jobId": "job_apply_02",
+  "idempotencyKey": "idem_apply_02",
+  "organizationId": "org_01",
+  "deviceId": "device_01",
+  "projectInstanceId": "project_instance_01",
+  "result": {
+    "kind": "error",
+    "payload": {
+      "code": "planDigestMismatch",
+      "message": "The approved plan no longer matches the local plan.",
+      "retryable": false,
+      "recoverability": "notNeeded"
+    }
+  }
+}

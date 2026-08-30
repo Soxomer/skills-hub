@@ -391,8 +391,8 @@ The dashboard compares baseline and candidate revisions, showing activation accu
 
 ## 12. Architecture boundaries
 
-The backend should preserve clear boundaries so the web UI, desktop shell,
-standalone CLI, and future local agent share behavior.
+The backend should preserve clear boundaries so the web UI, standalone CLI,
+and local runner share contracts while the temporary desktop shell is removed.
 
 | Component | Responsibility |
 | --- | --- |
@@ -408,7 +408,7 @@ standalone CLI, and future local agent share behavior.
 | Web control plane | Store organization-visible catalogs, Setup assignments, approvals, jobs, and status without handling local filesystem paths. PostgreSQL is its relational source of truth. |
 | Local runner | Resolve device-local project paths and perform constrained scan, plan, sync, rollback, and drift operations. SQLite retains only device-local mappings, ownership, recovery, and delivery state. |
 | Evaluation orchestrator | Create isolated runs and retain reproducible evidence. |
-| Tauri command layer | Temporary adapter for the legacy desktop shell during web cutover; it must not become a second execution implementation. |
+| Tauri command layer | Disposable adapter for the legacy desktop shell during web cutover; new packages must not depend on it and it is deleted after parity. |
 | CLI command layer | Expose the same application services to shells and automation. |
 
 The Tauri command layer and CLI must not independently implement resolution or switching rules.
@@ -471,7 +471,7 @@ Acceptance:
 
 - no Profile compatibility alias remains;
 - no time-based experiment state is introduced;
-- the same domain service can be called by Tauri and the CLI.
+- the same domain service can be called by the legacy adapter and the CLI during migration.
 
 ### Phase 1 — Default Setup and reliable manual switching
 
@@ -678,10 +678,10 @@ Before expanding the Catalog, variant, or evaluation model, establish the final 
 4. separate PostgreSQL control-plane state from runner-local SQLite state;
 5. prove a read-only browser-to-runner scan;
 6. prove plan, explicit approval, apply receipt, and manual Use Default through the same path;
-7. demote the Tauri application after browser parity is reached.
+7. delete the Tauri/native application and packaging after browser parity is reached.
 
-The next agent should implement only the first three tickets from
-[`WEB-CONTROL-PLANE-RUNNER-PLAN.md`](./WEB-CONTROL-PLANE-RUNNER-PLAN.md) before requesting review. This keeps the first handoff focused on boundaries and contracts rather than mixing repository migration, networking, persistence, and UI changes in one step.
+The first three tickets in
+[`WEB-CONTROL-PLANE-RUNNER-PLAN.md`](./WEB-CONTROL-PLANE-RUNNER-PLAN.md) are complete and awaiting contract review. PostgreSQL, networking, persistence separation, and UI migration remain outside this checkpoint.
 
 ## 16. Inspiration and reusable patterns
 

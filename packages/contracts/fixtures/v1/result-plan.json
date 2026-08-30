@@ -1,0 +1,29 @@
+{
+  "protocolVersion": "1.0",
+  "jobId": "job_plan_01",
+  "idempotencyKey": "idem_plan_01",
+  "organizationId": "org_01",
+  "deviceId": "device_01",
+  "projectInstanceId": "project_instance_01",
+  "result": {
+    "kind": "planResult",
+    "payload": {
+      "projectId": "project_01",
+      "plan": {
+        "setupRevisionId": "setup_revision_03",
+        "planDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "actions": [
+          {
+            "actionId": "action_01",
+            "kind": "link",
+            "artifactId": "artifact_pdf_01",
+            "destination": {
+              "toolId": "codex",
+              "projectRelativePath": ".agents/skills/pdf"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

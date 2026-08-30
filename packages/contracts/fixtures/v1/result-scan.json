@@ -1,0 +1,34 @@
+{
+  "protocolVersion": "1.0",
+  "jobId": "job_scan_01",
+  "idempotencyKey": "idem_scan_01",
+  "organizationId": "org_01",
+  "deviceId": "device_01",
+  "projectInstanceId": "project_instance_01",
+  "result": {
+    "kind": "scanResult",
+    "payload": {
+      "projectId": "project_01",
+      "discoveries": [
+        {
+          "discoveryId": "discovery_01",
+          "kind": "skill",
+          "state": "available",
+          "name": "pdf",
+          "toolId": "codex",
+          "portableSource": "github:openai/skills/pdf@v1",
+          "contentDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "discoveryId": "discovery_02",
+          "kind": "localContent",
+          "state": "conflict",
+          "name": "project-conventions",
+          "toolId": "cursor",
+          "portableSource": null,
+          "contentDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ]
+    }
+  }
+}

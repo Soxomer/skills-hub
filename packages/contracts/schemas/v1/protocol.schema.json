@@ -1,0 +1,406 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness-manager.local/contracts/v1/protocol.schema.json",
+  "title": "Agent Harness Manager runner protocol v1",
+  "oneOf": [
+    { "$ref": "#/$defs/capabilityEnvelope" },
+    { "$ref": "#/$defs/jobEnvelope" },
+    { "$ref": "#/$defs/resultEnvelope" }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "protocolVersion": {
+      "const": "1.0"
+    },
+    "recoverability": {
+      "enum": ["notNeeded", "rollbackAvailable", "manualIntervention"]
+    },
+    "runnerCapabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scanProject",
+        "planSetup",
+        "applyPlan",
+        "rollbackOperation",
+        "supportedTools"
+      ],
+      "properties": {
+        "scanProject": { "type": "boolean" },
+        "planSetup": { "type": "boolean" },
+        "applyPlan": { "type": "boolean" },
+        "rollbackOperation": { "type": "boolean" },
+        "supportedTools": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "capabilityEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "supportedProtocolVersions",
+        "runnerVersion",
+        "deviceId",
+        "capabilities"
+      ],
+      "properties": {
+        "protocolVersion": { "$ref": "#/$defs/protocolVersion" },
+        "supportedProtocolVersions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/protocolVersion" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "runnerVersion": { "$ref": "#/$defs/identifier" },
+        "deviceId": { "$ref": "#/$defs/identifier" },
+        "capabilities": { "$ref": "#/$defs/runnerCapabilities" }
+      }
+    },
+    "scanProjectJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "payload"],
+      "properties": {
+        "kind": { "const": "scanProject" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["projectId", "includeUnmanaged"],
+          "properties": {
+            "projectId": { "$ref": "#/$defs/identifier" },
+            "includeUnmanaged": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "planSetupJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "payload"],
+      "properties": {
+        "kind": { "const": "planSetup" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["projectId", "setupRevisionId"],
+          "properties": {
+            "projectId": { "$ref": "#/$defs/identifier" },
+            "setupRevisionId": { "$ref": "#/$defs/identifier" }
+          }
+        }
+      }
+    },
+    "planApproval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approvalId", "planDigest", "approvedBy", "approvedAt", "expiresAt"],
+      "properties": {
+        "approvalId": { "$ref": "#/$defs/identifier" },
+        "planDigest": { "$ref": "#/$defs/digest" },
+        "approvedBy": { "$ref": "#/$defs/identifier" },
+        "approvedAt": { "$ref": "#/$defs/timestamp" },
+        "expiresAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "applyPlanJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "payload"],
+      "properties": {
+        "kind": { "const": "applyPlan" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["projectId", "setupRevisionId", "approval"],
+          "properties": {
+            "projectId": { "$ref": "#/$defs/identifier" },
+            "setupRevisionId": { "$ref": "#/$defs/identifier" },
+            "approval": { "$ref": "#/$defs/planApproval" }
+          }
+        }
+      }
+    },
+    "rollbackOperationJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "payload"],
+      "properties": {
+        "kind": { "const": "rollbackOperation" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["projectId", "operationId"],
+          "properties": {
+            "projectId": { "$ref": "#/$defs/identifier" },
+            "operationId": { "$ref": "#/$defs/identifier" }
+          }
+        }
+      }
+    },
+    "runnerJob": {
+      "oneOf": [
+        { "$ref": "#/$defs/scanProjectJob" },
+        { "$ref": "#/$defs/planSetupJob" },
+        { "$ref": "#/$defs/applyPlanJob" },
+        { "$ref": "#/$defs/rollbackOperationJob" }
+      ]
+    },
+    "jobEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "jobId",
+        "idempotencyKey",
+        "organizationId",
+        "deviceId",
+        "projectInstanceId",
+        "issuedAt",
+        "expiresAt",
+        "job"
+      ],
+      "properties": {
+        "protocolVersion": { "$ref": "#/$defs/protocolVersion" },
+        "jobId": { "$ref": "#/$defs/identifier" },
+        "idempotencyKey": { "$ref": "#/$defs/identifier" },
+        "organizationId": { "$ref": "#/$defs/identifier" },
+        "deviceId": { "$ref": "#/$defs/identifier" },
+        "projectInstanceId": { "$ref": "#/$defs/identifier" },
+        "issuedAt": { "$ref": "#/$defs/timestamp" },
+        "expiresAt": { "$ref": "#/$defs/timestamp" },
+        "job": { "$ref": "#/$defs/runnerJob" }
+      }
+    },
+    "scanDiscovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "discoveryId",
+        "kind",
+        "state",
+        "name",
+        "toolId",
+        "portableSource",
+        "contentDigest"
+      ],
+      "properties": {
+        "discoveryId": { "$ref": "#/$defs/identifier" },
+        "kind": { "enum": ["skill", "pluginSkill", "localContent"] },
+        "state": { "enum": ["available", "conflict", "unsupported"] },
+        "name": { "$ref": "#/$defs/identifier" },
+        "toolId": { "$ref": "#/$defs/identifier" },
+        "portableSource": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "contentDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "scanResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "payload"],
+      "properties": {
+        "kind": { "const": "scanResult" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["projectId", "discoveries"],
+          "properties": {
+            "projectId": { "$ref": "#/$defs/identifier" },
+            "discoveries": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/scanDiscovery" }
+            }
+          }
+        }
+      }
+    },
+    "planAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actionId", "kind", "artifactId", "destination"],
+      "properties": {
+        "actionId": { "$ref": "#/$defs/identifier" },
+        "kind": { "enum": ["link", "copy", "removeManaged"] },
+        "artifactId": { "$ref": "#/$defs/identifier" },
+        "destination": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["toolId", "projectRelativePath"],
+          "properties": {
+            "toolId": { "$ref": "#/$defs/identifier" },
+            "projectRelativePath": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?![A-Za-z]:[\\\\/])(?![\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$)).+"
+            }
+          }
+        }
+      }
+    },
+    "canonicalPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["setupRevisionId", "planDigest", "actions"],
+      "properties": {
+        "setupRevisionId": { "$ref": "#/$defs/identifier" },
+        "planDigest": { "$ref": "#/$defs/digest" },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/planAction" }
+        }
+      }
+    },
+    "planResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "payload"],
+      "properties": {
+        "kind": { "const": "planResult" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["projectId", "plan"],
+          "properties": {
+            "projectId": { "$ref": "#/$defs/identifier" },
+            "plan": { "$ref": "#/$defs/canonicalPlan" }
+          }
+        }
+      }
+    },
+    "applyReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "payload"],
+      "properties": {
+        "kind": { "const": "applyReceipt" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "projectId",
+            "operationId",
+            "setupRevisionId",
+            "planDigest",
+            "outcome",
+            "recoverability",
+            "actionsApplied",
+            "completedAt"
+          ],
+          "properties": {
+            "projectId": { "$ref": "#/$defs/identifier" },
+            "operationId": { "$ref": "#/$defs/identifier" },
+            "setupRevisionId": { "$ref": "#/$defs/identifier" },
+            "planDigest": { "$ref": "#/$defs/digest" },
+            "outcome": { "enum": ["applied", "rolledBack", "noChange"] },
+            "recoverability": { "$ref": "#/$defs/recoverability" },
+            "actionsApplied": { "type": "integer", "minimum": 0 },
+            "completedAt": { "$ref": "#/$defs/timestamp" }
+          }
+        }
+      }
+    },
+    "rollbackReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "payload"],
+      "properties": {
+        "kind": { "const": "rollbackReceipt" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["projectId", "operationId", "outcome", "recoverability", "completedAt"],
+          "properties": {
+            "projectId": { "$ref": "#/$defs/identifier" },
+            "operationId": { "$ref": "#/$defs/identifier" },
+            "outcome": { "enum": ["applied", "rolledBack", "noChange"] },
+            "recoverability": { "$ref": "#/$defs/recoverability" },
+            "completedAt": { "$ref": "#/$defs/timestamp" }
+          }
+        }
+      }
+    },
+    "errorResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "payload"],
+      "properties": {
+        "kind": { "const": "error" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message", "retryable", "recoverability"],
+          "properties": {
+            "code": {
+              "enum": [
+                "unsupportedProtocolVersion",
+                "expiredJob",
+                "invalidOrganization",
+                "invalidDevice",
+                "unknownProjectInstance",
+                "capabilityUnavailable",
+                "planDigestMismatch",
+                "approvalExpired",
+                "conflict",
+                "operationFailed"
+              ]
+            },
+            "message": { "type": "string", "minLength": 1 },
+            "retryable": { "type": "boolean" },
+            "recoverability": { "$ref": "#/$defs/recoverability" }
+          }
+        }
+      }
+    },
+    "runnerResult": {
+      "oneOf": [
+        { "$ref": "#/$defs/scanResult" },
+        { "$ref": "#/$defs/planResult" },
+        { "$ref": "#/$defs/applyReceipt" },
+        { "$ref": "#/$defs/rollbackReceipt" },
+        { "$ref": "#/$defs/errorResult" }
+      ]
+    },
+    "resultEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "jobId",
+        "idempotencyKey",
+        "organizationId",
+        "deviceId",
+        "projectInstanceId",
+        "result"
+      ],
+      "properties": {
+        "protocolVersion": { "$ref": "#/$defs/protocolVersion" },
+        "jobId": { "$ref": "#/$defs/identifier" },
+        "idempotencyKey": { "$ref": "#/$defs/identifier" },
+        "organizationId": { "$ref": "#/$defs/identifier" },
+        "deviceId": { "$ref": "#/$defs/identifier" },
+        "projectInstanceId": { "$ref": "#/$defs/identifier" },
+        "result": { "$ref": "#/$defs/runnerResult" }
+      }
+    }
+  }
+}

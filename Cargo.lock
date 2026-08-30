@@ -32,6 +32,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ahm-domain"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ahm-runner"
+version = "0.1.0"
+dependencies = [
+ "ahm-domain",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

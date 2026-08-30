@@ -1,0 +1,15 @@
+{
+  "name": "@ahm/control-plane",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ahm/contracts": "0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}

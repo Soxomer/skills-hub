@@ -1,0 +1,21 @@
+{
+  "protocolVersion": "1.0",
+  "jobId": "job_apply_01",
+  "idempotencyKey": "idem_apply_01",
+  "organizationId": "org_01",
+  "deviceId": "device_01",
+  "projectInstanceId": "project_instance_01",
+  "result": {
+    "kind": "applyReceipt",
+    "payload": {
+      "projectId": "project_01",
+      "operationId": "operation_01",
+      "setupRevisionId": "setup_revision_03",
+      "planDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "outcome": "applied",
+      "recoverability": "rollbackAvailable",
+      "actionsApplied": 1,
+      "completedAt": "2026-08-31T08:21:00Z"
+    }
+  }
+}

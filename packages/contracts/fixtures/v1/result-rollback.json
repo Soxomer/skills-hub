@@ -1,0 +1,18 @@
+{
+  "protocolVersion": "1.0",
+  "jobId": "job_rollback_01",
+  "idempotencyKey": "idem_rollback_01",
+  "organizationId": "org_01",
+  "deviceId": "device_01",
+  "projectInstanceId": "project_instance_01",
+  "result": {
+    "kind": "rollbackReceipt",
+    "payload": {
+      "projectId": "project_01",
+      "operationId": "operation_01",
+      "outcome": "rolledBack",
+      "recoverability": "notNeeded",
+      "completedAt": "2026-08-31T08:31:00Z"
+    }
+  }
+}

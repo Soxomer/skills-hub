@@ -1,6 +1,6 @@
 # Web Control Plane and Local Runner — Implementation Plan
 
-Status: accepted next milestone
+Status: tickets 1–3 complete; contract review required before ticket 4
 
 Last updated: 2026-08-30
 
@@ -49,12 +49,13 @@ crates/
   ahm-runner/             CLI, local SQLite and filesystem execution
 
 legacy/
-  desktop/                Temporary Tauri shell until web cutover is complete
+  desktop/                Temporary migration input; deleted after web cutover
 ```
 
 The physical move should be incremental. Code is extracted behind stable
 boundaries and kept passing before the old location is removed. Tauri receives
-no new product-only behavior during this milestone.
+no new product behavior, no new package may depend on it, and the native shell
+is deleted after browser parity is reached.
 
 ## 4. Identity model
 
@@ -119,25 +120,25 @@ its project Default without losing unmanaged content.
 ### Increment D — Web cutover
 
 Move the remaining useful React screens behind the web API, add drift and
-offline states, and stop shipping the Tauri shell as the primary application.
+offline states, and delete the Tauri/native application and packaging.
 
 Demo: all milestone flows work in a normal browser with the runner installed.
 
 ## 7. Build tickets
 
-- [ ] **1. Checkpoint the current local vertical slice**
+- [x] **1. Checkpoint the current local vertical slice**
   Roadmap ref: Phase 1 — Default Setup and reliable manual switching.
   What to build: Preserve the currently passing per-project Default scan, capture, plan, sync, and rollback behavior as the baseline for extraction.
   Acceptance: Two temporary projects retain independent Default Setups and the complete current check suite passes.
   Verify: `npm run check`.
 
-- [ ] **2. Create web, control-plane, contracts, and Rust workspace boundaries**
+- [x] **2. Create web, control-plane, contracts, and Rust workspace boundaries**
   Roadmap ref: Architecture boundaries.
-  What to build: Introduce the target directories and build orchestration without changing behavior. Isolate the Tauri shell as a temporary consumer.
+  What to build: Introduce the target directories and build orchestration without changing behavior. Quarantine the Tauri shell as disposable migration input with no imports from new packages.
   Acceptance: Web, API, contracts, runner, and legacy desktop targets build independently from the repository root.
   Verify: Root build commands plus a clean dependency-boundary check.
 
-- [ ] **3. Publish protocol version 1 and golden fixtures**
+- [x] **3. Publish protocol version 1 and golden fixtures**
   Roadmap ref: Runner protocol constraints.
   What to build: Define identifiers, job envelopes, scan results, plans, approvals, receipts, errors, capability negotiation, idempotency keys, and protocol versions.
   Acceptance: TypeScript and Rust parse and serialize the same golden fixtures; unknown fields and unsupported versions have defined behavior.
@@ -179,9 +180,9 @@ Demo: all milestone flows work in a normal browser with the runner installed.
   Acceptance: Changed or expired plans cannot be applied; unmanaged content is preserved; repeated delivery is idempotent.
   Verify: Browser-to-runner end-to-end test across two independent projects.
 
-- [ ] **10. Complete cutover and recovery UX**
+- [ ] **10. Complete cutover, delete the native app, and finish recovery UX**
   Roadmap ref: Increment D.
-  What to build: Add runner offline, drift, partial failure, recovery, credential revocation, and operation-history experiences; demote the Tauri shell.
+  What to build: Add runner offline, drift, partial failure, recovery, credential revocation, and operation-history experiences; remove Tauri, the native shell, and its packaging.
   Acceptance: Users can understand whether desired and materialized state match and can recover without direct database manipulation.
   Verify: Failure-injection tests and manual browser walkthrough.
 
@@ -194,7 +195,6 @@ must not expand this milestone.
 
 ## 9. First handoff
 
-The next agent should start with tickets 1–3 only. The handoff is successful
-when the current baseline is preserved, the workspace boundaries exist, and
-protocol fixtures pass in TypeScript and Rust. It should not begin PostgreSQL,
-runner networking, or UI migration until those contracts are reviewed.
+Tickets 1–3 preserve the passing baseline, establish the workspace boundaries,
+and share protocol fixtures between TypeScript and Rust. PostgreSQL, runner
+networking, and UI migration remain blocked until these contracts are reviewed.

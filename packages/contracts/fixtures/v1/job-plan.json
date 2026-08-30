@@ -1,0 +1,17 @@
+{
+  "protocolVersion": "1.0",
+  "jobId": "job_plan_01",
+  "idempotencyKey": "idem_plan_01",
+  "organizationId": "org_01",
+  "deviceId": "device_01",
+  "projectInstanceId": "project_instance_01",
+  "issuedAt": "2026-08-31T08:10:00Z",
+  "expiresAt": "2026-08-31T08:15:00Z",
+  "job": {
+    "kind": "planSetup",
+    "payload": {
+      "projectId": "project_01",
+      "setupRevisionId": "setup_revision_03"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "protocolVersion": "1.0",
+  "supportedProtocolVersions": ["1.0"],
+  "runnerVersion": "0.1.0",
+  "deviceId": "device_01",
+  "capabilities": {
+    "scanProject": true,
+    "planSetup": true,
+    "applyPlan": true,
+    "rollbackOperation": true,
+    "supportedTools": ["codex", "cursor"]
+  }
+}
