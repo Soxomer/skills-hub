@@ -16,6 +16,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import ExplorePage from './components/skills/ExplorePage'
 import FilterBar from './components/skills/FilterBar'
+import RemoteSkillPreviewDrawer from './components/skills/RemoteSkillPreviewDrawer'
 import SkillDetailView from './components/skills/SkillDetailView'
 import Header from './components/skills/Header'
 import LoadingOverlay from './components/skills/LoadingOverlay'
@@ -63,7 +64,9 @@ import {
 import type {
   AutoUpdateConfigDto,
   DiscoveryScanSettingsDto,
+  ExploreSkillPreviewTarget,
   FeaturedSkillDto,
+  GitSkillPreviewDto,
   GitSkillCandidate,
   GithubProxyConfigDto,
   InstallResultDto,
@@ -207,6 +210,12 @@ function App() {
   const [searchResults, setSearchResults] = useState<OnlineSkillDto[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [skillPreviewTarget, setSkillPreviewTarget] =
+    useState<ExploreSkillPreviewTarget | null>(null)
+  const [skillPreview, setSkillPreview] = useState<GitSkillPreviewDto | null>(null)
+  const [skillPreviewLoading, setSkillPreviewLoading] = useState(false)
+  const [skillPreviewError, setSkillPreviewError] = useState<string | null>(null)
+  const skillPreviewRequestRef = useRef(0)
   const [autoSelectSkillName, setAutoSelectSkillName] = useState<string | null>(null)
   const [scopeModalSkill, setScopeModalSkill] = useState<ManagedSkill | null>(null)
   const [recentProjects, setRecentProjects] = useState<string[]>([])
@@ -1421,6 +1430,11 @@ function App() {
       if (view === 'explore') {
         loadFeaturedSkills()
       }
+      skillPreviewRequestRef.current += 1
+      setSkillPreviewTarget(null)
+      setSkillPreview(null)
+      setSkillPreviewLoading(false)
+      setSkillPreviewError(null)
       if (view === 'manage') {
         setManagementTab('tags')
       }
@@ -1473,6 +1487,56 @@ function App() {
     },
     [invokeTauri, t],
   )
+
+  const loadSkillPreview = useCallback(
+    async (target: ExploreSkillPreviewTarget) => {
+      const requestId = skillPreviewRequestRef.current + 1
+      skillPreviewRequestRef.current = requestId
+      setSkillPreviewTarget(target)
+      setSkillPreview(null)
+      setSkillPreviewError(null)
+      setSkillPreviewLoading(true)
+      try {
+        const result = await invokeTauri<GitSkillPreviewDto>('preview_git_skill_cmd', {
+          repoUrl: target.source_url,
+          skillName: target.name,
+        })
+        if (skillPreviewRequestRef.current !== requestId) return
+        setSkillPreview(result)
+      } catch (err) {
+        if (skillPreviewRequestRef.current !== requestId) return
+        const raw = err instanceof Error ? err.message : String(err)
+        if (raw.startsWith('PREVIEW_NOT_FOUND|')) {
+          setSkillPreviewError(t('skillPreview.errors.notFound'))
+        } else if (raw.startsWith('PREVIEW_AMBIGUOUS|')) {
+          setSkillPreviewError(t('skillPreview.errors.ambiguous'))
+        } else if (raw.startsWith('PREVIEW_TOO_LARGE|')) {
+          setSkillPreviewError(t('skillPreview.errors.tooLarge'))
+        } else if (raw.startsWith('PREVIEW_UNSUPPORTED_SOURCE|')) {
+          setSkillPreviewError(t('skillPreview.errors.unsupported'))
+        } else {
+          setSkillPreviewError(t('skillPreview.errors.generic'))
+        }
+      } finally {
+        if (skillPreviewRequestRef.current === requestId) {
+          setSkillPreviewLoading(false)
+        }
+      }
+    },
+    [invokeTauri, t],
+  )
+
+  const handleCloseSkillPreview = useCallback(() => {
+    skillPreviewRequestRef.current += 1
+    setSkillPreviewTarget(null)
+    setSkillPreview(null)
+    setSkillPreviewLoading(false)
+    setSkillPreviewError(null)
+  }, [])
+
+  const handleRetrySkillPreview = useCallback(() => {
+    if (skillPreviewTarget) void loadSkillPreview(skillPreviewTarget)
+  }, [loadSkillPreview, skillPreviewTarget])
 
 
   const handleOpenAdd = useCallback((tab: 'git' | 'local' = 'git') => {
@@ -2795,6 +2859,13 @@ function App() {
     [resetInstallScope, toolStatus],
   )
 
+  const handleInstallPreviewSkill = useCallback(() => {
+    if (!skillPreviewTarget) return
+    const target = skillPreviewTarget
+    handleCloseSkillPreview()
+    handleExploreInstall(target.source_url, target.name)
+  }, [handleCloseSkillPreview, handleExploreInstall, skillPreviewTarget])
+
   useEffect(() => {
     if (exploreInstallTrigger > 0 && exploreInstallUrlRef.current && !loading) {
       exploreInstallUrlRef.current = null
@@ -3800,11 +3871,25 @@ function App() {
             loading={loading}
             onExploreFilterChange={handleExploreFilterChange}
             onInstallSkill={handleExploreInstall}
+            onPreviewSkill={(skill) => void loadSkillPreview(skill)}
             onOpenManualAdd={handleOpenAdd}
             t={t}
           />
         )}
       </main>
+
+      <RemoteSkillPreviewDrawer
+        open={skillPreviewTarget !== null}
+        target={skillPreviewTarget}
+        preview={skillPreview}
+        loading={skillPreviewLoading}
+        error={skillPreviewError}
+        isTauri={isTauri}
+        onClose={handleCloseSkillPreview}
+        onRetry={handleRetrySkillPreview}
+        onInstall={handleInstallPreviewSkill}
+        t={t}
+      />
 
       <AddSkillModal
         open={showAddModal}

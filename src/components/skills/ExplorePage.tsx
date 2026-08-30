@@ -1,7 +1,12 @@
 import { memo, useMemo } from 'react'
 import { Plus, Search, Star } from 'lucide-react'
 import type { TFunction } from 'i18next'
-import type { FeaturedSkillDto, ManagedSkill, OnlineSkillDto } from './types'
+import type {
+  ExploreSkillPreviewTarget,
+  FeaturedSkillDto,
+  ManagedSkill,
+  OnlineSkillDto,
+} from './types'
 
 type ExplorePageProps = {
   featuredSkills: FeaturedSkillDto[]
@@ -13,6 +18,7 @@ type ExplorePageProps = {
   loading: boolean
   onExploreFilterChange: (value: string) => void
   onInstallSkill: (sourceUrl: string, skillName?: string) => void
+  onPreviewSkill: (skill: ExploreSkillPreviewTarget) => void
   onOpenManualAdd: (tab?: 'git' | 'local') => void
   t: TFunction
 }
@@ -33,6 +39,7 @@ const ExplorePage = ({
   loading,
   onExploreFilterChange,
   onInstallSkill,
+  onPreviewSkill,
   onOpenManualAdd,
   t,
 }: ExplorePageProps) => {
@@ -129,7 +136,20 @@ const ExplorePage = ({
                 {filteredSkills.map((skill) => {
                   const installed = isInstalled(skill.name, skill.source_url)
                   return (
-                    <div key={skill.slug} className="explore-card">
+                    <article key={skill.slug} className="explore-card">
+                      <button
+                        className="explore-card-open"
+                        type="button"
+                        onClick={() =>
+                          onPreviewSkill({
+                            name: skill.name,
+                            summary: skill.summary,
+                            source_url: skill.source_url,
+                            installed,
+                          })
+                        }
+                        aria-label={t('skillPreview.openAria', { name: skill.name })}
+                      />
                       <div className="explore-card-top">
                         <div className="explore-card-info">
                           <div className="explore-card-name">{skill.name}</div>
@@ -163,7 +183,7 @@ const ExplorePage = ({
                           </span>
                         </div>
                       </div>
-                    </div>
+                    </article>
                   )
                 })}
               </div>
@@ -182,7 +202,20 @@ const ExplorePage = ({
                     {deduplicatedResults.map((skill) => {
                       const installed = isInstalled(skill.name, skill.source_url)
                       return (
-                        <div key={skill.source} className="explore-card">
+                        <article key={skill.source} className="explore-card">
+                          <button
+                            className="explore-card-open"
+                            type="button"
+                            onClick={() =>
+                              onPreviewSkill({
+                                name: skill.name,
+                                summary: '',
+                                source_url: skill.source_url,
+                                installed,
+                              })
+                            }
+                            aria-label={t('skillPreview.openAria', { name: skill.name })}
+                          />
                           <div className="explore-card-top">
                             <div className="explore-card-info">
                               <div className="explore-card-name">{skill.name}</div>
@@ -210,7 +243,7 @@ const ExplorePage = ({
                               </span>
                             </div>
                           </div>
-                        </div>
+                        </article>
                       )
                     })}
                   </div>

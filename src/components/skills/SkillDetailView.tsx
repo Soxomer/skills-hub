@@ -309,7 +309,7 @@ function parseFrontmatter(raw: string): {
   return { meta: entries, body }
 }
 
-const FileContentRenderer = memo(
+export const FileContentRenderer = memo(
   ({ filename, content, isDark }: FileContentRendererProps) => {
     if (isMarkdown(filename)) {
       const { meta, body } = parseFrontmatter(content)

@@ -208,6 +208,21 @@ export type OnlineSkillDto = {
   source_url: string
 }
 
+export type ExploreSkillPreviewTarget = {
+  name: string
+  summary: string
+  source_url: string
+  installed: boolean
+}
+
+export type GitSkillPreviewDto = {
+  name: string
+  description?: string | null
+  source_url: string
+  subpath: string
+  content: string
+}
+
 export type SkillFileEntry = {
   path: string
   size: number

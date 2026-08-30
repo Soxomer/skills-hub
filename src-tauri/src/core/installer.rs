@@ -12,7 +12,8 @@ use super::central_repo::{ensure_central_repo, resolve_central_repo_path};
 use super::content_hash::hash_dir;
 use super::git_fetcher::{clone_or_pull, clone_or_pull_sparse};
 use super::github_download::{
-    download_github_directory, parse_github_api_params, GithubDownloadOptions,
+    download_github_directory, fetch_github_text_file, parse_github_api_params,
+    parse_github_repo_coordinates, GithubDownloadOptions,
 };
 use super::network_proxy::get_github_proxy_url;
 use super::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
@@ -26,6 +27,17 @@ pub struct InstallResult {
     pub name: String,
     pub central_path: PathBuf,
     pub content_hash: Option<String>,
+}
+
+const MAX_SKILL_PREVIEW_BYTES: usize = 512 * 1024;
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct GitSkillPreview {
+    pub name: String,
+    pub description: Option<String>,
+    pub source_url: String,
+    pub subpath: String,
+    pub content: String,
 }
 
 fn record_target_sync_failure(
@@ -927,6 +939,103 @@ pub struct GitSkillCandidate {
     pub subpath: String,
 }
 
+fn is_safe_github_repo_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.contains('\\')
+        && path
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
+fn git_skill_preview_paths(
+    source_subpath: Option<&str>,
+    requested_name: Option<&str>,
+) -> Result<Vec<String>> {
+    if let Some(subpath) = source_subpath {
+        if subpath == "." {
+            return Ok(vec!["SKILL.md".to_string()]);
+        }
+        if !is_safe_github_repo_path(subpath) {
+            anyhow::bail!("PREVIEW_INVALID_PATH|The skill path is not safe to preview.");
+        }
+        return Ok(vec![format!("{}/SKILL.md", subpath)]);
+    }
+
+    let mut paths = vec!["SKILL.md".to_string()];
+    if let Some(name) = requested_name
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        if is_safe_github_repo_path(name) && !name.contains('/') {
+            paths.push(format!("{}/SKILL.md", name));
+            for base in SKILL_SCAN_BASES {
+                paths.push(format!("{}/{}/SKILL.md", base, name));
+            }
+            paths.push(format!("agent-skills/{}/SKILL.md", name));
+            paths.push(format!(".agents/skills/{}/SKILL.md", name));
+        }
+    }
+    Ok(paths)
+}
+
+pub fn preview_git_skill(
+    store: &SkillStore,
+    repo_url: &str,
+    requested_name: Option<&str>,
+) -> Result<GitSkillPreview> {
+    let parsed = parse_github_url(repo_url);
+    let (owner, repo) = parse_github_repo_coordinates(&parsed.clone_url).ok_or_else(|| {
+        anyhow::anyhow!(
+            "PREVIEW_UNSUPPORTED_SOURCE|Only GitHub-hosted Explore skills can be previewed."
+        )
+    })?;
+    let github_token = store.get_setting("github_token")?.unwrap_or_default();
+    let token = (!github_token.is_empty()).then_some(github_token.as_str());
+    let proxy_url = get_github_proxy_url(store)?;
+    let paths = git_skill_preview_paths(parsed.subpath.as_deref(), requested_name)?;
+
+    let mut matched: Option<(String, String)> = None;
+    for path in paths {
+        if let Some(content) = fetch_github_text_file(
+            &owner,
+            &repo,
+            parsed.branch.as_deref(),
+            &path,
+            MAX_SKILL_PREVIEW_BYTES,
+            token,
+            &proxy_url,
+        )? {
+            matched = Some((path, content));
+            break;
+        }
+    }
+    let (skill_file_path, content) = matched.ok_or_else(|| {
+        anyhow::anyhow!(
+            "PREVIEW_NOT_FOUND|The repository does not expose a SKILL.md for this skill."
+        )
+    })?;
+    let parsed_info = parse_skill_md_text_with_reason(&content).ok();
+    let name = parsed_info
+        .as_ref()
+        .map(|(name, _)| name.clone())
+        .or_else(|| requested_name.map(str::to_string))
+        .unwrap_or_else(|| derive_name_from_repo_url(&parsed.clone_url));
+    let description = parsed_info.and_then(|(_, description)| description);
+    let subpath = skill_file_path
+        .strip_suffix("/SKILL.md")
+        .filter(|path| !path.is_empty())
+        .unwrap_or(".")
+        .to_string();
+
+    Ok(GitSkillPreview {
+        name,
+        description,
+        source_url: repo_url.to_string(),
+        subpath,
+        content,
+    })
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct LocalSkillCandidate {
     pub name: String,
@@ -1596,6 +1705,10 @@ fn parse_skill_md(path: &Path) -> Option<(String, Option<String>)> {
 
 fn parse_skill_md_with_reason(path: &Path) -> Result<(String, Option<String>), &'static str> {
     let text = std::fs::read_to_string(path).map_err(|_| "read_failed")?;
+    parse_skill_md_text_with_reason(&text)
+}
+
+fn parse_skill_md_text_with_reason(text: &str) -> Result<(String, Option<String>), &'static str> {
     let lines: Vec<&str> = text.lines().collect();
     if lines.first().map(|v| v.trim()) != Some("---") {
         return Err("invalid_frontmatter");

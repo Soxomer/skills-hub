@@ -137,6 +137,7 @@ pub fn run() {
             commands::install_local_selection,
             commands::install_git,
             commands::list_git_skills_cmd,
+            commands::preview_git_skill_cmd,
             commands::install_git_selection,
             commands::sync_skill_dir,
             commands::sync_skill_to_tool,
