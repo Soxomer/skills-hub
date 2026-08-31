@@ -1,12 +1,20 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, thread, time::Duration};
 
+use ahm_domain::{
+    EnrollRunnerRequest, ProjectId, ProjectInstanceId, RegisterProjectInstanceRequest,
+    RunnerCapabilityReport, PROTOCOL_VERSION,
+};
 use ahm_runner::execution::RunnerExecutionService;
+use ahm_runner::job_dispatcher::{scan_capabilities, LocalJobExecutor};
 use ahm_runner::setup_service::{
     default_cli_db_path, ApplyActionKind, ApplyPlan, DefaultSetupCandidateKind,
     DefaultSetupCaptureResult, DefaultSetupPreview, Project, ProjectStatus, SetupDetail,
     SkillSummary,
 };
-use anyhow::Result;
+use ahm_runner::state::{ProjectInstanceRecord, RunnerIdentityRecord, RunnerStateStore};
+use ahm_runner::transport::{HttpRunnerTransport, RunnerTransport};
+use ahm_runner::worker::{utc_now, RunnerWorker, WorkerOutcome};
+use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 
@@ -21,6 +29,10 @@ struct Cli {
     #[arg(long, global = true, env = "AHM_DB")]
     db: Option<PathBuf>,
 
+    /// Path to the local runner identity, journal, and result outbox.
+    #[arg(long, global = true, env = "AHM_RUNNER_STATE")]
+    runner_state: Option<PathBuf>,
+
     /// Emit machine-readable JSON.
     #[arg(long, global = true)]
     json: bool,
@@ -31,6 +43,10 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Connect this machine to a Skills Hub web account.
+    Connect(ConnectArgs),
+    /// Poll for remote work assigned by the web app.
+    Worker(WorkerArgs),
     /// Scan the current machine without changing it.
     Scan(ScanArgs),
     /// Inspect the central skill library.
@@ -47,6 +63,28 @@ enum Command {
     Sync(SetupProjectArgs),
     /// Restore the state before the latest synchronization.
     Rollback(ProjectPathArgs),
+}
+
+#[derive(Debug, Args)]
+struct ConnectArgs {
+    /// Single-use enrollment code shown by the web app.
+    code: String,
+    /// Public URL of the Skills Hub control plane.
+    #[arg(long, env = "AHM_SERVER")]
+    server: String,
+    /// Human-readable name for this machine.
+    #[arg(long, default_value = "Local runner")]
+    label: String,
+}
+
+#[derive(Debug, Args)]
+struct WorkerArgs {
+    /// Process at most one claim cycle and exit.
+    #[arg(long)]
+    once: bool,
+    /// Delay between claim cycles.
+    #[arg(long, default_value_t = 2)]
+    poll_seconds: u64,
 }
 
 #[derive(Debug, Args)]
@@ -138,6 +176,14 @@ enum ProjectCommand {
     List,
     /// Register an existing project directory.
     Add { path: PathBuf },
+    /// Connect a local checkout to an existing web project.
+    Connect {
+        /// Logical project ID from the web app.
+        project_id: String,
+        /// Checkout directory. Defaults to the current directory.
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
     /// Select a setup for a project without applying it yet.
     Use {
         setup: String,
@@ -178,10 +224,26 @@ fn main() {
 
 fn run(cli: Cli) -> Result<i32> {
     let db_path = cli.db.map(Ok).unwrap_or_else(default_cli_db_path)?;
-    let runner = RunnerExecutionService::open(db_path)?;
+    let runner_state_path = cli
+        .runner_state
+        .map(Ok)
+        .unwrap_or_else(default_runner_state_path)?;
+    let command = match cli.command {
+        Command::Connect(args) => {
+            connect_runner(args, &runner_state_path, cli.json)?;
+            return Ok(0);
+        }
+        Command::Worker(args) => {
+            run_worker(args, &runner_state_path, db_path, cli.json)?;
+            return Ok(0);
+        }
+        command => command,
+    };
+    let runner = RunnerExecutionService::open(db_path.clone())?;
     let service = runner.local_admin();
 
-    match cli.command {
+    match command {
+        Command::Connect(_) | Command::Worker(_) => unreachable!("handled before local admin"),
         Command::Scan(args) => {
             let preview = runner.scan(&scan_home(args.home)?, &project_path(args.project)?)?;
             emit_default_preview(&preview, cli.json)?;
@@ -277,6 +339,56 @@ fn run(cli: Cli) -> Result<i32> {
                 let project = service.add_project(&path)?;
                 emit_project(&project, cli.json)?;
             }
+            ProjectCommand::Connect {
+                project_id,
+                project,
+            } => {
+                let local_path = std::fs::canonicalize(project_path(project)?)
+                    .context("resolve project checkout")?;
+                service.add_project(&local_path)?;
+                let state = RunnerStateStore::open(&runner_state_path)?;
+                let identity = state
+                    .identity()?
+                    .context("runner is not connected; run `ahm connect` first")?;
+                let project_id = ProjectId::new(project_id)?;
+                let record = state
+                    .project_instance_for_checkout(
+                        &identity.organization_id,
+                        &project_id,
+                        &local_path,
+                    )?
+                    .unwrap_or(ProjectInstanceRecord {
+                        id: ProjectInstanceId::new(format!(
+                            "project_instance_{}",
+                            uuid::Uuid::new_v4().simple()
+                        ))?,
+                        organization_id: identity.organization_id.clone(),
+                        project_id: project_id.clone(),
+                        local_path,
+                        registered_at: utc_now(),
+                    });
+                state.register_project_instance(&record)?;
+                HttpRunnerTransport::new(&identity.server_url)?.register_project_instance(
+                    &identity,
+                    &RegisterProjectInstanceRequest {
+                        project_instance_id: record.id.clone(),
+                        project_id,
+                    },
+                )?;
+                if cli.json {
+                    print_json(&serde_json::json!({
+                        "projectInstanceId": record.id.as_str(),
+                        "projectId": record.project_id.as_str(),
+                        "localPath": record.local_path,
+                    }))?;
+                } else {
+                    println!(
+                        "Connected {} as project instance {}.",
+                        record.local_path.display(),
+                        record.id.as_str()
+                    );
+                }
+            }
             ProjectCommand::Use { setup, project } => {
                 let project = project_path(project)?;
                 let project = service.assign_setup(&project, &setup)?;
@@ -333,8 +445,98 @@ fn run(cli: Cli) -> Result<i32> {
     Ok(0)
 }
 
+fn connect_runner(
+    args: ConnectArgs,
+    runner_state_path: &std::path::Path,
+    json: bool,
+) -> Result<()> {
+    let transport = HttpRunnerTransport::new(&args.server)?;
+    let enrolled = transport.enroll(&EnrollRunnerRequest {
+        code: args.code,
+        label: args.label,
+        capabilities: RunnerCapabilityReport {
+            protocol_version: PROTOCOL_VERSION,
+            supported_protocol_versions: vec![PROTOCOL_VERSION],
+            runner_version: env!("CARGO_PKG_VERSION").to_owned(),
+            capabilities: scan_capabilities(),
+        },
+    })?;
+    let identity = RunnerIdentityRecord {
+        server_url: args.server.trim_end_matches('/').to_owned(),
+        organization_id: enrolled.organization_id,
+        device_id: enrolled.device_id,
+        credential_secret: enrolled.credential,
+        enrolled_at: utc_now(),
+    };
+    RunnerStateStore::open(runner_state_path)?.save_identity(&identity)?;
+    if json {
+        print_json(&serde_json::json!({
+            "organizationId": identity.organization_id.as_str(),
+            "deviceId": identity.device_id.as_str(),
+            "serverUrl": identity.server_url,
+        }))?;
+    } else {
+        println!(
+            "Connected {} to {}.",
+            identity.device_id.as_str(),
+            identity.server_url
+        );
+        println!("Next: ahm project connect <project-id>");
+    }
+    Ok(())
+}
+
+fn run_worker(
+    args: WorkerArgs,
+    runner_state_path: &std::path::Path,
+    db_path: PathBuf,
+    json: bool,
+) -> Result<()> {
+    let state = RunnerStateStore::open(runner_state_path)?;
+    let identity = state
+        .identity()?
+        .context("runner is not connected; run `ahm connect` first")?;
+    let transport = HttpRunnerTransport::new(&identity.server_url)?;
+    let executor = LocalJobExecutor::new(RunnerExecutionService::open(db_path)?, scan_home(None)?);
+    let mut worker = RunnerWorker::new(state, transport, executor);
+    if !json {
+        println!(
+            "Runner {} is connected and polling {}.",
+            identity.device_id.as_str(),
+            identity.server_url
+        );
+    }
+    loop {
+        match worker.run_once() {
+            Ok(outcome) => {
+                if json && outcome != WorkerOutcome::Idle {
+                    print_json(&serde_json::json!({ "outcome": format!("{outcome:?}") }))?;
+                } else if !json && outcome == WorkerOutcome::Processed {
+                    println!("Completed and delivered one remote job.");
+                } else if !json && outcome == WorkerOutcome::Replayed {
+                    println!("Delivered a previously completed remote job.");
+                }
+            }
+            Err(error) if !args.once => {
+                eprintln!("worker cycle failed: {error:#}");
+            }
+            Err(error) => return Err(error),
+        }
+        if args.once {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_secs(args.poll_seconds));
+    }
+}
+
 fn project_path(path: Option<PathBuf>) -> Result<PathBuf> {
     Ok(path.map(Ok).unwrap_or_else(std::env::current_dir)?)
+}
+
+fn default_runner_state_path() -> Result<PathBuf> {
+    dirs::data_local_dir()
+        .map(|path| path.join("ahm").join("runner.db"))
+        .context("local application data directory not found")
 }
 
 fn scan_home(path: Option<PathBuf>) -> Result<PathBuf> {

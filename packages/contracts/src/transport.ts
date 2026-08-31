@@ -1,0 +1,68 @@
+import type {
+  JobEnvelope,
+  OrganizationId,
+  ProjectId,
+  ProjectInstanceId,
+  ResultEnvelope,
+  ProtocolVersion,
+  RunnerCapabilities,
+} from './protocol.js'
+
+export interface RunnerCapabilityReport {
+  protocolVersion: ProtocolVersion
+  supportedProtocolVersions: ProtocolVersion[]
+  runnerVersion: string
+  capabilities: RunnerCapabilities
+}
+
+export interface CreateRunnerEnrollmentResponse {
+  enrollmentId: string
+  code: string
+  expiresAt: string
+  command: string
+}
+
+export interface RunnerEnrollmentStatus {
+  enrollmentId: string
+  state: 'waiting' | 'claimed' | 'expired'
+  deviceId: string | null
+  expiresAt: string
+}
+
+export interface EnrollRunnerRequest {
+  code: string
+  label: string
+  capabilities: RunnerCapabilityReport
+}
+
+export interface EnrollRunnerResponse {
+  organizationId: OrganizationId
+  deviceId: string
+  credential: string
+}
+
+export interface RegisterProjectInstanceRequest {
+  projectInstanceId: ProjectInstanceId
+  projectId: ProjectId
+}
+
+export interface ClaimRunnerJobRequest {
+  capabilities: RunnerCapabilityReport
+}
+
+export interface LeasedRunnerJob {
+  leaseId: string
+  leaseExpiresAt: string
+  cancelRequested: boolean
+  job: JobEnvelope
+}
+
+export interface SubmitRunnerResultRequest {
+  leaseId: string
+  result: ResultEnvelope
+}
+
+export interface RunnerResultAcknowledgement {
+  accepted: true
+  duplicate: boolean
+}

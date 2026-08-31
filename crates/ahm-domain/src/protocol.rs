@@ -378,6 +378,8 @@ pub enum ProtocolErrorCode {
     ApprovalExpired,
     Conflict,
     OperationFailed,
+    JobCancelled,
+    IdempotencyMismatch,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

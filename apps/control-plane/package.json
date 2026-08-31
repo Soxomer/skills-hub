@@ -5,13 +5,18 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "migrate": "node dist/migrate.js",
+    "start": "node dist/migrate.js && node dist/server.js",
     "test": "vitest run tests"
   },
   "dependencies": {
-    "@ahm/contracts": "0.1.0"
+    "@ahm/contracts": "0.1.0",
+    "fastify": "^5.6.2",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/node": "^24.10.7",
+    "@types/pg": "^8.15.6",
     "pg-mem": "^3.0.5",
     "typescript": "~5.9.3",
     "vitest": "^4.1.9"

@@ -361,7 +361,9 @@
                 "planDigestMismatch",
                 "approvalExpired",
                 "conflict",
-                "operationFailed"
+          "operationFailed",
+          "jobCancelled",
+          "idempotencyMismatch"
               ]
             },
             "message": { "type": "string", "minLength": 1 },

@@ -681,8 +681,8 @@ Before expanding the Catalog, variant, or evaluation model, establish the final 
 7. prove plan, explicit approval, apply receipt, and manual Use Default through the same path;
 8. delete the Tauri/native application and packaging after browser parity is reached.
 
-The first five tickets in
-[`WEB-CONTROL-PLANE-RUNNER-PLAN.md`](./WEB-CONTROL-PLANE-RUNNER-PLAN.md) are complete. Shared PostgreSQL and device-local SQLite ownership are separated, and the standalone runner now owns filesystem execution and the CLI. Enrollment and outbound job transport are next; UI migration remains deferred.
+The first six tickets in
+[`WEB-CONTROL-PLANE-RUNNER-PLAN.md`](./WEB-CONTROL-PLANE-RUNNER-PLAN.md) are complete. Shared PostgreSQL and device-local SQLite ownership are separated, and the standalone runner now owns filesystem execution, the CLI, enrollment, outbound job polling, and durable result delivery. Browser UI migration is next.
 
 ## 16. Inspiration and reusable patterns
 

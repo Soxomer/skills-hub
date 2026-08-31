@@ -156,7 +156,7 @@ Demo: all milestone flows work in a normal browser with the runner installed.
   Acceptance: The runner has no Tauri dependency and all filesystem mutations pass through the same execution service.
   Verify: Rust tests plus CLI integration tests in temporary directories.
 
-- [ ] **6. Add enrollment and outbound job transport**
+- [x] **6. Add enrollment and outbound job transport**
   Roadmap ref: Increment B.
   What to build: Implement one-time enrollment, device credentials, capability reporting, job claim, lease, result retry, expiry, and cancellation behavior.
   Acceptance: A runner can reconnect without duplicating an operation; the server cannot request an arbitrary command or path.
@@ -200,5 +200,28 @@ share protocol fixtures between TypeScript and Rust, separate shared PostgreSQL
 state from runner-local SQLite state, and move scan, plan, apply, rollback,
 adapters, recovery primitives, and the `ahm` CLI into `ahm-runner`. The legacy
 desktop now consumes runner-owned modules through thin path-resolution wrappers.
-Runner networking and UI migration remain deferred; ticket 6 adds enrollment
-and outbound job transport.
+Runner enrollment and outbound job transport now use protocol-v1 HTTPS polling.
+The runner stores its device credential, project paths, operation journal, and
+pending result outbox locally; PostgreSQL stores enrollment, capability, lease,
+cancellation, and portable result state. Remote execution is deliberately
+limited to `scanProject` until portable Setup snapshots and digest-bound apply
+are carried by the protocol. Ticket 7 adds the browser connection and scan UX.
+
+## 10. Runner transport operations
+
+The control plane starts from `apps/control-plane` with `DATABASE_URL` and an
+optional `PUBLIC_SERVER_URL`; startup applies pending PostgreSQL migrations.
+The intended runner journey is:
+
+```text
+ahm connect <single-use-code> --server https://hub.example.com
+ahm project connect <logical-project-id> --project /path/to/checkout
+ahm worker
+```
+
+`AHM_RUNNER_STATE` can override the device-local SQLite location. Credentials
+are never printed after enrollment, the server stores only their SHA-256 hash,
+and revocation immediately rejects subsequent claims and result delivery.
+Loopback HTTP is supported for development; other runner endpoints require
+HTTPS. The worker claims one job at a time and retries its durable result outbox
+after a disconnect without re-executing a completed job.

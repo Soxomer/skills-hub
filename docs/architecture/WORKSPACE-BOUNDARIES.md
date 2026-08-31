@@ -18,7 +18,7 @@ Tauri or legacy application modules.
 ```text
 apps/
   web/                 browser application boundary
-  control-plane/       hosted API boundary; transport is intentionally deferred
+  control-plane/       hosted API and outbound runner-job transport
 packages/
   contracts/           protocol schemas, TypeScript types, and golden fixtures
 crates/
@@ -40,8 +40,8 @@ contracts, domain, and runner targets build independently from root commands.
 - Version `1.0` is the only supported version. Unsupported versions fail validation; capability negotiation returns no compatible version.
 - Plan destinations are project-relative and reject drive-qualified, rooted, and parent-traversing paths.
 
-Persistence ownership is defined below. Networking and UI migration remain
-deferred while enrollment and outbound job transport are built.
+Persistence ownership is defined below. Enrollment and outbound HTTPS polling
+are implemented; browser UI migration remains the next boundary task.
 
 ## Standalone execution ownership
 
@@ -68,12 +68,26 @@ content.
 | Runner jobs and plan approvals | Operation and rollback journal |
 | Portable receipts and audit events | Pending result-delivery outbox |
 
-The control-plane migration is
-`apps/control-plane/migrations/0001_control_plane.sql`. Its schema tests execute
-the migration and reject every machine-local path column. The runner migration
+The control-plane migrations live in `apps/control-plane/migrations`. Their
+schema tests execute the complete migration sequence and reject every
+machine-local path column. The runner migration
 lives in `crates/ahm-runner/src/state.rs`; its schema tests reject shared Setup,
 assignment, approval, and organization tables.
 
 The combined legacy SQLite schema remains local migration input for existing CLI
 users. It is not the storage model for the browser product; organization-visible
 records use control-plane PostgreSQL, while new worker state uses runner SQLite.
+
+## Runner transport
+
+The runner initiates all network traffic through versioned HTTP endpoints. A
+short-lived, single-use enrollment code yields a revocable bearer credential;
+the control plane stores only its SHA-256 hash. Each claim reports capabilities
+and leases no more than one declarative job to a runner. Completed results are
+journaled together with an idempotency digest and committed to the SQLite
+outbox before delivery.
+
+The first transport slice advertises and accepts only `scanProject`. Plan,
+apply, and rollback remain local CLI capabilities until the protocol carries a
+portable immutable Setup snapshot and apply enforces its approved plan digest.
+Jobs never contain shell commands or server-selected absolute paths.

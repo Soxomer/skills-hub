@@ -4,14 +4,19 @@ import { fileURLToPath } from 'node:url'
 import { newDb } from 'pg-mem'
 import { describe, expect, it } from 'vitest'
 
-const migrationPath = fileURLToPath(
+const firstMigrationPath = fileURLToPath(
   new URL('../migrations/0001_control_plane.sql', import.meta.url),
 )
-const migration = readFileSync(migrationPath, 'utf8')
+const secondMigrationPath = fileURLToPath(
+  new URL('../migrations/0002_runner_transport.sql', import.meta.url),
+)
+const migrations = [firstMigrationPath, secondMigrationPath].map((path) =>
+  readFileSync(path, 'utf8'),
+)
 
 function createMigratedDatabase() {
   const database = newDb({ autoCreateForeignKeyIndices: true })
-  database.public.none(migration)
+  for (const migration of migrations) database.public.none(migration)
   return database
 }
 
@@ -35,6 +40,7 @@ describe('control-plane migration', () => {
       'project_instances',
       'projects',
       'runner_devices',
+      'runner_enrollments',
       'runner_jobs',
       'setup_revision_items',
       'setup_revisions',
@@ -56,9 +62,9 @@ describe('control-plane migration', () => {
     for (const database of [createMigratedDatabase(), createMigratedDatabase()]) {
       expect(
         database.public.one<{ version: number }>(
-          'SELECT version FROM control_plane_schema_migrations',
+          'SELECT MAX(version) AS version FROM control_plane_schema_migrations',
         ).version,
-      ).toBe(1)
+      ).toBe(2)
     }
   })
 

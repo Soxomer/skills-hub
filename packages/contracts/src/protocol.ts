@@ -178,6 +178,8 @@ export type ProtocolErrorCode =
   | 'approvalExpired'
   | 'conflict'
   | 'operationFailed'
+  | 'jobCancelled'
+  | 'idempotencyMismatch'
 
 export interface ErrorResult {
   kind: 'error'
