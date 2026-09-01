@@ -81,6 +81,20 @@ describe('runner transport', () => {
     const identity = await connect(app)
     const authorization = { authorization: `Bearer ${identity.credential}` }
 
+    const connectedRunner = await app.inject({
+      method: 'GET',
+      url: `/api/v1/runners/${identity.deviceId}`,
+      headers: actorHeaders,
+    })
+    expect(connectedRunner.statusCode).toBe(200)
+    expect(connectedRunner.json()).toMatchObject({
+      deviceId: identity.deviceId,
+      label: 'Laptop',
+      status: 'active',
+      lastSeenAt: null,
+      projectInstances: [],
+    })
+
     const registration = await app.inject({
       method: 'PUT',
       url: '/runner/v1/project-instances/instance_01',
@@ -88,6 +102,23 @@ describe('runner transport', () => {
       payload: { projectId: 'project_01' },
     })
     expect(registration.statusCode).toBe(204)
+
+    const registeredRunner = await app.inject({
+      method: 'GET',
+      url: `/api/v1/runners/${identity.deviceId}`,
+      headers: actorHeaders,
+    })
+    expect(registeredRunner.json()).toMatchObject({
+      lastSeenAt: null,
+      projectInstances: [
+        {
+          projectInstanceId: 'instance_01',
+          projectId: 'project_01',
+          registeredAt: '2026-09-01T10:00:00.000Z',
+          lastSeenAt: '2026-09-01T10:00:00.000Z',
+        },
+      ],
+    })
 
     const queued = await app.inject({
       method: 'POST',

@@ -55,6 +55,10 @@ export function createControlPlaneApp(service: RunnerTransportService): FastifyI
     async (request) => service.enrollmentStatus(actor(request), request.params.enrollmentId),
   )
 
+  app.get<{ Params: { deviceId: string } }>('/api/v1/runners/:deviceId', async (request) =>
+    service.runnerStatus(actor(request), request.params.deviceId),
+  )
+
   app.post<{
     Params: { projectInstanceId: string }
     Body: { includeUnmanaged?: boolean }

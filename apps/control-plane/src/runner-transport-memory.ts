@@ -4,6 +4,7 @@ import type {
   RegisterProjectInstanceRequest,
   ResultEnvelope,
   RunnerCapabilityReport,
+  RunnerStatusResponse,
 } from '@ahm/contracts'
 
 import type {
@@ -35,13 +36,18 @@ interface MemoryJob {
   resultDigest: string | null
 }
 
+interface MemoryProjectInstance extends ProjectInstanceRoute {
+  registeredAt: string
+  lastSeenAt: string | null
+}
+
 export class InMemoryRunnerTransportRepository implements RunnerTransportRepository {
   private readonly enrollments = new Map<string, RunnerEnrollmentRecord>()
   private readonly enrollmentByCode = new Map<string, string>()
   private readonly devices = new Map<string, MemoryDevice>()
   private readonly deviceByCredential = new Map<string, string>()
   private readonly projects = new Map<string, string>()
-  private readonly projectInstances = new Map<string, ProjectInstanceRoute>()
+  private readonly projectInstances = new Map<string, MemoryProjectInstance>()
   private readonly jobs = new Map<string, MemoryJob>()
 
   seedProject(organizationId: string, projectId: string): void {
@@ -108,6 +114,34 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
       : null
   }
 
+  async runnerStatus(
+    organizationId: string,
+    deviceId: string,
+  ): Promise<RunnerStatusResponse | null> {
+    const device = this.devices.get(deviceId)
+    if (!device || device.organizationId !== organizationId) return null
+    return {
+      deviceId: device.deviceId,
+      label: device.label,
+      status: device.status,
+      enrolledAt: device.enrolledAt,
+      lastSeenAt: device.lastSeenAt,
+      capabilities: device.capabilities,
+      projectInstances: [...this.projectInstances.values()]
+        .filter(
+          (instance) =>
+            instance.organizationId === organizationId && instance.deviceId === deviceId,
+        )
+        .sort((left, right) => left.registeredAt.localeCompare(right.registeredAt))
+        .map((instance) => ({
+          projectInstanceId: instance.projectInstanceId,
+          projectId: instance.projectId,
+          registeredAt: instance.registeredAt,
+          lastSeenAt: instance.lastSeenAt,
+        })),
+    }
+  }
+
   async registerProjectInstance(
     runner: RunnerAuthentication,
     request: RegisterProjectInstanceRequest,
@@ -126,9 +160,9 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
       projectInstanceId: request.projectInstanceId,
       projectId: request.projectId,
       deviceId: runner.deviceId,
+      registeredAt: current?.registeredAt ?? now,
+      lastSeenAt: now,
     })
-    const device = this.devices.get(runner.deviceId)
-    if (device) device.lastSeenAt = now
     return true
   }
 
@@ -137,7 +171,14 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
     projectInstanceId: string,
   ): Promise<ProjectInstanceRoute | null> {
     const route = this.projectInstances.get(projectInstanceId)
-    return route?.organizationId === organizationId ? { ...route } : null
+    return route?.organizationId === organizationId
+      ? {
+          organizationId: route.organizationId,
+          projectInstanceId: route.projectInstanceId,
+          projectId: route.projectId,
+          deviceId: route.deviceId,
+        }
+      : null
   }
 
   async enqueueJob(job: JobEnvelope): Promise<void> {

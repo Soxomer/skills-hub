@@ -29,6 +29,23 @@ export interface RunnerEnrollmentStatus {
   expiresAt: string
 }
 
+export interface RunnerProjectInstanceSummary {
+  projectInstanceId: ProjectInstanceId
+  projectId: ProjectId
+  registeredAt: string
+  lastSeenAt: string | null
+}
+
+export interface RunnerStatusResponse {
+  deviceId: string
+  label: string
+  status: 'active' | 'revoked'
+  enrolledAt: string
+  lastSeenAt: string | null
+  capabilities: RunnerCapabilityReport | null
+  projectInstances: RunnerProjectInstanceSummary[]
+}
+
 export interface EnrollRunnerRequest {
   code: string
   label: string

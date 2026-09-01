@@ -1,0 +1,188 @@
+export const resources = {
+  en: {
+    translation: {
+      brand: {
+        name: 'Agent Harness Manager',
+        eyebrow: 'Local runner',
+      },
+      language: {
+        action: '中文',
+        aria: 'Switch language to Chinese',
+      },
+      page: {
+        title: 'Connect your local runner',
+        description:
+          'Keep project files on this machine while controlling scans and setups from the browser.',
+        protocol: 'Protocol {{version}}',
+      },
+      status: {
+        label: 'Connection status',
+        ready: 'Not connected',
+        waiting: 'Waiting for runner',
+        connected: 'Connected',
+        offline: 'Runner offline',
+        expired: 'Command expired',
+        revoked: 'Access revoked',
+      },
+      intro: {
+        title: 'Connect this machine',
+        description:
+          'Generate a single-use command, run it in your terminal, then keep the worker running.',
+        action: 'Generate connection command',
+        creating: 'Generating command…',
+      },
+      enrollment: {
+        step: 'Step 1',
+        title: 'Run the connection command',
+        description: 'Open a terminal on the machine that contains your projects and run:',
+        waiting: 'Waiting for the runner to claim this command.',
+        expires: 'Expires {{time}}',
+        refresh: 'Check now',
+        replace: 'Generate a new command',
+        expiredTitle: 'This connection command has expired',
+        expiredDescription: 'Generate a fresh single-use command and run it on the same machine.',
+      },
+      runner: {
+        step: 'Step 1 complete',
+        title: '{{label}} is connected',
+        description: 'The credential is stored locally. Only declared runner capabilities are accepted.',
+        device: 'Device ID',
+        lastSeen: 'Last seen',
+        neverSeen: 'Worker not started yet',
+        version: 'Runner version',
+        capabilities: 'Capabilities',
+        tools: '{{count}} supported tools',
+        offlineTitle: 'The runner is currently offline',
+        offlineDescription:
+          'Check that the worker command is still running and that this machine can reach the control plane.',
+        revokedTitle: 'This runner no longer has access',
+        revokedDescription:
+          'Generate a new connection command to enroll this machine with a fresh credential.',
+      },
+      project: {
+        step: 'Step 2',
+        title: 'Connect a project checkout',
+        description:
+          'Enter an existing logical Project ID. Project creation and selection arrive in the next roadmap slice.',
+        inputLabel: 'Project ID',
+        inputPlaceholder: 'project_01',
+        commandHelp: 'Run from the project checkout, or add --project followed by its path.',
+        connected: 'Connected projects',
+        none: 'No project checkout is registered on this runner yet.',
+        instance: 'Instance {{id}}',
+      },
+      worker: {
+        step: 'Step 3',
+        title: 'Start the worker',
+        description:
+          'Keep this process running. It polls outbound work and never accepts arbitrary commands or server-provided paths.',
+        online: 'Worker is reporting normally.',
+        offline: 'The worker has stopped reporting.',
+        awaiting: 'Waiting for the worker to report for the first time.',
+      },
+      command: {
+        copy: 'Copy',
+        copied: 'Copied',
+        copyLabel: 'Copy {{name}}',
+      },
+      errors: {
+        create: 'The connection command could not be generated. Check the control-plane service and try again.',
+        refresh: 'Status could not be refreshed. The last known state is still shown.',
+        retry: 'Retry',
+      },
+      time: {
+        unavailable: 'Not available',
+      },
+    },
+  },
+  zh: {
+    translation: {
+      brand: {
+        name: 'Agent Harness Manager',
+        eyebrow: '本地运行器',
+      },
+      language: {
+        action: 'EN',
+        aria: '切换语言为英文',
+      },
+      page: {
+        title: '连接本地运行器',
+        description: '项目文件保留在本机，同时通过浏览器控制扫描和配置。',
+        protocol: '协议 {{version}}',
+      },
+      status: {
+        label: '连接状态',
+        ready: '未连接',
+        waiting: '等待运行器',
+        connected: '已连接',
+        offline: '运行器离线',
+        expired: '命令已过期',
+        revoked: '访问已撤销',
+      },
+      intro: {
+        title: '连接此设备',
+        description: '生成一次性命令，在终端中运行，然后保持工作进程运行。',
+        action: '生成连接命令',
+        creating: '正在生成命令…',
+      },
+      enrollment: {
+        step: '第 1 步',
+        title: '运行连接命令',
+        description: '在包含项目的设备上打开终端并运行：',
+        waiting: '正在等待运行器使用此命令。',
+        expires: '{{time}} 过期',
+        refresh: '立即检查',
+        replace: '生成新命令',
+        expiredTitle: '此连接命令已过期',
+        expiredDescription: '生成新的一次性命令，并在同一设备上运行。',
+      },
+      runner: {
+        step: '第 1 步完成',
+        title: '{{label}} 已连接',
+        description: '凭据保存在本地。系统只接受已声明的运行器能力。',
+        device: '设备 ID',
+        lastSeen: '最后在线',
+        neverSeen: '工作进程尚未启动',
+        version: '运行器版本',
+        capabilities: '能力',
+        tools: '支持 {{count}} 个工具',
+        offlineTitle: '运行器当前离线',
+        offlineDescription: '请确认工作进程仍在运行，并且此设备可以连接控制平面。',
+        revokedTitle: '此运行器已无访问权限',
+        revokedDescription: '生成新的连接命令，使用新凭据重新注册此设备。',
+      },
+      project: {
+        step: '第 2 步',
+        title: '连接项目工作区',
+        description: '输入已有的逻辑项目 ID。项目创建和选择将在下一阶段提供。',
+        inputLabel: '项目 ID',
+        inputPlaceholder: 'project_01',
+        commandHelp: '在项目工作区中运行，或添加 --project 及其路径。',
+        connected: '已连接项目',
+        none: '此运行器尚未注册任何项目工作区。',
+        instance: '实例 {{id}}',
+      },
+      worker: {
+        step: '第 3 步',
+        title: '启动工作进程',
+        description: '保持此进程运行。它通过出站轮询接收任务，不接受任意命令或服务器提供的路径。',
+        online: '工作进程运行正常。',
+        offline: '工作进程已停止报告。',
+        awaiting: '正在等待工作进程首次报告。',
+      },
+      command: {
+        copy: '复制',
+        copied: '已复制',
+        copyLabel: '复制{{name}}',
+      },
+      errors: {
+        create: '无法生成连接命令。请检查控制平面服务后重试。',
+        refresh: '无法刷新状态，仍显示最后已知状态。',
+        retry: '重试',
+      },
+      time: {
+        unavailable: '不可用',
+      },
+    },
+  },
+} as const

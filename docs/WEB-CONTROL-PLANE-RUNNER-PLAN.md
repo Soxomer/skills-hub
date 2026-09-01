@@ -1,8 +1,8 @@
 # Web Control Plane and Local Runner — Implementation Plan
 
-Status: tickets 1–5 complete; enrollment and outbound transport are next
+Status: tickets 1–7 complete; remote scan and Default review are next
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 ## 1. Outcome
 
@@ -162,10 +162,10 @@ Demo: all milestone flows work in a normal browser with the runner installed.
   Acceptance: A runner can reconnect without duplicating an operation; the server cannot request an arbitrary command or path.
   Verify: API/runner integration tests covering disconnect, retry, duplicate delivery, expiry, and revoked credentials.
 
-- [ ] **7. Move the React UI to the web application**
+- [x] **7. Add browser runner connection and status UX**
   Roadmap ref: Increment B and web cutover.
-  What to build: Move the existing useful React screens, replace direct Tauri `invoke` calls with a typed API client, and add runner/project connection states.
-  Acceptance: The web application loads in a normal browser and contains no Tauri runtime dependency in its primary flows.
+  What to build: Add a typed control-plane client, single-use connection command, runner health and recovery states, ProjectInstance registration guidance, and English/Chinese browser UI.
+  Acceptance: The web application loads in a normal browser, reflects waiting, connected, offline, expired, and revoked states, and contains no Tauri runtime dependency.
   Verify: Frontend unit tests, production build, and a browser smoke test.
 
 - [ ] **8. Deliver the remote scan and Default review slice**
@@ -195,7 +195,7 @@ must not expand this milestone.
 
 ## 9. First handoff
 
-Tickets 1–5 preserve the passing baseline, establish the workspace boundaries,
+Tickets 1–7 preserve the passing baseline, establish the workspace boundaries,
 share protocol fixtures between TypeScript and Rust, separate shared PostgreSQL
 state from runner-local SQLite state, and move scan, plan, apply, rollback,
 adapters, recovery primitives, and the `ahm` CLI into `ahm-runner`. The legacy
@@ -203,9 +203,11 @@ desktop now consumes runner-owned modules through thin path-resolution wrappers.
 Runner enrollment and outbound job transport now use protocol-v1 HTTPS polling.
 The runner stores its device credential, project paths, operation journal, and
 pending result outbox locally; PostgreSQL stores enrollment, capability, lease,
-cancellation, and portable result state. Remote execution is deliberately
+cancellation, and portable result state. The browser now provides typed runner
+enrollment, health, recovery, and ProjectInstance guidance. Remote execution is deliberately
 limited to `scanProject` until portable Setup snapshots and digest-bound apply
-are carried by the protocol. Ticket 7 adds the browser connection and scan UX.
+are carried by the protocol. Ticket 7 adds the browser connection/status UX;
+ticket 8 completes remote scan and Default review.
 
 ## 10. Runner transport operations
 

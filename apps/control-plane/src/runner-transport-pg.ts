@@ -1,3 +1,4 @@
+import { PROTOCOL_VERSION } from '@ahm/contracts'
 import type {
   JobEnvelope,
   LeasedRunnerJob,
@@ -6,6 +7,7 @@ import type {
   ResultEnvelope,
   RunnerCapabilityReport,
   RunnerJob,
+  RunnerStatusResponse,
 } from '@ahm/contracts'
 import type { Pool, PoolClient, QueryResultRow } from 'pg'
 
@@ -35,6 +37,24 @@ interface AuthenticationRow extends QueryResultRow {
   organization_id: string
   device_id: string
   status: RunnerAuthentication['status']
+}
+
+interface RunnerStatusRow extends QueryResultRow {
+  id: string
+  label: string
+  status: RunnerStatusResponse['status']
+  enrolled_at: Date
+  last_seen_at: Date | null
+  runner_version: string | null
+  supported_protocol_versions: ProtocolVersion[] | null
+  capabilities: RunnerCapabilityReport['capabilities'] | null
+}
+
+interface ProjectInstanceStatusRow extends QueryResultRow {
+  id: string
+  project_id: string
+  registered_at: Date
+  last_seen_at: Date | null
 }
 
 interface JobRow extends QueryResultRow {
@@ -208,6 +228,52 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
       [credentialHash],
     )
     return result.rows[0] ? authenticationFromRow(result.rows[0]) : null
+  }
+
+  async runnerStatus(
+    organizationId: string,
+    deviceId: string,
+  ): Promise<RunnerStatusResponse | null> {
+    const [deviceResult, projectInstancesResult] = await Promise.all([
+      this.pool.query<RunnerStatusRow>(
+        `SELECT id, label, status, enrolled_at, last_seen_at, runner_version,
+                supported_protocol_versions, capabilities
+         FROM runner_devices WHERE organization_id = $1 AND id = $2`,
+        [organizationId, deviceId],
+      ),
+      this.pool.query<ProjectInstanceStatusRow>(
+        `SELECT id, project_id, registered_at, last_seen_at
+         FROM project_instances
+         WHERE organization_id = $1 AND device_id = $2
+         ORDER BY registered_at, id`,
+        [organizationId, deviceId],
+      ),
+    ])
+    const device = deviceResult.rows[0]
+    if (!device) return null
+    const capabilities =
+      device.runner_version && device.supported_protocol_versions && device.capabilities
+        ? {
+            protocolVersion: PROTOCOL_VERSION,
+            supportedProtocolVersions: device.supported_protocol_versions,
+            runnerVersion: device.runner_version,
+            capabilities: device.capabilities,
+          }
+        : null
+    return {
+      deviceId: device.id,
+      label: device.label,
+      status: device.status,
+      enrolledAt: iso(device.enrolled_at),
+      lastSeenAt: device.last_seen_at ? iso(device.last_seen_at) : null,
+      capabilities,
+      projectInstances: projectInstancesResult.rows.map((instance) => ({
+        projectInstanceId: instance.id,
+        projectId: instance.project_id,
+        registeredAt: iso(instance.registered_at),
+        lastSeenAt: instance.last_seen_at ? iso(instance.last_seen_at) : null,
+      })),
+    }
   }
 
   async registerProjectInstance(

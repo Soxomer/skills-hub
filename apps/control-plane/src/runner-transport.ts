@@ -13,6 +13,7 @@ import {
   type RunnerCapabilityReport,
   type RunnerEnrollmentStatus,
   type RunnerResultAcknowledgement,
+  type RunnerStatusResponse,
   type SubmitRunnerResultRequest,
 } from '@ahm/contracts'
 
@@ -78,6 +79,7 @@ export interface RunnerTransportRepository {
     now: string,
   ): Promise<RunnerAuthentication | null>
   authenticateRunner(credentialHash: string): Promise<RunnerAuthentication | null>
+  runnerStatus(organizationId: string, deviceId: string): Promise<RunnerStatusResponse | null>
   registerProjectInstance(
     runner: RunnerAuthentication,
     request: RegisterProjectInstanceRequest,
@@ -242,6 +244,12 @@ export class RunnerTransportService {
     if (!runner || runner.status !== 'active') {
       throw new RunnerTransportError(401, 'runner credential is invalid or revoked')
     }
+    return runner
+  }
+
+  async runnerStatus(actor: RequestActor, deviceId: string): Promise<RunnerStatusResponse> {
+    const runner = await this.repository.runnerStatus(actor.organizationId, deviceId)
+    if (!runner) throw new RunnerTransportError(404, 'runner not found')
     return runner
   }
 
