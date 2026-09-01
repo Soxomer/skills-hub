@@ -6,6 +6,7 @@ import type {
   RegisterProjectInstanceRequest,
   ResultEnvelope,
   RunnerCapabilityReport,
+  RunnerJobStatusResponse,
   RunnerJob,
   RunnerStatusResponse,
 } from '@ahm/contracts'
@@ -17,7 +18,6 @@ import type {
   RunnerAuthentication,
   RunnerDeviceRegistration,
   RunnerEnrollmentRecord,
-  RunnerJobStatus,
   RunnerTransportRepository,
 } from './runner-transport.js'
 
@@ -71,7 +71,7 @@ interface JobRow extends QueryResultRow {
   lease_id: string | null
   lease_expires_at: Date | null
   cancel_requested_at: Date | null
-  state: RunnerJobStatus['state']
+  state: RunnerJobStatusResponse['state']
   result_json: ResultEnvelope | null
   result_digest: string | null
 }
@@ -445,7 +445,10 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
     })
   }
 
-  async jobStatus(organizationId: string, jobId: string): Promise<RunnerJobStatus | null> {
+  async jobStatus(
+    organizationId: string,
+    jobId: string,
+  ): Promise<RunnerJobStatusResponse | null> {
     const result = await this.pool.query<JobRow>(
       `SELECT * FROM runner_jobs WHERE organization_id = $1 AND id = $2`,
       [organizationId, jobId],

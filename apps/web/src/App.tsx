@@ -2,7 +2,6 @@ import { PROTOCOL_VERSION, type RunnerStatusResponse } from '@ahm/contracts'
 import {
   AlertTriangle,
   ArrowRight,
-  Check,
   Clock3,
   Languages,
   Laptop,
@@ -11,14 +10,15 @@ import {
   RotateCcw,
   ShieldCheck,
 } from 'lucide-react'
-import { memo, useMemo, useState } from 'react'
+import { memo, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { createBrowserClient } from './api'
 import './App.css'
 import { CommandBlock } from './components/CommandBlock'
 import { ConnectionBadge } from './components/ConnectionBadge'
-import { connectionDisplayState, workerHasReported } from './runner-status'
+import { ProjectScanWorkspace } from './components/ProjectScanWorkspace'
+import { connectionDisplayState } from './runner-status'
 import { useRunnerConnection } from './useRunnerConnection'
 
 function dateTime(value: string | null, language: string): string | null {
@@ -33,7 +33,6 @@ export const App = memo(function App() {
   const { t, i18n } = useTranslation()
   const client = useMemo(() => createBrowserClient(), [])
   const connection = useRunnerConnection(client)
-  const [projectId, setProjectId] = useState('')
   const effectiveStatus =
     connection.status ??
     (connection.enrollment
@@ -46,8 +45,6 @@ export const App = memo(function App() {
       : null)
   const displayState = connectionDisplayState(effectiveStatus, connection.runner)
   const language = i18n.resolvedLanguage ?? 'en'
-  const normalizedProjectId = projectId.trim()
-  const projectCommand = `ahm project connect ${normalizedProjectId || '<project-id>'}`
 
   const toggleLanguage = async () => {
     const nextLanguage = language.startsWith('zh') ? 'en' : 'zh'
@@ -215,76 +212,11 @@ export const App = memo(function App() {
               </div>
             )}
 
-            <section className="step-panel" aria-labelledby="project-title">
-              <div className="step-heading">
-                <span className="step-number">2</span>
-                <div>
-                  <p className="eyebrow">{t('project.step')}</p>
-                  <h2 id="project-title">{t('project.title')}</h2>
-                  <p>{t('project.description')}</p>
-                </div>
-              </div>
-              <label className="field">
-                <span>{t('project.inputLabel')}</span>
-                <input
-                  value={projectId}
-                  onChange={(event) => setProjectId(event.target.value)}
-                  placeholder={t('project.inputPlaceholder')}
-                  autoComplete="off"
-                  spellCheck="false"
-                />
-              </label>
-              <CommandBlock
-                command={projectCommand}
-                name={t('project.title')}
-                disabled={!normalizedProjectId}
-              />
-              <p className="field-help">{t('project.commandHelp')}</p>
-              <div className="project-list">
-                <h3>{t('project.connected')}</h3>
-                {connection.runner.projectInstances.length === 0 ? (
-                  <p className="empty-state">{t('project.none')}</p>
-                ) : (
-                  <ul>
-                    {connection.runner.projectInstances.map((instance) => (
-                      <li key={instance.projectInstanceId}>
-                        <Check aria-hidden="true" size={17} />
-                        <span>
-                          <strong>{instance.projectId}</strong>
-                          <small>{t('project.instance', { id: instance.projectInstanceId })}</small>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </section>
-
-            <section className="step-panel" aria-labelledby="worker-title">
-              <div className="step-heading">
-                <span className="step-number">3</span>
-                <div>
-                  <p className="eyebrow">{t('worker.step')}</p>
-                  <h2 id="worker-title">{t('worker.title')}</h2>
-                  <p>{t('worker.description')}</p>
-                </div>
-              </div>
-              <CommandBlock command="ahm worker" name={t('worker.title')} />
-              <p
-                className={`worker-state ${
-                  displayState === 'connected' && workerHasReported(connection.runner)
-                    ? 'is-online'
-                    : ''
-                }`}
-              >
-                <span aria-hidden="true" />
-                {displayState === 'offline'
-                  ? t('worker.offline')
-                  : workerHasReported(connection.runner)
-                    ? t('worker.online')
-                    : t('worker.awaiting')}
-              </p>
-            </section>
+            <ProjectScanWorkspace
+              client={client}
+              runner={connection.runner}
+              runnerOnline={displayState === 'connected'}
+            />
           </div>
         )}
       </main>

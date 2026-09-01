@@ -1,6 +1,12 @@
 import type {
+  CaptureDefaultRevisionRequest,
+  CaptureDefaultRevisionResponse,
+  CreateProjectRequest,
   CreateRunnerEnrollmentResponse,
+  ProjectListResponse,
+  ProjectSummary,
   RunnerEnrollmentStatus,
+  RunnerJobStatusResponse,
   RunnerStatusResponse,
 } from '@ahm/contracts'
 
@@ -17,11 +23,13 @@ export interface ControlPlaneClientOptions {
 
 export class ControlPlaneApiError extends Error {
   readonly status: number
+  readonly code: string | null
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code: string | null = null) {
     super(message)
     this.name = 'ControlPlaneApiError'
     this.status = status
+    this.code = code
   }
 }
 
@@ -48,6 +56,43 @@ export class ControlPlaneClient {
     return this.send(`/api/v1/runners/${encodeURIComponent(deviceId)}`)
   }
 
+  projects(): Promise<ProjectListResponse> {
+    return this.send('/api/v1/projects')
+  }
+
+  createProject(request: CreateProjectRequest): Promise<ProjectSummary> {
+    return this.send('/api/v1/projects', this.jsonRequest('POST', request))
+  }
+
+  scanProject(projectInstanceId: string): Promise<{ jobId: string }> {
+    return this.send(
+      `/api/v1/project-instances/${encodeURIComponent(projectInstanceId)}/scan`,
+      this.jsonRequest('POST', { includeUnmanaged: true }),
+    )
+  }
+
+  job(jobId: string): Promise<RunnerJobStatusResponse> {
+    return this.send(`/api/v1/jobs/${encodeURIComponent(jobId)}`)
+  }
+
+  captureDefault(
+    projectId: string,
+    request: CaptureDefaultRevisionRequest,
+  ): Promise<CaptureDefaultRevisionResponse> {
+    return this.send(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/default-revisions`,
+      this.jsonRequest('POST', request),
+    )
+  }
+
+  private jsonRequest(method: string, body: unknown): RequestInit {
+    return {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }
+  }
+
   private async send<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await this.request(`${this.baseUrl}${path}`, {
       ...init,
@@ -60,9 +105,16 @@ export class ControlPlaneClient {
     })
     if (!response.ok) {
       let message = `Control-plane request failed (${response.status})`
-      const body = (await response.json().catch(() => null)) as { error?: unknown } | null
+      const body = (await response.json().catch(() => null)) as {
+        code?: unknown
+        error?: unknown
+      } | null
       if (typeof body?.error === 'string' && body.error.trim()) message = body.error
-      throw new ControlPlaneApiError(response.status, message)
+      throw new ControlPlaneApiError(
+        response.status,
+        message,
+        typeof body?.code === 'string' ? body.code : null,
+      )
     }
     return (await response.json()) as T
   }

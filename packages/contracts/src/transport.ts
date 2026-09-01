@@ -8,6 +8,13 @@ import type {
   RunnerCapabilities,
 } from './protocol.js'
 
+export interface RunnerJobStatusResponse {
+  jobId: string
+  state: 'pending' | 'leased' | 'succeeded' | 'failed' | 'expired' | 'cancelled'
+  result: ResultEnvelope | null
+  cancelRequested: boolean
+}
+
 export interface RunnerCapabilityReport {
   protocolVersion: ProtocolVersion
   supportedProtocolVersions: ProtocolVersion[]

@@ -44,21 +44,53 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
 button,
 a,
-input {
+input,
+select {
   -webkit-tap-highlight-color: transparent;
 }
 
 button:focus-visible,
 a:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--surface);
+}
+
+* {
+  scrollbar-color: var(--border-strong) var(--surface-subtle);
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--surface-subtle);
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid var(--surface-subtle);
+  border-radius: 999px;
+  background: var(--border-strong);
 }
 
 @media (prefers-color-scheme: dark) {

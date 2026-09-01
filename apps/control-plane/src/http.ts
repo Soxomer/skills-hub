@@ -1,5 +1,9 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
 
+import type { CaptureDefaultRevisionRequest, CreateProjectRequest } from '@ahm/contracts'
+
+import { ProjectServiceError, type ProjectService } from './projects.js'
+
 import {
   RunnerTransportError,
   type RequestActor,
@@ -29,12 +33,19 @@ function runnerCredential(request: FastifyRequest): string {
   return authorization.slice(7)
 }
 
-export function createControlPlaneApp(service: RunnerTransportService): FastifyInstance {
+export function createControlPlaneApp(
+  transport: RunnerTransportService,
+  projects: ProjectService,
+): FastifyInstance {
   const app = Fastify({ logger: false })
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof RunnerTransportError) {
       void reply.code(error.statusCode).send({ error: error.message })
+      return
+    }
+    if (error instanceof ProjectServiceError) {
+      void reply.code(error.statusCode).send({ code: error.code, error: error.message })
       return
     }
     if (error instanceof Error && 'validation' in error && error.validation) {
@@ -46,24 +57,43 @@ export function createControlPlaneApp(service: RunnerTransportService): FastifyI
 
   app.get('/health', async () => ({ status: 'ok' }))
 
+  app.get('/api/v1/projects', async (request) => projects.listProjects(actor(request)))
+
+  app.post<{ Body: CreateProjectRequest }>('/api/v1/projects', async (request, reply) => {
+    const project = await projects.createProject(actor(request), request.body)
+    return reply.code(201).send(project)
+  })
+
+  app.post<{
+    Params: { projectId: string }
+    Body: CaptureDefaultRevisionRequest
+  }>('/api/v1/projects/:projectId/default-revisions', async (request, reply) => {
+    const result = await projects.captureDefault(
+      actor(request),
+      request.params.projectId,
+      request.body,
+    )
+    return reply.code(result.created ? 201 : 200).send(result)
+  })
+
   app.post('/api/v1/runner-enrollments', async (request) =>
-    service.createEnrollment(actor(request)),
+    transport.createEnrollment(actor(request)),
   )
 
   app.get<{ Params: { enrollmentId: string } }>(
     '/api/v1/runner-enrollments/:enrollmentId',
-    async (request) => service.enrollmentStatus(actor(request), request.params.enrollmentId),
+    async (request) => transport.enrollmentStatus(actor(request), request.params.enrollmentId),
   )
 
   app.get<{ Params: { deviceId: string } }>('/api/v1/runners/:deviceId', async (request) =>
-    service.runnerStatus(actor(request), request.params.deviceId),
+    transport.runnerStatus(actor(request), request.params.deviceId),
   )
 
   app.post<{
     Params: { projectInstanceId: string }
     Body: { includeUnmanaged?: boolean }
   }>('/api/v1/project-instances/:projectInstanceId/scan', async (request) =>
-    service.enqueueScan(
+    transport.enqueueScan(
       actor(request),
       request.params.projectInstanceId,
       request.body?.includeUnmanaged ?? true,
@@ -71,32 +101,32 @@ export function createControlPlaneApp(service: RunnerTransportService): FastifyI
   )
 
   app.get<{ Params: { jobId: string } }>('/api/v1/jobs/:jobId', async (request) =>
-    service.jobStatus(actor(request), request.params.jobId),
+    transport.jobStatus(actor(request), request.params.jobId),
   )
 
   app.post<{ Params: { jobId: string } }>('/api/v1/jobs/:jobId/cancel', async (request, reply) => {
-    await service.cancelJob(actor(request), request.params.jobId)
+    await transport.cancelJob(actor(request), request.params.jobId)
     return reply.code(204).send()
   })
 
   app.post<{ Params: { deviceId: string } }>(
     '/api/v1/runners/:deviceId/revoke',
     async (request, reply) => {
-      await service.revokeRunner(actor(request), request.params.deviceId)
+      await transport.revokeRunner(actor(request), request.params.deviceId)
       return reply.code(204).send()
     },
   )
 
   app.post<{ Body: Parameters<RunnerTransportService['enroll']>[0] }>(
     '/runner/v1/enroll',
-    async (request) => service.enroll(request.body),
+    async (request) => transport.enroll(request.body),
   )
 
   app.put<{
     Params: { projectInstanceId: string }
     Body: Omit<Parameters<RunnerTransportService['registerProjectInstance']>[1], 'projectInstanceId'>
   }>('/runner/v1/project-instances/:projectInstanceId', async (request, reply) => {
-    await service.registerProjectInstance(runnerCredential(request), {
+    await transport.registerProjectInstance(runnerCredential(request), {
       ...request.body,
       projectInstanceId: request.params.projectInstanceId,
     })
@@ -106,7 +136,7 @@ export function createControlPlaneApp(service: RunnerTransportService): FastifyI
   app.post<{ Body: Parameters<RunnerTransportService['claimJob']>[1] }>(
     '/runner/v1/jobs/claim',
     async (request, reply) => {
-      const job = await service.claimJob(runnerCredential(request), request.body)
+      const job = await transport.claimJob(runnerCredential(request), request.body)
       if (!job) return reply.header('retry-after', '2').code(204).send()
       return job
     },
@@ -116,7 +146,7 @@ export function createControlPlaneApp(service: RunnerTransportService): FastifyI
     Params: { jobId: string }
     Body: Parameters<RunnerTransportService['submitResult']>[2]
   }>('/runner/v1/jobs/:jobId/result', async (request) =>
-    service.submitResult(runnerCredential(request), request.params.jobId, request.body),
+    transport.submitResult(runnerCredential(request), request.params.jobId, request.body),
   )
 
   return app

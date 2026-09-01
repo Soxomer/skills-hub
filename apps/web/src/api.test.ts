@@ -60,4 +60,80 @@ describe('ControlPlaneClient', () => {
       expect.any(Object),
     )
   })
+
+  it('sends project scan and Default capture payloads as JSON', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ jobId: 'scan_01' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            projectId: 'project_01',
+            created: true,
+            defaultRevision: {
+              setupId: 'setup_01',
+              setupRevisionId: 'revision_01',
+              revisionNumber: 1,
+              sourceScanJobId: 'scan_01',
+              itemCount: 1,
+              createdAt: '2026-09-01T10:00:00.000Z',
+            },
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+
+    await client(request).scanProject('instance with spaces')
+    await client(request).captureDefault('project_01', {
+      scanJobId: 'scan_01',
+      includedDiscoveryIds: ['discovery_01'],
+    })
+
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      'https://hub.example.test/api/v1/project-instances/instance%20with%20spaces/scan',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ includeUnmanaged: true }),
+        headers: expect.objectContaining({ 'content-type': 'application/json' }),
+      }),
+    )
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      'https://hub.example.test/api/v1/projects/project_01/default-revisions',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          scanJobId: 'scan_01',
+          includedDiscoveryIds: ['discovery_01'],
+        }),
+      }),
+    )
+  })
+
+  it('preserves structured control-plane error codes', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 'defaultAlreadyCaptured', error: 'already captured' }),
+        { status: 409 },
+      ),
+    )
+
+    await expect(
+      client(request).captureDefault('project_01', {
+        scanJobId: 'scan_02',
+        includedDiscoveryIds: [],
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<ControlPlaneApiError>>({
+        status: 409,
+        code: 'defaultAlreadyCaptured',
+      }),
+    )
+  })
 })

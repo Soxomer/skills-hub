@@ -10,7 +10,10 @@ const firstMigrationPath = fileURLToPath(
 const secondMigrationPath = fileURLToPath(
   new URL('../migrations/0002_runner_transport.sql', import.meta.url),
 )
-const migrations = [firstMigrationPath, secondMigrationPath].map((path) =>
+const thirdMigrationPath = fileURLToPath(
+  new URL('../migrations/0003_default_capture.sql', import.meta.url),
+)
+const migrations = [firstMigrationPath, secondMigrationPath, thirdMigrationPath].map((path) =>
   readFileSync(path, 'utf8'),
 )
 
@@ -64,7 +67,7 @@ describe('control-plane migration', () => {
         database.public.one<{ version: number }>(
           'SELECT MAX(version) AS version FROM control_plane_schema_migrations',
         ).version,
-      ).toBe(2)
+      ).toBe(3)
     }
   })
 

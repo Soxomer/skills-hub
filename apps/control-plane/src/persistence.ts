@@ -35,6 +35,7 @@ export interface SetupRevisionRecord {
   organizationId: OrganizationId
   setupId: string
   revisionNumber: number
+  sourceScanJobId: JobId | null
   items: readonly PortableSetupRevisionItem[]
   createdBy: UserId
   createdAt: string

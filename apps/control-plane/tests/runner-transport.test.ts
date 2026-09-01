@@ -2,6 +2,8 @@ import type { RunnerCapabilityReport } from '@ahm/contracts'
 import { describe, expect, it } from 'vitest'
 
 import { createControlPlaneApp } from '../src/http.js'
+import { InMemoryProjectRepository } from '../src/projects-memory.js'
+import { ProjectService } from '../src/projects.js'
 import { InMemoryRunnerTransportRepository } from '../src/runner-transport-memory.js'
 import { RunnerTransportService } from '../src/runner-transport.js'
 
@@ -35,7 +37,7 @@ function harness() {
     randomSecret: (bytes) => `secret_${bytes}_${++sequence}`,
     leaseTtlMs: 1_000,
   })
-  const app = createControlPlaneApp(service)
+  const app = createControlPlaneApp(service, new ProjectService(new InMemoryProjectRepository()))
   return {
     app,
     advance(milliseconds: number) {

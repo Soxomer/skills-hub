@@ -4,6 +4,7 @@ import type {
   RegisterProjectInstanceRequest,
   ResultEnvelope,
   RunnerCapabilityReport,
+  RunnerJobStatusResponse,
   RunnerStatusResponse,
 } from '@ahm/contracts'
 
@@ -13,7 +14,6 @@ import type {
   RunnerAuthentication,
   RunnerDeviceRegistration,
   RunnerEnrollmentRecord,
-  RunnerJobStatus,
   RunnerTransportRepository,
 } from './runner-transport.js'
 
@@ -27,7 +27,7 @@ interface MemoryDevice extends RunnerAuthentication {
 
 interface MemoryJob {
   envelope: JobEnvelope
-  state: RunnerJobStatus['state']
+  state: RunnerJobStatusResponse['state']
   leaseId: string | null
   leaseExpiresAt: string | null
   attemptCount: number
@@ -275,7 +275,10 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
     return { outcome: 'accepted' }
   }
 
-  async jobStatus(organizationId: string, jobId: string): Promise<RunnerJobStatus | null> {
+  async jobStatus(
+    organizationId: string,
+    jobId: string,
+  ): Promise<RunnerJobStatusResponse | null> {
     const job = this.jobs.get(jobId)
     if (!job || job.envelope.organizationId !== organizationId) return null
     return {

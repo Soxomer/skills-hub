@@ -13,6 +13,7 @@ import {
   type RunnerCapabilityReport,
   type RunnerEnrollmentStatus,
   type RunnerResultAcknowledgement,
+  type RunnerJobStatusResponse,
   type RunnerStatusResponse,
   type SubmitRunnerResultRequest,
 } from '@ahm/contracts'
@@ -53,13 +54,6 @@ export interface ProjectInstanceRoute {
   projectInstanceId: string
   projectId: string
   deviceId: string
-}
-
-export interface RunnerJobStatus {
-  jobId: string
-  state: 'pending' | 'leased' | 'succeeded' | 'failed' | 'expired' | 'cancelled'
-  result: ResultEnvelope | null
-  cancelRequested: boolean
 }
 
 export interface JobCompletion {
@@ -106,7 +100,7 @@ export interface RunnerTransportRepository {
     resultDigest: string,
     now: string,
   ): Promise<JobCompletion>
-  jobStatus(organizationId: string, jobId: string): Promise<RunnerJobStatus | null>
+  jobStatus(organizationId: string, jobId: string): Promise<RunnerJobStatusResponse | null>
   requestCancellation(organizationId: string, jobId: string, now: string): Promise<boolean>
   revokeRunner(organizationId: string, deviceId: string): Promise<boolean>
 }
@@ -340,7 +334,7 @@ export class RunnerTransportService {
     return { accepted: true, duplicate: completion.outcome === 'duplicate' }
   }
 
-  async jobStatus(actor: RequestActor, jobId: string): Promise<RunnerJobStatus> {
+  async jobStatus(actor: RequestActor, jobId: string): Promise<RunnerJobStatusResponse> {
     const status = await this.repository.jobStatus(actor.organizationId, jobId)
     if (!status) throw new RunnerTransportError(404, 'runner job not found')
     return status
