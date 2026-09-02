@@ -1,15 +1,19 @@
 use std::path::PathBuf;
 
 use ahm_domain::{
-    Digest, DiscoveryKind, DiscoveryState, ErrorResult, Identifier, IsoTimestamp, JobEnvelope,
-    LeasedRunnerJob, ProjectId, ProtocolErrorCode, Recoverability, ResultEnvelope,
-    RunnerCapabilities, RunnerJob, RunnerResult, ScanDiscovery, ScanResult, PROTOCOL_VERSION,
+    ApplyReceipt, ArtifactBundle, CanonicalPlan, Digest, DiscoveryKind, DiscoveryState,
+    ErrorResult, Identifier, IsoTimestamp, JobEnvelope, LeasedRunnerJob, OperationOutcome,
+    PlanAction, PlanActionKind, PlanDestination, PlanResult, ProjectId, ProjectRelativePath,
+    ProtocolErrorCode, Recoverability, ResultEnvelope, RollbackReceipt, RunnerCapabilities,
+    RunnerJob, RunnerResult, ScanDiscovery, ScanResult, SetupRevisionId, PROTOCOL_VERSION,
 };
+use anyhow::Context;
 use sha2::{Digest as ShaDigest, Sha256};
 
 use crate::{
+    artifact_cache::ArtifactCache,
     execution::RunnerExecutionService,
-    setup_service::{DefaultSetupCandidate, DefaultSetupCandidateKind},
+    setup_service::{ApplyActionKind, ApplyPlan, DefaultSetupCandidate, DefaultSetupCandidateKind},
     state::{ProjectInstanceRecord, RunnerIdentityRecord},
     tool_adapters::default_tool_adapters,
 };
@@ -23,16 +27,31 @@ pub trait JobExecutor {
         lease: &LeasedRunnerJob,
         now: &IsoTimestamp,
     ) -> ResultEnvelope;
+    fn has_artifact(&self, _digest: &Digest) -> anyhow::Result<bool> {
+        Ok(false)
+    }
+    fn store_artifact(&self, _bundle: &ArtifactBundle) -> anyhow::Result<()> {
+        anyhow::bail!("artifact storage is unavailable")
+    }
+    fn artifact_bundle(&self, _digest: &Digest) -> anyhow::Result<Option<ArtifactBundle>> {
+        Ok(None)
+    }
 }
 
 pub struct LocalJobExecutor {
     runner: RunnerExecutionService,
     home: PathBuf,
+    artifact_cache: ArtifactCache,
 }
 
 impl LocalJobExecutor {
     pub fn new(runner: RunnerExecutionService, home: PathBuf) -> Self {
-        Self { runner, home }
+        let artifact_cache = ArtifactCache::for_home(&home);
+        Self {
+            runner,
+            home,
+            artifact_cache,
+        }
     }
 
     fn execute_scan(
@@ -51,7 +70,22 @@ impl LocalJobExecutor {
                         include_unmanaged
                             || candidate.classification == DefaultSetupCandidateKind::KnownSkill
                     })
-                    .filter_map(candidate_to_discovery)
+                    .filter_map(|candidate| {
+                        let mut discovery = candidate_to_discovery(candidate)?;
+                        if discovery.state == DiscoveryState::Available {
+                            if let Err(error) = self.artifact_cache.snapshot(
+                                std::path::Path::new(&candidate.source_path),
+                                &discovery.content_digest,
+                            ) {
+                                log::warn!(
+                                    "cache scanned artifact {} failed: {error:#}",
+                                    candidate.source_path
+                                );
+                                discovery.state = DiscoveryState::Unsupported;
+                            }
+                        }
+                        Some(discovery)
+                    })
                     .collect();
                 RunnerResult::ScanResult(ScanResult {
                     project_id: project_id.clone(),
@@ -68,11 +102,24 @@ impl LocalJobExecutor {
             }
         }
     }
+
+    fn stage_and_plan(
+        &self,
+        project: &ProjectInstanceRecord,
+        revision: &ahm_domain::PortableSetupRevision,
+    ) -> anyhow::Result<CanonicalPlan> {
+        let selector = self
+            .runner
+            .local_admin()
+            .stage_portable_revision(revision, self.artifact_cache.root())?;
+        let plan = self.runner.plan(&project.local_path, Some(&selector))?;
+        canonical_plan(&plan, revision, self.artifact_cache.root())
+    }
 }
 
 impl JobExecutor for LocalJobExecutor {
     fn capabilities(&self) -> RunnerCapabilities {
-        scan_capabilities()
+        runner_capabilities()
     }
 
     fn execute(
@@ -116,11 +163,138 @@ impl JobExecutor for LocalJobExecutor {
                         "job project does not match its registered instance",
                         false,
                     ),
+                    RunnerJob::PlanSetup(plan) if plan.project_id == project.project_id => {
+                        match self.stage_and_plan(project, &plan.revision) {
+                            Ok(plan) => RunnerResult::PlanResult(PlanResult {
+                                project_id: project.project_id.clone(),
+                                plan,
+                            }),
+                            Err(error) => {
+                                log::error!(
+                                    "remote plan {} failed: {error:#}",
+                                    job.job_id.as_str()
+                                );
+                                protocol_error(
+                                    ProtocolErrorCode::Conflict,
+                                    format!("could not prepare Setup plan: {error:#}"),
+                                    false,
+                                )
+                            }
+                        }
+                    }
+                    RunnerJob::ApplyPlan(apply) if apply.project_id == project.project_id => {
+                        match self.stage_and_plan(project, &apply.revision) {
+                            Ok(plan) => {
+                                let approval = &apply.approval;
+                                if approval.organization_id != job.organization_id
+                                    || approval.project_instance_id != job.project_instance_id
+                                    || approval.setup_revision_id
+                                        != apply.revision.setup_revision_id
+                                    || approval.plan_digest != plan.plan_digest
+                                {
+                                    protocol_error(
+                                        ProtocolErrorCode::PlanDigestMismatch,
+                                        "approved plan no longer matches the local filesystem",
+                                        false,
+                                    )
+                                } else if is_expired(&approval.expires_at, now) {
+                                    protocol_error(
+                                        ProtocolErrorCode::ApprovalExpired,
+                                        "plan approval expired with its apply job",
+                                        false,
+                                    )
+                                } else if !plan.conflicts.is_empty() {
+                                    protocol_error(
+                                        ProtocolErrorCode::Conflict,
+                                        "approved plan contains conflicts",
+                                        false,
+                                    )
+                                } else {
+                                    let selector =
+                                        format!("remote:{}", apply.revision.setup_id.as_str());
+                                    match self.runner.apply(&project.local_path, Some(&selector)) {
+                                        Ok(applied) => {
+                                            let actions_applied = plan.actions.len() as u64;
+                                            RunnerResult::ApplyReceipt(ApplyReceipt {
+                                                project_id: project.project_id.clone(),
+                                                operation_id: Identifier::new(applied.operation_id)
+                                                    .expect("UUID operation identifier is valid"),
+                                                setup_revision_id: apply
+                                                    .revision
+                                                    .setup_revision_id
+                                                    .clone(),
+                                                plan_digest: plan.plan_digest,
+                                                outcome: if actions_applied == 0 {
+                                                    OperationOutcome::NoChange
+                                                } else {
+                                                    OperationOutcome::Applied
+                                                },
+                                                recoverability: if actions_applied == 0 {
+                                                    Recoverability::NotNeeded
+                                                } else {
+                                                    Recoverability::RollbackAvailable
+                                                },
+                                                actions_applied,
+                                                completed_at: now.clone(),
+                                            })
+                                        }
+                                        Err(error) => {
+                                            log::error!(
+                                                "remote apply {} failed: {error:#}",
+                                                job.job_id.as_str()
+                                            );
+                                            operation_error(
+                                                "apply failed; local recovery may be required",
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            Err(error) => protocol_error(
+                                ProtocolErrorCode::OperationFailed,
+                                format!("could not prepare approved Setup: {error:#}"),
+                                false,
+                            ),
+                        }
+                    }
+                    RunnerJob::RollbackOperation(rollback)
+                        if rollback.project_id == project.project_id =>
+                    {
+                        match self
+                            .runner
+                            .local_admin()
+                            .rollback_operation(&project.local_path, rollback.operation_id.as_str())
+                        {
+                            Ok(rolled_back) => {
+                                let restored_setup_revision_id = rolled_back
+                                    .plan
+                                    .setup
+                                    .as_ref()
+                                    .and_then(|setup| setup.revision_id.strip_prefix("remote:"))
+                                    .and_then(|id| SetupRevisionId::new(id).ok());
+                                RunnerResult::RollbackReceipt(RollbackReceipt {
+                                    project_id: project.project_id.clone(),
+                                    operation_id: rollback.operation_id.clone(),
+                                    restored_setup_revision_id,
+                                    outcome: OperationOutcome::RolledBack,
+                                    recoverability: Recoverability::NotNeeded,
+                                    completed_at: now.clone(),
+                                })
+                            }
+                            Err(error) => {
+                                log::error!(
+                                    "remote rollback {} failed: {error:#}",
+                                    job.job_id.as_str()
+                                );
+                                operation_error("rollback failed; local recovery is required")
+                            }
+                        }
+                    }
                     RunnerJob::PlanSetup(_)
                     | RunnerJob::ApplyPlan(_)
                     | RunnerJob::RollbackOperation(_) => protocol_error(
-                        ProtocolErrorCode::CapabilityUnavailable,
-                        "remote mutation is not available in this runner version",
+                        ProtocolErrorCode::UnknownProjectInstance,
+                        "job project does not match its registered instance",
                         false,
                     ),
                 }
@@ -142,6 +316,18 @@ impl JobExecutor for LocalJobExecutor {
             result,
         }
     }
+
+    fn has_artifact(&self, digest: &Digest) -> anyhow::Result<bool> {
+        self.artifact_cache.contains(digest)
+    }
+
+    fn store_artifact(&self, bundle: &ArtifactBundle) -> anyhow::Result<()> {
+        self.artifact_cache.store(bundle).map(|_| ())
+    }
+
+    fn artifact_bundle(&self, digest: &Digest) -> anyhow::Result<Option<ArtifactBundle>> {
+        self.artifact_cache.bundle(digest)
+    }
 }
 
 fn is_expired(expires_at: &IsoTimestamp, now: &IsoTimestamp) -> bool {
@@ -150,17 +336,136 @@ fn is_expired(expires_at: &IsoTimestamp, now: &IsoTimestamp) -> bool {
     matches!((expires_at, now), (Ok(expires_at), Ok(now)) if expires_at <= now)
 }
 
-pub fn scan_capabilities() -> RunnerCapabilities {
+pub fn runner_capabilities() -> RunnerCapabilities {
     RunnerCapabilities {
         scan_project: true,
-        plan_setup: false,
-        apply_plan: false,
-        rollback_operation: false,
+        plan_setup: true,
+        apply_plan: true,
+        rollback_operation: true,
         supported_tools: default_tool_adapters()
             .into_iter()
             .filter_map(|adapter| Identifier::new(adapter.id.as_key()).ok())
             .collect(),
     }
+}
+
+fn canonical_plan(
+    local: &ApplyPlan,
+    revision: &ahm_domain::PortableSetupRevision,
+    artifact_cache_root: &std::path::Path,
+) -> anyhow::Result<CanonicalPlan> {
+    let project_root = std::path::Path::new(&local.project.path);
+    let artifact_by_skill = revision
+        .items
+        .iter()
+        .map(|item| {
+            (
+                format!(
+                    "remote-artifact-{}",
+                    item.content_digest
+                        .as_str()
+                        .strip_prefix("sha256:")
+                        .unwrap_or_default()
+                ),
+                item.artifact_id.clone(),
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut actions = Vec::new();
+    for action in &local.actions {
+        if action.kind == ApplyActionKind::Keep {
+            continue;
+        }
+        let relative = std::path::Path::new(&action.target_path)
+            .strip_prefix(project_root)
+            .with_context(|| "plan destination is outside its registered project")?;
+        let project_relative_path = relative
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        let kind = if action.kind == ApplyActionKind::Remove {
+            PlanActionKind::RemoveManaged
+        } else if action.tools.iter().any(|tool| tool == "cursor") {
+            PlanActionKind::Copy
+        } else {
+            PlanActionKind::Link
+        };
+        let artifact_id = artifact_by_skill
+            .get(&action.skill_id)
+            .cloned()
+            .unwrap_or_else(|| {
+                Identifier::new(action.skill_id.clone())
+                    .expect("local skill identifiers are valid protocol identifiers")
+            });
+        let tool_id = Identifier::new(
+            action
+                .tools
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "managed".to_owned()),
+        )?;
+        let action_key = format!(
+            "{:?}:{}:{}",
+            kind,
+            artifact_id.as_str(),
+            project_relative_path
+        );
+        actions.push(PlanAction {
+            action_id: Identifier::new(format!("action_{}", &sha256_hex(&action_key)[..24]))?,
+            kind,
+            artifact_id,
+            destination: PlanDestination {
+                tool_id,
+                project_relative_path: ProjectRelativePath::new(project_relative_path)?,
+            },
+        });
+    }
+    actions.sort_by(|left, right| {
+        left.destination
+            .project_relative_path
+            .as_str()
+            .cmp(right.destination.project_relative_path.as_str())
+            .then_with(|| left.action_id.as_str().cmp(right.action_id.as_str()))
+    });
+    let project_path = project_root.to_string_lossy();
+    let cache_path = artifact_cache_root.to_string_lossy();
+    let conflicts = local
+        .conflicts
+        .iter()
+        .map(|conflict| {
+            if conflict.contains("tracked target source is missing") {
+                return "a previously managed artifact is missing from the local cache".to_owned();
+            }
+            conflict
+                .replace(project_path.as_ref(), ".")
+                .replace(cache_path.as_ref(), "[local cache]")
+        })
+        .collect::<Vec<_>>();
+    let digest_input = serde_json::json!({
+        "setupRevisionId": revision.setup_revision_id,
+        "actions": actions,
+        "conflicts": conflicts,
+    });
+    let plan_digest = Digest::new(format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(serde_json::to_vec(&digest_input)?))
+    ))?;
+    Ok(CanonicalPlan {
+        setup_revision_id: revision.setup_revision_id.clone(),
+        plan_digest,
+        actions,
+        conflicts,
+    })
+}
+
+fn operation_error(message: &str) -> RunnerResult {
+    RunnerResult::Error(ErrorResult {
+        code: ProtocolErrorCode::OperationFailed,
+        message: message.to_owned(),
+        retryable: false,
+        recoverability: Recoverability::ManualIntervention,
+    })
 }
 
 fn candidate_to_discovery(candidate: &DefaultSetupCandidate) -> Option<ScanDiscovery> {
@@ -237,7 +542,9 @@ pub fn protocol_error(
 #[cfg(test)]
 mod tests {
     use ahm_domain::{
-        Identifier, JobEnvelope, LeasedRunnerJob, RunnerJob, RunnerResult, ScanProjectJob,
+        ApplyPlanJob, ArtifactId, Identifier, JobEnvelope, LeasedRunnerJob, PlanApproval,
+        PlanSetupJob, PortableSetupRevision, PortableSetupRevisionItem, RollbackOperationJob,
+        RunnerJob, RunnerResult, ScanProjectJob,
     };
     use tempfile::tempdir;
 
@@ -308,5 +615,141 @@ mod tests {
         assert_eq!(scan.discoveries[0].tool_id.as_str(), "codex");
         let json = serde_json::to_string(&scan).unwrap();
         assert!(!json.contains(home.to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn remote_plan_apply_and_rollback_use_the_approved_digest() {
+        let root = tempdir().unwrap();
+        let home = root.path().join("home");
+        let project_path = root.path().join("project");
+        let source = root.path().join("source");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&project_path).unwrap();
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("SKILL.md"), "# Remote").unwrap();
+        let content_digest = Digest::new(format!(
+            "sha256:{}",
+            crate::content_hash::hash_dir(&source).unwrap()
+        ))
+        .unwrap();
+        ArtifactCache::for_home(&home)
+            .snapshot(&source, &content_digest)
+            .unwrap();
+        let runner = RunnerExecutionService::open(root.path().join("local-admin.db")).unwrap();
+        runner.local_admin().add_project(&project_path).unwrap();
+        let executor = LocalJobExecutor::new(runner, home);
+        let identity = RunnerIdentityRecord {
+            server_url: "https://hub.example.test".to_owned(),
+            organization_id: identifier("org_01"),
+            device_id: identifier("device_01"),
+            credential_secret: "secret".to_owned(),
+            enrolled_at: IsoTimestamp::new("2026-09-02T10:00:00Z").unwrap(),
+        };
+        let project = ProjectInstanceRecord {
+            id: identifier("instance_01"),
+            organization_id: identifier("org_01"),
+            project_id: identifier("project_01"),
+            local_path: project_path.clone(),
+            registered_at: IsoTimestamp::new("2026-09-02T10:00:00Z").unwrap(),
+        };
+        let revision = PortableSetupRevision {
+            setup_id: identifier("setup_01"),
+            setup_revision_id: identifier("revision_01"),
+            revision_number: 1,
+            items: vec![PortableSetupRevisionItem {
+                artifact_id: ArtifactId::new("artifact_01").unwrap(),
+                artifact_kind: DiscoveryKind::Skill,
+                portable_source: None,
+                content_digest,
+                tool_id: identifier("codex"),
+                target_name: identifier("remote-skill"),
+            }],
+        };
+        let envelope = |job_id: &str, runner_job: RunnerJob| LeasedRunnerJob {
+            lease_id: format!("lease_{job_id}"),
+            lease_expires_at: IsoTimestamp::new("2026-09-02T10:02:00Z").unwrap(),
+            cancel_requested: false,
+            job: JobEnvelope {
+                protocol_version: PROTOCOL_VERSION,
+                job_id: identifier(job_id),
+                idempotency_key: Identifier::new(format!("idem_{job_id}")).unwrap(),
+                organization_id: identifier("org_01"),
+                device_id: identifier("device_01"),
+                project_instance_id: identifier("instance_01"),
+                issued_at: IsoTimestamp::new("2026-09-02T10:00:00Z").unwrap(),
+                expires_at: IsoTimestamp::new("2026-09-02T10:05:00Z").unwrap(),
+                job: runner_job,
+            },
+        };
+        let now = IsoTimestamp::new("2026-09-02T10:01:00Z").unwrap();
+        let plan_result = executor.execute(
+            &identity,
+            Some(&project),
+            &envelope(
+                "job_plan",
+                RunnerJob::PlanSetup(PlanSetupJob {
+                    project_id: identifier("project_01"),
+                    revision: revision.clone(),
+                }),
+            ),
+            &now,
+        );
+        let RunnerResult::PlanResult(plan_result) = plan_result.result else {
+            panic!("expected plan result")
+        };
+        assert_eq!(plan_result.plan.actions.len(), 1);
+        let plan_digest = plan_result.plan.plan_digest;
+        let apply_result = executor.execute(
+            &identity,
+            Some(&project),
+            &envelope(
+                "job_apply",
+                RunnerJob::ApplyPlan(ApplyPlanJob {
+                    project_id: identifier("project_01"),
+                    revision: revision.clone(),
+                    approval: PlanApproval {
+                        approval_id: identifier("approval_01"),
+                        organization_id: identifier("org_01"),
+                        project_instance_id: identifier("instance_01"),
+                        setup_revision_id: identifier("revision_01"),
+                        plan_digest: plan_digest.clone(),
+                        approved_by: identifier("user_01"),
+                        approved_at: IsoTimestamp::new("2026-09-02T10:00:30Z").unwrap(),
+                        expires_at: IsoTimestamp::new("2026-09-02T10:05:00Z").unwrap(),
+                    },
+                }),
+            ),
+            &now,
+        );
+        let RunnerResult::ApplyReceipt(receipt) = apply_result.result else {
+            panic!("expected apply receipt")
+        };
+        assert_eq!(receipt.plan_digest, plan_digest);
+        assert!(project_path
+            .join(".agents")
+            .join("skills")
+            .join("remote-skill")
+            .exists());
+        let rollback_result = executor.execute(
+            &identity,
+            Some(&project),
+            &envelope(
+                "job_rollback",
+                RunnerJob::RollbackOperation(RollbackOperationJob {
+                    project_id: identifier("project_01"),
+                    operation_id: receipt.operation_id,
+                }),
+            ),
+            &now,
+        );
+        assert!(matches!(
+            rollback_result.result,
+            RunnerResult::RollbackReceipt(_)
+        ));
+        assert!(!project_path
+            .join(".agents")
+            .join("skills")
+            .join("remote-skill")
+            .exists());
     }
 }

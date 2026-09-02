@@ -79,7 +79,14 @@ export interface ProjectInstanceRecord {
 export interface StoredJob {
   id: JobId
   envelope: JobEnvelope
-  state: 'pending' | 'leased' | 'succeeded' | 'failed' | 'expired' | 'cancelled'
+  state:
+    | 'pending'
+    | 'leased'
+    | 'acknowledged'
+    | 'succeeded'
+    | 'failed'
+    | 'expired'
+    | 'cancelled'
 }
 
 export interface StoredApproval {

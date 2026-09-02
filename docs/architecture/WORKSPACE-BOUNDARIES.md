@@ -82,12 +82,14 @@ records use control-plane PostgreSQL, while new worker state uses runner SQLite.
 
 The runner initiates all network traffic through versioned HTTP endpoints. A
 short-lived, single-use enrollment code yields a revocable bearer credential;
-the control plane stores only its SHA-256 hash. Each claim reports capabilities
-and leases no more than one declarative job to a runner. Completed results are
-journaled together with an idempotency digest and committed to the SQLite
-outbox before delivery.
+the control plane stores only its SHA-256 hash. Each held claim reports
+capabilities and leases no more than one declarative job to a runner. The runner
+commits the lease to its SQLite operation inbox before acknowledging it.
+Completed results are journaled with an idempotency digest and committed to the
+SQLite result outbox before delivery; they remain pending until the control
+plane acknowledges durable receipt.
 
-The first transport slice advertises and accepts only `scanProject`. Plan,
-apply, and rollback remain local CLI capabilities until the protocol carries a
-portable immutable Setup snapshot and apply enforces its approved plan digest.
-Jobs never contain shell commands or server-selected absolute paths.
+Plan, apply, and rollback carry portable immutable Setup snapshots and
+content-addressed artifact references. Apply recomputes the local plan and
+requires the exact reviewed digest. Jobs never contain shell commands or
+server-selected absolute paths.

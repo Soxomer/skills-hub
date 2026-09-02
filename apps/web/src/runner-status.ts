@@ -1,6 +1,6 @@
 import type { RunnerEnrollmentStatus, RunnerStatusResponse } from '@ahm/contracts'
 
-export const RUNNER_OFFLINE_AFTER_MS = 15_000
+export const RUNNER_OFFLINE_AFTER_MS = 45_000
 
 export type ConnectionDisplayState =
   | 'ready'

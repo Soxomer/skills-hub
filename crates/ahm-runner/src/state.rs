@@ -1,8 +1,8 @@
 use std::{fmt, fs, path::Path};
 
 use ahm_domain::{
-    ContractValueError, DeviceId, IsoTimestamp, JobEnvelope, OrganizationId, ProjectId,
-    ProjectInstanceId,
+    ApplyReceipt, ContractValueError, DeviceId, IsoTimestamp, JobEnvelope, OrganizationId,
+    ProjectId, ProjectInstanceId, Recoverability,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
@@ -464,16 +464,34 @@ impl RunnerStateStore {
         failed: bool,
         completed_at: &IsoTimestamp,
     ) -> Result<(), RunnerStateError> {
+        let result = serde_json::from_str::<ahm_domain::ResultEnvelope>(result_json).ok();
+        let plan_digest = result.as_ref().and_then(|result| match &result.result {
+            ahm_domain::RunnerResult::PlanResult(result) => Some(result.plan.plan_digest.as_str()),
+            ahm_domain::RunnerResult::ApplyReceipt(receipt) => Some(receipt.plan_digest.as_str()),
+            _ => None,
+        });
+        let recoverability = result
+            .as_ref()
+            .map(|result| match &result.result {
+                ahm_domain::RunnerResult::ApplyReceipt(receipt) => receipt.recoverability,
+                ahm_domain::RunnerResult::RollbackReceipt(receipt) => receipt.recoverability,
+                ahm_domain::RunnerResult::Error(error) => error.recoverability,
+                _ => Recoverability::NotNeeded,
+            })
+            .unwrap_or(Recoverability::NotNeeded);
         let transaction = self.connection.transaction()?;
         transaction.execute(
             "UPDATE operation_journal
-             SET status = ?1, result_json = ?2, result_digest = ?3, completed_at = ?4
-             WHERE job_id = ?5",
+             SET status = ?1, result_json = ?2, result_digest = ?3, completed_at = ?4,
+                 plan_digest = ?5, recoverability = ?6
+             WHERE job_id = ?7",
             params![
                 if failed { "failed" } else { "succeeded" },
                 result_json,
                 result_digest,
                 completed_at.as_str(),
+                plan_digest,
+                recoverability_key(recoverability),
                 job.job_id.as_str(),
             ],
         )?;
@@ -493,6 +511,41 @@ impl RunnerStateStore {
             ],
         )?;
         transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn record_materialization(
+        &self,
+        project_instance_id: &ProjectInstanceId,
+        receipt: &ApplyReceipt,
+    ) -> Result<(), RunnerStateError> {
+        self.connection.execute(
+            "INSERT INTO materializations
+             (id, project_instance_id, setup_revision_id, plan_digest, status, applied_at)
+             VALUES (?1, ?2, ?3, ?4, 'applied', ?5)
+             ON CONFLICT(id) DO UPDATE SET
+               setup_revision_id = excluded.setup_revision_id,
+               plan_digest = excluded.plan_digest,
+               status = 'applied', applied_at = excluded.applied_at",
+            params![
+                receipt.operation_id.as_str(),
+                project_instance_id.as_str(),
+                receipt.setup_revision_id.as_str(),
+                receipt.plan_digest.as_str(),
+                receipt.completed_at.as_str(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_materialization_rolled_back(
+        &self,
+        operation_id: &str,
+    ) -> Result<(), RunnerStateError> {
+        self.connection.execute(
+            "UPDATE materializations SET status = 'rolledBack' WHERE id = ?1",
+            params![operation_id],
+        )?;
         Ok(())
     }
 
@@ -576,6 +629,14 @@ fn job_kind(job: &JobEnvelope) -> &'static str {
         ahm_domain::RunnerJob::PlanSetup(_) => "planSetup",
         ahm_domain::RunnerJob::ApplyPlan(_) => "applyPlan",
         ahm_domain::RunnerJob::RollbackOperation(_) => "rollbackOperation",
+    }
+}
+
+fn recoverability_key(value: Recoverability) -> &'static str {
+    match value {
+        Recoverability::NotNeeded => "notNeeded",
+        Recoverability::RollbackAvailable => "rollbackAvailable",
+        Recoverability::ManualIntervention => "manualIntervention",
     }
 }
 

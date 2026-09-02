@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    JobEnvelope, OrganizationId, ProjectId, ProjectInstanceId, ProtocolVersion, ResultEnvelope,
-    RunnerCapabilities,
+    Digest, JobEnvelope, OrganizationId, ProjectId, ProjectInstanceId, ProtocolVersion,
+    ResultEnvelope, RunnerCapabilities,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -41,6 +41,8 @@ pub struct RegisterProjectInstanceRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClaimRunnerJobRequest {
     pub capabilities: RunnerCapabilityReport,
+    #[serde(default)]
+    pub wait_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -61,7 +63,43 @@ pub struct SubmitRunnerResultRequest {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AcknowledgeRunnerJobRequest {
+    pub lease_id: String,
+    pub request_digest: Digest,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunnerJobAcknowledgement {
+    pub accepted: bool,
+    pub duplicate: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunnerResultAcknowledgement {
     pub accepted: bool,
     pub duplicate: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactBundleEntry {
+    pub path: String,
+    pub kind: ArtifactBundleEntryKind,
+    pub content_base64: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ArtifactBundleEntryKind {
+    Directory,
+    File,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactBundle {
+    pub content_digest: Digest,
+    pub entries: Vec<ArtifactBundleEntry>,
 }

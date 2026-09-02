@@ -49,6 +49,9 @@ export function groupDiscoveriesByTool(
 
 export function isTerminalJob(status: RunnerJobStatusResponse | null): boolean {
   return Boolean(
-    status && !(['pending', 'leased'] as RunnerJobStatusResponse['state'][]).includes(status.state),
+    status &&
+      !(['pending', 'leased', 'acknowledged'] as RunnerJobStatusResponse['state'][]).includes(
+        status.state,
+      ),
   )
 }

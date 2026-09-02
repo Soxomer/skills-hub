@@ -77,6 +77,22 @@ async function connect(app: ReturnType<typeof createControlPlaneApp>) {
   return identity
 }
 
+async function acknowledge(
+  app: ReturnType<typeof createControlPlaneApp>,
+  authorization: { authorization: string },
+  jobId: string,
+  leaseId: string,
+) {
+  const response = await app.inject({
+    method: 'POST',
+    url: `/runner/v1/jobs/${jobId}/ack`,
+    headers: authorization,
+    payload: { leaseId, requestDigest: `sha256:${'a'.repeat(64)}` },
+  })
+  expect(response.statusCode).toBe(200)
+  expect(response.json()).toEqual({ accepted: true, duplicate: false })
+}
+
 describe('runner transport', () => {
   it('enrolls, registers, leases, and acknowledges a remote scan', async () => {
     const { app } = harness()
@@ -141,6 +157,7 @@ describe('runner transport', () => {
       leaseId: string
       job: { idempotencyKey: string; projectInstanceId: string }
     }>()
+    await acknowledge(app, authorization, jobId, lease.leaseId)
 
     const result = {
       protocolVersion: '1.0',
@@ -275,6 +292,7 @@ describe('runner transport', () => {
       payload: { capabilities },
     })
     const lease = firstClaim.json<{ leaseId: string; job: Record<string, string> }>()
+    await acknowledge(app, authorization, jobId, lease.leaseId)
     await app.inject({
       method: 'POST',
       url: `/api/v1/jobs/${jobId}/cancel`,
@@ -321,6 +339,63 @@ describe('runner transport', () => {
       headers: actorHeaders,
     })
     expect(status.json()).toMatchObject({ state: 'cancelled' })
+    await app.close()
+  })
+
+  it('wakes a held outbound claim as soon as durable work is enqueued', async () => {
+    const { app } = harness()
+    const identity = await connect(app)
+    const authorization = { authorization: `Bearer ${identity.credential}` }
+    await app.inject({
+      method: 'PUT',
+      url: '/runner/v1/project-instances/instance_01',
+      headers: authorization,
+      payload: { projectId: 'project_01' },
+    })
+
+    const waitingClaim = app.inject({
+      method: 'POST',
+      url: '/runner/v1/jobs/claim',
+      headers: authorization,
+      payload: { capabilities, waitMs: 5_000 },
+    })
+    await Promise.resolve()
+    const queued = await app.inject({
+      method: 'POST',
+      url: '/api/v1/project-instances/instance_01/scan',
+      headers: actorHeaders,
+    })
+    const response = await waitingClaim
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ job: { jobId: queued.json().jobId } })
+    await app.close()
+  })
+
+  it('stores and retrieves content-addressed artifacts for the organization', async () => {
+    const { app } = harness()
+    const identity = await connect(app)
+    const authorization = { authorization: `Bearer ${identity.credential}` }
+    const contentDigest = `sha256:${'f'.repeat(64)}`
+    const bundle = {
+      contentDigest,
+      entries: [
+        { path: 'SKILL.md', kind: 'file', contentBase64: btoa('# Shared') },
+      ],
+    }
+    const stored = await app.inject({
+      method: 'PUT',
+      url: '/runner/v1/artifacts',
+      headers: authorization,
+      payload: bundle,
+    })
+    expect(stored.statusCode).toBe(204)
+    const loaded = await app.inject({
+      method: 'GET',
+      url: `/runner/v1/artifacts/${contentDigest}`,
+      headers: authorization,
+    })
+    expect(loaded.json()).toEqual(bundle)
     await app.close()
   })
 })

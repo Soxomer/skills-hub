@@ -1,9 +1,14 @@
 import type {
+  ApplyReviewedPlanRequest,
+  ApplyReviewedPlanResponse,
   CaptureDefaultRevisionRequest,
   CaptureDefaultRevisionResponse,
   CreateProjectRequest,
   CreateRunnerEnrollmentResponse,
   ProjectListResponse,
+  ProjectSetupStateResponse,
+  RequestSetupPlanRequest,
+  RollbackOperationRequest,
   ProjectSummary,
   RunnerEnrollmentStatus,
   RunnerJobStatusResponse,
@@ -81,6 +86,40 @@ export class ControlPlaneClient {
   ): Promise<CaptureDefaultRevisionResponse> {
     return this.send(
       `/api/v1/projects/${encodeURIComponent(projectId)}/default-revisions`,
+      this.jsonRequest('POST', request),
+    )
+  }
+
+  setupRevisions(projectId: string): Promise<ProjectSetupStateResponse> {
+    return this.send(`/api/v1/projects/${encodeURIComponent(projectId)}/setup-revisions`)
+  }
+
+  prepareSetupPlan(
+    projectInstanceId: string,
+    request: RequestSetupPlanRequest,
+  ): Promise<{ jobId: string }> {
+    return this.send(
+      `/api/v1/project-instances/${encodeURIComponent(projectInstanceId)}/plan`,
+      this.jsonRequest('POST', request),
+    )
+  }
+
+  applySetupPlan(
+    projectInstanceId: string,
+    request: ApplyReviewedPlanRequest,
+  ): Promise<ApplyReviewedPlanResponse> {
+    return this.send(
+      `/api/v1/project-instances/${encodeURIComponent(projectInstanceId)}/apply`,
+      this.jsonRequest('POST', request),
+    )
+  }
+
+  rollbackSetup(
+    projectInstanceId: string,
+    request: RollbackOperationRequest,
+  ): Promise<{ jobId: string }> {
+    return this.send(
+      `/api/v1/project-instances/${encodeURIComponent(projectInstanceId)}/rollback`,
       this.jsonRequest('POST', request),
     )
   }

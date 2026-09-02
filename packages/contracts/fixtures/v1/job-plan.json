@@ -11,7 +11,21 @@
     "kind": "planSetup",
     "payload": {
       "projectId": "project_01",
-      "setupRevisionId": "setup_revision_03"
+      "revision": {
+        "setupId": "setup_03",
+        "setupRevisionId": "setup_revision_03",
+        "revisionNumber": 3,
+        "items": [
+          {
+            "artifactId": "artifact_pdf_01",
+            "artifactKind": "skill",
+            "portableSource": "catalog:artifact_pdf_01",
+            "contentDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "toolId": "codex",
+            "targetName": "pdf"
+          }
+        ]
+      }
     }
   }
 }

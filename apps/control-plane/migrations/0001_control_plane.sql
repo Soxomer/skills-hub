@@ -126,7 +126,8 @@ CREATE TABLE IF NOT EXISTS runner_jobs (
   idempotency_key TEXT NOT NULL,
   job_kind TEXT NOT NULL CHECK (job_kind IN ('scanProject', 'planSetup', 'applyPlan', 'rollbackOperation')),
   payload JSONB NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('pending', 'leased', 'succeeded', 'failed', 'expired', 'cancelled')),
+  state TEXT NOT NULL CONSTRAINT runner_jobs_state_check
+    CHECK (state IN ('pending', 'leased', 'succeeded', 'failed', 'expired', 'cancelled')),
   issued_at TIMESTAMPTZ NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
   completed_at TIMESTAMPTZ NULL,

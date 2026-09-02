@@ -201,6 +201,26 @@ pub enum RunnerJob {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortableSetupRevisionItem {
+    pub artifact_id: ArtifactId,
+    pub artifact_kind: DiscoveryKind,
+    pub portable_source: Option<String>,
+    pub content_digest: Digest,
+    pub tool_id: Identifier,
+    pub target_name: Identifier,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortableSetupRevision {
+    pub setup_id: Identifier,
+    pub setup_revision_id: SetupRevisionId,
+    pub revision_number: u64,
+    pub items: Vec<PortableSetupRevisionItem>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScanProjectJob {
     pub project_id: ProjectId,
     pub include_unmanaged: bool,
@@ -210,13 +230,16 @@ pub struct ScanProjectJob {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PlanSetupJob {
     pub project_id: ProjectId,
-    pub setup_revision_id: SetupRevisionId,
+    pub revision: PortableSetupRevision,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PlanApproval {
     pub approval_id: ApprovalId,
+    pub organization_id: OrganizationId,
+    pub project_instance_id: ProjectInstanceId,
+    pub setup_revision_id: SetupRevisionId,
     pub plan_digest: Digest,
     pub approved_by: UserId,
     pub approved_at: IsoTimestamp,
@@ -227,7 +250,7 @@ pub struct PlanApproval {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApplyPlanJob {
     pub project_id: ProjectId,
-    pub setup_revision_id: SetupRevisionId,
+    pub revision: PortableSetupRevision,
     pub approval: PlanApproval,
 }
 
@@ -317,6 +340,7 @@ pub struct CanonicalPlan {
     pub setup_revision_id: SetupRevisionId,
     pub plan_digest: Digest,
     pub actions: Vec<PlanAction>,
+    pub conflicts: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -360,6 +384,7 @@ pub struct ApplyReceipt {
 pub struct RollbackReceipt {
     pub project_id: ProjectId,
     pub operation_id: OperationId,
+    pub restored_setup_revision_id: Option<SetupRevisionId>,
     pub outcome: OperationOutcome,
     pub recoverability: Recoverability,
     pub completed_at: IsoTimestamp,
@@ -417,6 +442,6 @@ pub struct ResultEnvelope {
 #[serde(untagged)]
 pub enum ProtocolEnvelope {
     Capabilities(CapabilityEnvelope),
-    Job(JobEnvelope),
+    Job(Box<JobEnvelope>),
     Result(ResultEnvelope),
 }

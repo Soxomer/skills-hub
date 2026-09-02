@@ -2,7 +2,9 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
 import {
   PROTOCOL_VERSION,
+  type ArtifactBundle,
   type ClaimRunnerJobRequest,
+  type AcknowledgeRunnerJobRequest,
   type CreateRunnerEnrollmentResponse,
   type EnrollRunnerRequest,
   type EnrollRunnerResponse,
@@ -13,6 +15,7 @@ import {
   type RunnerCapabilityReport,
   type RunnerEnrollmentStatus,
   type RunnerResultAcknowledgement,
+  type RunnerJobAcknowledgement,
   type RunnerJobStatusResponse,
   type RunnerStatusResponse,
   type SubmitRunnerResultRequest,
@@ -60,6 +63,10 @@ export interface JobCompletion {
   outcome: 'accepted' | 'duplicate' | 'conflict' | 'unknown'
 }
 
+export interface JobAcknowledgement {
+  outcome: 'accepted' | 'duplicate' | 'conflict' | 'unknown'
+}
+
 export interface RunnerTransportRepository {
   createEnrollment(record: RunnerEnrollmentRecord): Promise<void>
   enrollmentStatus(
@@ -84,6 +91,15 @@ export interface RunnerTransportRepository {
     projectInstanceId: string,
   ): Promise<ProjectInstanceRoute | null>
   enqueueJob(job: JobEnvelope): Promise<void>
+  storeArtifact(
+    runner: RunnerAuthentication,
+    bundle: ArtifactBundle,
+    now: string,
+  ): Promise<void>
+  loadArtifact(
+    runner: RunnerAuthentication,
+    contentDigest: string,
+  ): Promise<ArtifactBundle | null>
   claimJob(
     runner: RunnerAuthentication,
     supportedKinds: readonly string[],
@@ -92,6 +108,13 @@ export interface RunnerTransportRepository {
     now: string,
     leaseExpiresAt: string,
   ): Promise<LeasedRunnerJob | null>
+  acknowledgeJob(
+    runner: RunnerAuthentication,
+    jobId: string,
+    leaseId: string,
+    requestDigest: string,
+    now: string,
+  ): Promise<JobAcknowledgement>
   completeJob(
     runner: RunnerAuthentication,
     jobId: string,
@@ -123,6 +146,7 @@ export interface RunnerTransportServiceOptions {
   now?: () => Date
   randomId?: () => string
   randomSecret?: (bytes: number) => string
+  jobSignal?: JobSignal
 }
 
 function digest(value: string): string {
@@ -133,10 +157,107 @@ function canonicalDigest(value: unknown): string {
   return digest(JSON.stringify(value))
 }
 
+function validateArtifactBundle(bundle: ArtifactBundle): void {
+  if (!bundle || !/^sha256:[0-9a-f]{64}$/.test(bundle.contentDigest)) {
+    throw new RunnerTransportError(400, 'valid artifact content digest is required')
+  }
+  if (!Array.isArray(bundle.entries) || bundle.entries.length > 5_000) {
+    throw new RunnerTransportError(400, 'artifact bundle has too many entries')
+  }
+  let decodedBytes = 0
+  const paths = new Set<string>()
+  for (const entry of bundle.entries) {
+    if (
+      typeof entry.path !== 'string' ||
+      entry.path.length === 0 ||
+      entry.path.length > 500 ||
+      entry.path.includes('\\') ||
+      entry.path.startsWith('/') ||
+      entry.path.split('/').some((part) => part === '' || part === '.' || part === '..') ||
+      paths.has(entry.path)
+    ) {
+      throw new RunnerTransportError(400, 'artifact bundle contains an invalid path')
+    }
+    paths.add(entry.path)
+    if (entry.kind === 'directory') {
+      if (entry.contentBase64 !== null) {
+        throw new RunnerTransportError(400, 'artifact directory cannot contain file bytes')
+      }
+      continue
+    }
+    if (entry.kind !== 'file' || typeof entry.contentBase64 !== 'string') {
+      throw new RunnerTransportError(400, 'artifact entry kind is invalid')
+    }
+    const bytes = Buffer.from(entry.contentBase64, 'base64')
+    if (bytes.toString('base64') !== entry.contentBase64) {
+      throw new RunnerTransportError(400, 'artifact file content is not canonical base64')
+    }
+    decodedBytes += bytes.length
+    if (decodedBytes > 10 * 1024 * 1024) {
+      throw new RunnerTransportError(413, 'artifact bundle exceeds 10 MiB')
+    }
+  }
+}
+
 function supportedJobKinds(report: RunnerCapabilityReport): string[] {
   const kinds: string[] = []
   if (report.capabilities.scanProject) kinds.push('scanProject')
+  if (report.capabilities.planSetup) kinds.push('planSetup')
+  if (report.capabilities.applyPlan) kinds.push('applyPlan')
+  if (report.capabilities.rollbackOperation) kinds.push('rollbackOperation')
   return kinds
+}
+
+interface JobWaiter {
+  afterGeneration: number
+  resolve: () => void
+  timeout: ReturnType<typeof setTimeout>
+}
+
+export class JobSignal {
+  private readonly generations = new Map<string, number>()
+  private readonly waiters = new Map<string, Set<JobWaiter>>()
+
+  generation(deviceId: string): number {
+    return this.generations.get(deviceId) ?? 0
+  }
+
+  notify(deviceId: string): void {
+    const generation = this.generation(deviceId) + 1
+    this.generations.set(deviceId, generation)
+    const waiters = this.waiters.get(deviceId)
+    if (!waiters) return
+    for (const waiter of [...waiters]) {
+      if (waiter.afterGeneration >= generation) continue
+      clearTimeout(waiter.timeout)
+      waiters.delete(waiter)
+      waiter.resolve()
+    }
+    if (waiters.size === 0) this.waiters.delete(deviceId)
+  }
+
+  wait(deviceId: string, afterGeneration: number, waitMs: number): Promise<void> {
+    if (waitMs <= 0 || this.generation(deviceId) > afterGeneration) return Promise.resolve()
+    return new Promise((resolve) => {
+      const waiters = this.waiters.get(deviceId) ?? new Set<JobWaiter>()
+      const waiter: JobWaiter = {
+        afterGeneration,
+        resolve,
+        timeout: setTimeout(() => {
+          waiters.delete(waiter)
+          if (waiters.size === 0) this.waiters.delete(deviceId)
+          resolve()
+        }, waitMs),
+      }
+      waiters.add(waiter)
+      this.waiters.set(deviceId, waiters)
+      if (this.generation(deviceId) > afterGeneration) {
+        clearTimeout(waiter.timeout)
+        waiters.delete(waiter)
+        resolve()
+      }
+    })
+  }
 }
 
 function validateCapabilities(report: RunnerCapabilityReport): void {
@@ -155,6 +276,7 @@ export class RunnerTransportService {
   private readonly now: () => Date
   private readonly randomId: () => string
   private readonly randomSecret: (bytes: number) => string
+  private readonly jobSignal: JobSignal
 
   constructor(
     private readonly repository: RunnerTransportRepository,
@@ -167,6 +289,7 @@ export class RunnerTransportService {
     this.randomId = options.randomId ?? randomUUID
     this.randomSecret =
       options.randomSecret ?? ((bytes) => randomBytes(bytes).toString('base64url'))
+    this.jobSignal = options.jobSignal ?? new JobSignal()
   }
 
   async createEnrollment(actor: RequestActor): Promise<CreateRunnerEnrollmentResponse> {
@@ -284,7 +407,24 @@ export class RunnerTransportService {
       },
     }
     await this.repository.enqueueJob(job)
+    this.jobSignal.notify(route.deviceId)
     return { jobId }
+  }
+
+  async storeArtifact(credential: string, bundle: ArtifactBundle): Promise<void> {
+    validateArtifactBundle(bundle)
+    const runner = await this.authenticate(credential)
+    await this.repository.storeArtifact(runner, bundle, this.now().toISOString())
+  }
+
+  async loadArtifact(credential: string, contentDigest: string): Promise<ArtifactBundle> {
+    if (!/^sha256:[0-9a-f]{64}$/.test(contentDigest)) {
+      throw new RunnerTransportError(400, 'valid artifact content digest is required')
+    }
+    const runner = await this.authenticate(credential)
+    const bundle = await this.repository.loadArtifact(runner, contentDigest)
+    if (!bundle) throw new RunnerTransportError(404, 'artifact is not available')
+    return bundle
   }
 
   async claimJob(
@@ -293,15 +433,53 @@ export class RunnerTransportService {
   ): Promise<LeasedRunnerJob | null> {
     validateCapabilities(request.capabilities)
     const runner = await this.authenticate(credential)
-    const now = this.now()
-    return this.repository.claimJob(
-      runner,
-      supportedJobKinds(request.capabilities),
-      request.capabilities,
-      this.randomId(),
-      now.toISOString(),
-      new Date(now.getTime() + this.leaseTtlMs).toISOString(),
+    const waitMs = Math.min(
+      25_000,
+      Math.max(0, Number.isFinite(request.waitMs) ? Math.floor(request.waitMs ?? 0) : 0),
     )
+    const generation = this.jobSignal.generation(runner.deviceId)
+    const claim = () =>
+      this.repository.claimJob(
+        runner,
+        supportedJobKinds(request.capabilities),
+        request.capabilities,
+        this.randomId(),
+        this.now().toISOString(),
+        new Date(this.now().getTime() + this.leaseTtlMs).toISOString(),
+      )
+    const immediate = await claim()
+    if (immediate || waitMs === 0) return immediate
+    await this.jobSignal.wait(runner.deviceId, generation, waitMs)
+    return claim()
+  }
+
+  notifyJob(deviceId: string): void {
+    this.jobSignal.notify(deviceId)
+  }
+
+  async acknowledgeJob(
+    credential: string,
+    jobId: string,
+    request: AcknowledgeRunnerJobRequest,
+  ): Promise<RunnerJobAcknowledgement> {
+    const runner = await this.authenticate(credential)
+    if (!/^sha256:[0-9a-f]{64}$/.test(request.requestDigest)) {
+      throw new RunnerTransportError(400, 'valid request digest is required')
+    }
+    const acknowledgement = await this.repository.acknowledgeJob(
+      runner,
+      jobId,
+      request.leaseId,
+      request.requestDigest,
+      this.now().toISOString(),
+    )
+    if (acknowledgement.outcome === 'unknown') {
+      throw new RunnerTransportError(404, 'runner job not found')
+    }
+    if (acknowledgement.outcome === 'conflict') {
+      throw new RunnerTransportError(409, 'runner job acknowledgement does not match its lease')
+    }
+    return { accepted: true, duplicate: acknowledgement.outcome === 'duplicate' }
   }
 
   async submitResult(
@@ -313,7 +491,9 @@ export class RunnerTransportService {
     if (
       request.result.jobId !== jobId ||
       request.result.organizationId !== runner.organizationId ||
-      request.result.deviceId !== runner.deviceId
+      request.result.deviceId !== runner.deviceId ||
+      request.result.projectInstanceId.trim() === '' ||
+      request.result.idempotencyKey.trim() === ''
     ) {
       throw new RunnerTransportError(409, 'result identity does not match its lease')
     }

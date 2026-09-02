@@ -1,4 +1,5 @@
 import type {
+  ArtifactBundle,
   JobEnvelope,
   LeasedRunnerJob,
   RegisterProjectInstanceRequest,
@@ -10,6 +11,7 @@ import type {
 
 import type {
   JobCompletion,
+  JobAcknowledgement,
   ProjectInstanceRoute,
   RunnerAuthentication,
   RunnerDeviceRegistration,
@@ -34,6 +36,8 @@ interface MemoryJob {
   cancelRequestedAt: string | null
   result: ResultEnvelope | null
   resultDigest: string | null
+  requestDigest: string | null
+  acknowledgedAt: string | null
 }
 
 interface MemoryProjectInstance extends ProjectInstanceRoute {
@@ -49,6 +53,7 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
   private readonly projects = new Map<string, string>()
   private readonly projectInstances = new Map<string, MemoryProjectInstance>()
   private readonly jobs = new Map<string, MemoryJob>()
+  private readonly artifacts = new Map<string, ArtifactBundle>()
 
   seedProject(organizationId: string, projectId: string): void {
     this.projects.set(`${organizationId}:${projectId}`, projectId)
@@ -191,7 +196,27 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
       cancelRequestedAt: null,
       result: null,
       resultDigest: null,
+      requestDigest: null,
+      acknowledgedAt: null,
     })
+  }
+
+  async storeArtifact(
+    runner: RunnerAuthentication,
+    bundle: ArtifactBundle,
+  ): Promise<void> {
+    this.artifacts.set(
+      `${runner.organizationId}:${bundle.contentDigest}`,
+      structuredClone(bundle),
+    )
+  }
+
+  async loadArtifact(
+    runner: RunnerAuthentication,
+    contentDigest: string,
+  ): Promise<ArtifactBundle | null> {
+    const bundle = this.artifacts.get(`${runner.organizationId}:${contentDigest}`)
+    return bundle ? structuredClone(bundle) : null
   }
 
   async claimJob(
@@ -210,7 +235,7 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
     for (const job of this.jobs.values()) {
       if (
         job.envelope.deviceId === runner.deviceId &&
-        job.state === 'leased' &&
+        (job.state === 'leased' || job.state === 'acknowledged') &&
         job.leaseExpiresAt !== null &&
         job.leaseExpiresAt > now &&
         supportedKinds.includes(job.envelope.job.kind)
@@ -222,13 +247,18 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
       left.envelope.issuedAt.localeCompare(right.envelope.issuedAt),
     )
     for (const job of candidates) {
-      if (job.envelope.expiresAt <= now && ['pending', 'leased'].includes(job.state)) {
+      if (
+        job.envelope.expiresAt <= now &&
+        ['pending', 'leased', 'acknowledged'].includes(job.state)
+      ) {
         job.state = 'expired'
         continue
       }
       const available =
         job.state === 'pending' ||
-        (job.state === 'leased' && job.leaseExpiresAt !== null && job.leaseExpiresAt <= now)
+        ((job.state === 'leased' || job.state === 'acknowledged') &&
+          job.leaseExpiresAt !== null &&
+          job.leaseExpiresAt <= now)
       if (
         !available ||
         job.envelope.deviceId !== runner.deviceId ||
@@ -240,9 +270,41 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
       job.leaseId = leaseId
       job.leaseExpiresAt = leaseExpiresAt
       job.attemptCount += 1
+      job.requestDigest = null
+      job.acknowledgedAt = null
       return this.leasedJob(job)
     }
     return null
+  }
+
+  async acknowledgeJob(
+    runner: RunnerAuthentication,
+    jobId: string,
+    leaseId: string,
+    requestDigest: string,
+    now: string,
+  ): Promise<JobAcknowledgement> {
+    const job = this.jobs.get(jobId)
+    if (
+      !job ||
+      job.envelope.organizationId !== runner.organizationId ||
+      job.envelope.deviceId !== runner.deviceId
+    ) {
+      return { outcome: 'unknown' }
+    }
+    if (job.state === 'acknowledged') {
+      return {
+        outcome:
+          job.leaseId === leaseId && job.requestDigest === requestDigest
+            ? 'duplicate'
+            : 'conflict',
+      }
+    }
+    if (job.state !== 'leased' || job.leaseId !== leaseId) return { outcome: 'conflict' }
+    job.state = 'acknowledged'
+    job.requestDigest = requestDigest
+    job.acknowledgedAt = now
+    return { outcome: 'accepted' }
   }
 
   async completeJob(
@@ -263,7 +325,17 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
     if (job.resultDigest !== null) {
       return { outcome: job.resultDigest === resultDigest ? 'duplicate' : 'conflict' }
     }
-    if (job.leaseId !== leaseId || job.state !== 'leased') return { outcome: 'conflict' }
+    if (job.leaseId !== leaseId || job.state !== 'acknowledged') {
+      return { outcome: 'conflict' }
+    }
+    if (
+      result.idempotencyKey !== job.envelope.idempotencyKey ||
+      result.projectInstanceId !== job.envelope.projectInstanceId ||
+      (result.result.kind !== 'error' &&
+        result.result.payload.projectId !== job.envelope.job.payload.projectId)
+    ) {
+      return { outcome: 'conflict' }
+    }
     job.result = result
     job.resultDigest = resultDigest
     job.state =
@@ -301,7 +373,7 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
       job.state = 'cancelled'
       return true
     }
-    if (job.state === 'leased') {
+    if (job.state === 'leased' || job.state === 'acknowledged') {
       job.cancelRequestedAt = now
       return true
     }

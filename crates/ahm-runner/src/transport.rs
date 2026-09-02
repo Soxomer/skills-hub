@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use ahm_domain::{
-    ClaimRunnerJobRequest, EnrollRunnerRequest, EnrollRunnerResponse, LeasedRunnerJob,
-    RegisterProjectInstanceRequest, RunnerResultAcknowledgement, SubmitRunnerResultRequest,
+    AcknowledgeRunnerJobRequest, ArtifactBundle, ClaimRunnerJobRequest, Digest,
+    EnrollRunnerRequest, EnrollRunnerResponse, LeasedRunnerJob, RegisterProjectInstanceRequest,
+    RunnerJobAcknowledgement, RunnerResultAcknowledgement, SubmitRunnerResultRequest,
 };
 use anyhow::{bail, Context, Result};
 use reqwest::{blocking::Client, StatusCode, Url};
@@ -27,6 +28,22 @@ pub trait RunnerTransport {
         identity: &RunnerIdentityRecord,
         request: &ClaimRunnerJobRequest,
     ) -> Result<Option<LeasedRunnerJob>>;
+    fn acknowledge_job(
+        &self,
+        identity: &RunnerIdentityRecord,
+        job_id: &str,
+        request: &AcknowledgeRunnerJobRequest,
+    ) -> Result<RunnerJobAcknowledgement>;
+    fn store_artifact(
+        &self,
+        identity: &RunnerIdentityRecord,
+        bundle: &ArtifactBundle,
+    ) -> Result<()>;
+    fn load_artifact(
+        &self,
+        identity: &RunnerIdentityRecord,
+        digest: &Digest,
+    ) -> Result<Option<ArtifactBundle>>;
     fn submit_result(
         &self,
         identity: &RunnerIdentityRecord,
@@ -117,6 +134,54 @@ impl RunnerTransport for HttpRunnerTransport {
             return Ok(None);
         }
         parse_json_response(response, "claim runner job").map(Some)
+    }
+
+    fn acknowledge_job(
+        &self,
+        identity: &RunnerIdentityRecord,
+        job_id: &str,
+        request: &AcknowledgeRunnerJobRequest,
+    ) -> Result<RunnerJobAcknowledgement> {
+        let response = self
+            .client
+            .post(self.endpoint(&format!("runner/v1/jobs/{job_id}/ack"))?)
+            .bearer_auth(&identity.credential_secret)
+            .json(request)
+            .send()
+            .context("contact control plane")?;
+        parse_json_response(response, "acknowledge runner job")
+    }
+
+    fn store_artifact(
+        &self,
+        identity: &RunnerIdentityRecord,
+        bundle: &ArtifactBundle,
+    ) -> Result<()> {
+        let response = self
+            .client
+            .put(self.endpoint("runner/v1/artifacts")?)
+            .bearer_auth(&identity.credential_secret)
+            .json(bundle)
+            .send()
+            .context("contact control plane")?;
+        ensure_success(response, "store artifact")
+    }
+
+    fn load_artifact(
+        &self,
+        identity: &RunnerIdentityRecord,
+        digest: &Digest,
+    ) -> Result<Option<ArtifactBundle>> {
+        let response = self
+            .client
+            .get(self.endpoint(&format!("runner/v1/artifacts/{}", digest.as_str()))?)
+            .bearer_auth(&identity.credential_secret)
+            .send()
+            .context("contact control plane")?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        parse_json_response(response, "load artifact").map(Some)
     }
 
     fn submit_result(

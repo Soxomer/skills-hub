@@ -5,7 +5,7 @@ use ahm_domain::{
     RunnerCapabilityReport, PROTOCOL_VERSION,
 };
 use ahm_runner::execution::RunnerExecutionService;
-use ahm_runner::job_dispatcher::{scan_capabilities, LocalJobExecutor};
+use ahm_runner::job_dispatcher::{runner_capabilities, LocalJobExecutor};
 use ahm_runner::setup_service::{
     default_cli_db_path, ApplyActionKind, ApplyPlan, DefaultSetupCandidateKind,
     DefaultSetupCaptureResult, DefaultSetupPreview, Project, ProjectStatus, SetupDetail,
@@ -82,7 +82,7 @@ struct WorkerArgs {
     /// Process at most one claim cycle and exit.
     #[arg(long)]
     once: bool,
-    /// Delay between claim cycles.
+    /// Retry delay after a transport failure.
     #[arg(long, default_value_t = 2)]
     poll_seconds: u64,
 }
@@ -458,7 +458,7 @@ fn connect_runner(
             protocol_version: PROTOCOL_VERSION,
             supported_protocol_versions: vec![PROTOCOL_VERSION],
             runner_version: env!("CARGO_PKG_VERSION").to_owned(),
-            capabilities: scan_capabilities(),
+            capabilities: runner_capabilities(),
         },
     })?;
     let identity = RunnerIdentityRecord {
@@ -498,7 +498,8 @@ fn run_worker(
         .context("runner is not connected; run `ahm connect` first")?;
     let transport = HttpRunnerTransport::new(&identity.server_url)?;
     let executor = LocalJobExecutor::new(RunnerExecutionService::open(db_path)?, scan_home(None)?);
-    let mut worker = RunnerWorker::new(state, transport, executor);
+    let mut worker = RunnerWorker::new(state, transport, executor)
+        .with_claim_wait_ms(if args.once { 0 } else { 25_000 });
     if !json {
         println!(
             "Runner {} is connected and polling {}.",
@@ -507,6 +508,7 @@ fn run_worker(
         );
     }
     loop {
+        let mut retry_after_error = false;
         match worker.run_once() {
             Ok(outcome) => {
                 if json && outcome != WorkerOutcome::Idle {
@@ -519,13 +521,16 @@ fn run_worker(
             }
             Err(error) if !args.once => {
                 eprintln!("worker cycle failed: {error:#}");
+                retry_after_error = true;
             }
             Err(error) => return Err(error),
         }
         if args.once {
             return Ok(());
         }
-        thread::sleep(Duration::from_secs(args.poll_seconds));
+        if retry_after_error {
+            thread::sleep(Duration::from_secs(args.poll_seconds));
+        }
     }
 }
 

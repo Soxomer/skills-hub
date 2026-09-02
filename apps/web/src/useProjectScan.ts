@@ -155,7 +155,6 @@ export function useProjectScan(client: ControlPlaneClient) {
 
   useEffect(() => {
     if (!activeJobId || isTerminalJob(jobStatus)) return
-    void refreshJob()
     const interval = window.setInterval(() => void refreshJob(), POLL_INTERVAL_MS)
     return () => window.clearInterval(interval)
   }, [activeJobId, jobStatus, refreshJob])

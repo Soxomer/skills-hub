@@ -6,6 +6,7 @@ import {
   groupDiscoveriesByTool,
   reconcileIncludedDiscoveryIds,
   scanDiscoveries,
+  isTerminalJob,
 } from './scan-state'
 
 const discoveries: ScanDiscovery[] = [
@@ -74,5 +75,7 @@ describe('scan review state', () => {
     }
     expect(scanDiscoveries(status)).toEqual(discoveries)
     expect(scanDiscoveries({ ...status, state: 'failed' })).toBeNull()
+    expect(isTerminalJob({ ...status, state: 'acknowledged' })).toBe(false)
+    expect(isTerminalJob(status)).toBe(true)
   })
 })

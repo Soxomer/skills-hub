@@ -10,7 +10,14 @@ import type {
 
 export interface RunnerJobStatusResponse {
   jobId: string
-  state: 'pending' | 'leased' | 'succeeded' | 'failed' | 'expired' | 'cancelled'
+  state:
+    | 'pending'
+    | 'leased'
+    | 'acknowledged'
+    | 'succeeded'
+    | 'failed'
+    | 'expired'
+    | 'cancelled'
   result: ResultEnvelope | null
   cancelRequested: boolean
 }
@@ -72,6 +79,7 @@ export interface RegisterProjectInstanceRequest {
 
 export interface ClaimRunnerJobRequest {
   capabilities: RunnerCapabilityReport
+  waitMs?: number
 }
 
 export interface LeasedRunnerJob {
@@ -86,7 +94,28 @@ export interface SubmitRunnerResultRequest {
   result: ResultEnvelope
 }
 
+export interface AcknowledgeRunnerJobRequest {
+  leaseId: string
+  requestDigest: string
+}
+
+export interface RunnerJobAcknowledgement {
+  accepted: true
+  duplicate: boolean
+}
+
 export interface RunnerResultAcknowledgement {
   accepted: true
   duplicate: boolean
+}
+
+export interface ArtifactBundleEntry {
+  path: string
+  kind: 'directory' | 'file'
+  contentBase64: string | null
+}
+
+export interface ArtifactBundle {
+  contentDigest: string
+  entries: ArtifactBundleEntry[]
 }

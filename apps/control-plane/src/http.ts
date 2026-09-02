@@ -1,6 +1,12 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
 
-import type { CaptureDefaultRevisionRequest, CreateProjectRequest } from '@ahm/contracts'
+import type {
+  ApplyReviewedPlanRequest,
+  CaptureDefaultRevisionRequest,
+  CreateProjectRequest,
+  RequestSetupPlanRequest,
+  RollbackOperationRequest,
+} from '@ahm/contracts'
 
 import { ProjectServiceError, type ProjectService } from './projects.js'
 
@@ -9,6 +15,7 @@ import {
   type RequestActor,
   type RunnerTransportService,
 } from './runner-transport.js'
+import { SwitchingError, type SwitchingService } from './switching.js'
 
 function requiredHeader(request: FastifyRequest, name: string): string {
   const value = request.headers[name]
@@ -36,6 +43,7 @@ function runnerCredential(request: FastifyRequest): string {
 export function createControlPlaneApp(
   transport: RunnerTransportService,
   projects: ProjectService,
+  switching?: SwitchingService,
 ): FastifyInstance {
   const app = Fastify({ logger: false })
 
@@ -45,6 +53,10 @@ export function createControlPlaneApp(
       return
     }
     if (error instanceof ProjectServiceError) {
+      void reply.code(error.statusCode).send({ code: error.code, error: error.message })
+      return
+    }
+    if (error instanceof SwitchingError) {
       void reply.code(error.statusCode).send({ code: error.code, error: error.message })
       return
     }
@@ -75,6 +87,34 @@ export function createControlPlaneApp(
     )
     return reply.code(result.created ? 201 : 200).send(result)
   })
+
+  if (switching) {
+    app.get<{ Params: { projectId: string } }>(
+      '/api/v1/projects/:projectId/setup-revisions',
+      async (request) => switching.projectSetupState(actor(request), request.params.projectId),
+    )
+
+    app.post<{
+      Params: { projectInstanceId: string }
+      Body: RequestSetupPlanRequest
+    }>('/api/v1/project-instances/:projectInstanceId/plan', async (request) =>
+      switching.requestPlan(actor(request), request.params.projectInstanceId, request.body),
+    )
+
+    app.post<{
+      Params: { projectInstanceId: string }
+      Body: ApplyReviewedPlanRequest
+    }>('/api/v1/project-instances/:projectInstanceId/apply', async (request) =>
+      switching.applyReviewedPlan(actor(request), request.params.projectInstanceId, request.body),
+    )
+
+    app.post<{
+      Params: { projectInstanceId: string }
+      Body: RollbackOperationRequest
+    }>('/api/v1/project-instances/:projectInstanceId/rollback', async (request) =>
+      switching.requestRollback(actor(request), request.params.projectInstanceId, request.body),
+    )
+  }
 
   app.post('/api/v1/runner-enrollments', async (request) =>
     transport.createEnrollment(actor(request)),
@@ -140,6 +180,32 @@ export function createControlPlaneApp(
       if (!job) return reply.header('retry-after', '2').code(204).send()
       return job
     },
+  )
+
+  app.put<{ Body: Parameters<RunnerTransportService['storeArtifact']>[1] }>(
+    '/runner/v1/artifacts',
+    { bodyLimit: 15 * 1024 * 1024 },
+    async (request, reply) => {
+      await transport.storeArtifact(runnerCredential(request), request.body)
+      return reply.code(204).send()
+    },
+  )
+
+  app.get<{ Params: { contentDigest: string } }>(
+    '/runner/v1/artifacts/:contentDigest',
+    async (request) =>
+      transport.loadArtifact(runnerCredential(request), request.params.contentDigest),
+  )
+
+  app.post<{
+    Params: { jobId: string }
+    Body: Parameters<RunnerTransportService['acknowledgeJob']>[2]
+  }>('/runner/v1/jobs/:jobId/ack', async (request) =>
+    transport.acknowledgeJob(
+      runnerCredential(request),
+      request.params.jobId,
+      request.body,
+    ),
   )
 
   app.post<{

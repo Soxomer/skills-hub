@@ -13,9 +13,15 @@ const secondMigrationPath = fileURLToPath(
 const thirdMigrationPath = fileURLToPath(
   new URL('../migrations/0003_default_capture.sql', import.meta.url),
 )
-const migrations = [firstMigrationPath, secondMigrationPath, thirdMigrationPath].map((path) =>
-  readFileSync(path, 'utf8'),
+const fourthMigrationPath = fileURLToPath(
+  new URL('../migrations/0004_runner_delivery.sql', import.meta.url),
 )
+const migrations = [
+  firstMigrationPath,
+  secondMigrationPath,
+  thirdMigrationPath,
+  fourthMigrationPath,
+].map((path) => readFileSync(path, 'utf8'))
 
 function createMigratedDatabase() {
   const database = newDb({ autoCreateForeignKeyIndices: true })
@@ -33,6 +39,7 @@ describe('control-plane migration', () => {
       .map((row) => row.table_name)
 
     expect(tables).toEqual([
+      'artifact_bundles',
       'audit_events',
       'control_plane_schema_migrations',
       'operation_receipts',
@@ -67,7 +74,7 @@ describe('control-plane migration', () => {
         database.public.one<{ version: number }>(
           'SELECT MAX(version) AS version FROM control_plane_schema_migrations',
         ).version,
-      ).toBe(3)
+      ).toBe(4)
     }
   })
 

@@ -89,6 +89,46 @@
         }
       }
     },
+    "portableSetupRevisionItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifactId",
+        "artifactKind",
+        "portableSource",
+        "contentDigest",
+        "toolId",
+        "targetName"
+      ],
+      "properties": {
+        "artifactId": { "$ref": "#/$defs/identifier" },
+        "artifactKind": { "enum": ["skill", "pluginSkill", "localContent"] },
+        "portableSource": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "contentDigest": { "$ref": "#/$defs/digest" },
+        "toolId": { "$ref": "#/$defs/identifier" },
+        "targetName": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "portableSetupRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["setupId", "setupRevisionId", "revisionNumber", "items"],
+      "properties": {
+        "setupId": { "$ref": "#/$defs/identifier" },
+        "setupRevisionId": { "$ref": "#/$defs/identifier" },
+        "revisionNumber": { "type": "integer", "minimum": 1 },
+        "items": {
+          "type": "array",
+          "maxItems": 5000,
+          "items": { "$ref": "#/$defs/portableSetupRevisionItem" }
+        }
+      }
+    },
     "planSetupJob": {
       "type": "object",
       "additionalProperties": false,
@@ -98,10 +138,10 @@
         "payload": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["projectId", "setupRevisionId"],
+          "required": ["projectId", "revision"],
           "properties": {
             "projectId": { "$ref": "#/$defs/identifier" },
-            "setupRevisionId": { "$ref": "#/$defs/identifier" }
+            "revision": { "$ref": "#/$defs/portableSetupRevision" }
           }
         }
       }
@@ -109,9 +149,21 @@
     "planApproval": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["approvalId", "planDigest", "approvedBy", "approvedAt", "expiresAt"],
+      "required": [
+        "approvalId",
+        "organizationId",
+        "projectInstanceId",
+        "setupRevisionId",
+        "planDigest",
+        "approvedBy",
+        "approvedAt",
+        "expiresAt"
+      ],
       "properties": {
         "approvalId": { "$ref": "#/$defs/identifier" },
+        "organizationId": { "$ref": "#/$defs/identifier" },
+        "projectInstanceId": { "$ref": "#/$defs/identifier" },
+        "setupRevisionId": { "$ref": "#/$defs/identifier" },
         "planDigest": { "$ref": "#/$defs/digest" },
         "approvedBy": { "$ref": "#/$defs/identifier" },
         "approvedAt": { "$ref": "#/$defs/timestamp" },
@@ -127,10 +179,10 @@
         "payload": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["projectId", "setupRevisionId", "approval"],
+          "required": ["projectId", "revision", "approval"],
           "properties": {
             "projectId": { "$ref": "#/$defs/identifier" },
-            "setupRevisionId": { "$ref": "#/$defs/identifier" },
+            "revision": { "$ref": "#/$defs/portableSetupRevision" },
             "approval": { "$ref": "#/$defs/planApproval" }
           }
         }
@@ -260,13 +312,17 @@
     "canonicalPlan": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["setupRevisionId", "planDigest", "actions"],
+      "required": ["setupRevisionId", "planDigest", "actions", "conflicts"],
       "properties": {
         "setupRevisionId": { "$ref": "#/$defs/identifier" },
         "planDigest": { "$ref": "#/$defs/digest" },
         "actions": {
           "type": "array",
           "items": { "$ref": "#/$defs/planAction" }
+        },
+        "conflicts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
         }
       }
     },
@@ -328,10 +384,23 @@
         "payload": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["projectId", "operationId", "outcome", "recoverability", "completedAt"],
+          "required": [
+            "projectId",
+            "operationId",
+            "restoredSetupRevisionId",
+            "outcome",
+            "recoverability",
+            "completedAt"
+          ],
           "properties": {
             "projectId": { "$ref": "#/$defs/identifier" },
             "operationId": { "$ref": "#/$defs/identifier" },
+            "restoredSetupRevisionId": {
+              "oneOf": [
+                { "$ref": "#/$defs/identifier" },
+                { "type": "null" }
+              ]
+            },
             "outcome": { "enum": ["applied", "rolledBack", "noChange"] },
             "recoverability": { "$ref": "#/$defs/recoverability" },
             "completedAt": { "$ref": "#/$defs/timestamp" }

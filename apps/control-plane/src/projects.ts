@@ -19,7 +19,14 @@ export interface StoredProject extends ProjectSummary {
 
 export interface ScanJobRecord {
   jobId: string
-  state: 'pending' | 'leased' | 'succeeded' | 'failed' | 'expired' | 'cancelled'
+  state:
+    | 'pending'
+    | 'leased'
+    | 'acknowledged'
+    | 'succeeded'
+    | 'failed'
+    | 'expired'
+    | 'cancelled'
   result: ResultEnvelope | null
 }
 
@@ -215,7 +222,11 @@ export class ProjectService {
     if (!scan) {
       throw new ProjectServiceError(404, 'scanNotFound', 'project scan was not found')
     }
-    if (scan.state === 'pending' || scan.state === 'leased') {
+    if (
+      scan.state === 'pending' ||
+      scan.state === 'leased' ||
+      scan.state === 'acknowledged'
+    ) {
       throw new ProjectServiceError(409, 'scanNotReady', 'project scan is still running')
     }
     if (scan.state !== 'succeeded') {

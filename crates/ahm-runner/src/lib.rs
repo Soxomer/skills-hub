@@ -1,5 +1,6 @@
 use ahm_domain::{ProtocolVersion, PROTOCOL_VERSION};
 
+pub mod artifact_cache;
 pub mod central_repo;
 pub mod content_hash;
 pub mod execution;

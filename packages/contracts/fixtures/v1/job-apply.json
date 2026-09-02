@@ -11,9 +11,26 @@
     "kind": "applyPlan",
     "payload": {
       "projectId": "project_01",
-      "setupRevisionId": "setup_revision_03",
+      "revision": {
+        "setupId": "setup_03",
+        "setupRevisionId": "setup_revision_03",
+        "revisionNumber": 3,
+        "items": [
+          {
+            "artifactId": "artifact_pdf_01",
+            "artifactKind": "skill",
+            "portableSource": "catalog:artifact_pdf_01",
+            "contentDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "toolId": "codex",
+            "targetName": "pdf"
+          }
+        ]
+      },
       "approval": {
         "approvalId": "approval_01",
+        "organizationId": "org_01",
+        "projectInstanceId": "project_instance_01",
+        "setupRevisionId": "setup_revision_03",
         "planDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "approvedBy": "user_01",
         "approvedAt": "2026-08-31T08:19:00Z",

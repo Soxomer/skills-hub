@@ -10,6 +10,7 @@
     "payload": {
       "projectId": "project_01",
       "operationId": "operation_01",
+      "restoredSetupRevisionId": "setup_revision_01",
       "outcome": "rolledBack",
       "recoverability": "notNeeded",
       "completedAt": "2026-08-31T08:31:00Z"

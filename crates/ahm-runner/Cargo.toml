@@ -7,6 +7,7 @@ rust-version.workspace = true
 [dependencies]
 ahm-domain = { path = "../ahm-domain" }
 anyhow.workspace = true
+base64.workspace = true
 clap.workspace = true
 chrono.workspace = true
 dirs.workspace = true

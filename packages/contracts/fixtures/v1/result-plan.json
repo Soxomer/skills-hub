@@ -22,7 +22,8 @@
               "projectRelativePath": ".agents/skills/pdf"
             }
           }
-        ]
+        ],
+        "conflicts": []
       }
     }
   }

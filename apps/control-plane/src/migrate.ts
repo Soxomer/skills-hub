@@ -25,6 +25,7 @@ try {
     [1, '0001_control_plane.sql'],
     [2, '0002_runner_transport.sql'],
     [3, '0003_default_capture.sql'],
+    [4, '0004_runner_delivery.sql'],
   ] as const) {
     if (applied.has(version)) continue
     const url = new URL(`../migrations/${name}`, import.meta.url)

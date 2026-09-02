@@ -1,6 +1,7 @@
 use ahm_domain::{
-    ClaimRunnerJobRequest, IsoTimestamp, ProtocolErrorCode, ResultEnvelope, RunnerCapabilityReport,
-    RunnerResult, SubmitRunnerResultRequest, PROTOCOL_VERSION,
+    AcknowledgeRunnerJobRequest, ClaimRunnerJobRequest, Digest, DiscoveryState, IsoTimestamp,
+    ProtocolErrorCode, ResultEnvelope, RunnerCapabilityReport, RunnerJob, RunnerResult,
+    SubmitRunnerResultRequest, PROTOCOL_VERSION,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::{SecondsFormat, Utc};
@@ -23,6 +24,7 @@ pub struct RunnerWorker<T, E> {
     state: RunnerStateStore,
     transport: T,
     executor: E,
+    claim_wait_ms: u64,
 }
 
 impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
@@ -31,7 +33,13 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
             state,
             transport,
             executor,
+            claim_wait_ms: 25_000,
         }
+    }
+
+    pub fn with_claim_wait_ms(mut self, claim_wait_ms: u64) -> Self {
+        self.claim_wait_ms = claim_wait_ms.min(25_000);
+        self
     }
 
     pub fn run_once(&mut self) -> Result<WorkerOutcome> {
@@ -48,6 +56,7 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
                 runner_version: env!("CARGO_PKG_VERSION").to_owned(),
                 capabilities: self.executor.capabilities(),
             },
+            wait_ms: Some(self.claim_wait_ms),
         };
         let Some(lease) = self.transport.claim_job(&identity, &request)? else {
             return Ok(WorkerOutcome::Idle);
@@ -58,10 +67,18 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
             .project_instance(&lease.job.project_instance_id)?;
         let request_json = serde_json::to_string(&lease.job)?;
         let request_digest = sha256(&request_json);
-        match self
+        let start = self
             .state
-            .begin_job(&lease.job, &lease.lease_id, &request_digest, &now)?
-        {
+            .begin_job(&lease.job, &lease.lease_id, &request_digest, &now)?;
+        self.transport.acknowledge_job(
+            &identity,
+            lease.job.job_id.as_str(),
+            &AcknowledgeRunnerJobRequest {
+                lease_id: lease.lease_id.clone(),
+                request_digest: Digest::new(request_digest.clone())?,
+            },
+        )?;
+        match start {
             JournalStartOutcome::Completed { .. } => {
                 self.flush_outbox(&identity)?;
                 Ok(WorkerOutcome::Replayed)
@@ -80,20 +97,47 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
                         false,
                     ),
                 };
-                self.transport.submit_result(
-                    &identity,
-                    lease.job.job_id.as_str(),
-                    &SubmitRunnerResultRequest {
-                        lease_id: lease.lease_id,
-                        result,
-                    },
+                let result_json = serde_json::to_string(&result)?;
+                self.state.finish_job(
+                    &lease.job,
+                    &lease.lease_id,
+                    &result_json,
+                    &sha256(&result_json),
+                    true,
+                    &utc_now(),
                 )?;
+                self.flush_outbox(&identity)?;
                 Ok(WorkerOutcome::Replayed)
             }
             JournalStartOutcome::Execute => {
-                let result = self
-                    .executor
-                    .execute(&identity, project.as_ref(), &lease, &now);
+                let result = if self.prepare_required_artifacts(&identity, &lease)? {
+                    self.executor
+                        .execute(&identity, project.as_ref(), &lease, &now)
+                } else {
+                    ResultEnvelope {
+                        protocol_version: PROTOCOL_VERSION,
+                        job_id: lease.job.job_id.clone(),
+                        idempotency_key: lease.job.idempotency_key.clone(),
+                        organization_id: lease.job.organization_id.clone(),
+                        device_id: lease.job.device_id.clone(),
+                        project_instance_id: lease.job.project_instance_id.clone(),
+                        result: protocol_error(
+                            ProtocolErrorCode::Conflict,
+                            "Setup artifact is not available from the local or shared cache",
+                            false,
+                        ),
+                    }
+                };
+                self.publish_scan_artifacts(&identity, &result)?;
+                match &result.result {
+                    RunnerResult::ApplyReceipt(receipt) => self
+                        .state
+                        .record_materialization(&lease.job.project_instance_id, receipt)?,
+                    RunnerResult::RollbackReceipt(receipt) => self
+                        .state
+                        .mark_materialization_rolled_back(receipt.operation_id.as_str())?,
+                    _ => {}
+                }
                 let failed = matches!(result.result, RunnerResult::Error(_));
                 let result_json = serde_json::to_string(&result)?;
                 self.state.finish_job(
@@ -108,6 +152,61 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
                 Ok(WorkerOutcome::Processed)
             }
         }
+    }
+
+    fn prepare_required_artifacts(
+        &self,
+        identity: &crate::state::RunnerIdentityRecord,
+        lease: &ahm_domain::LeasedRunnerJob,
+    ) -> Result<bool> {
+        let revision = match &lease.job.job {
+            RunnerJob::PlanSetup(job) => Some(&job.revision),
+            RunnerJob::ApplyPlan(job) => Some(&job.revision),
+            RunnerJob::ScanProject(_) | RunnerJob::RollbackOperation(_) => None,
+        };
+        let Some(revision) = revision else {
+            return Ok(true);
+        };
+        let mut seen = std::collections::HashSet::new();
+        for item in &revision.items {
+            if !seen.insert(item.content_digest.as_str().to_owned())
+                || self.executor.has_artifact(&item.content_digest)?
+            {
+                continue;
+            }
+            let Some(bundle) = self
+                .transport
+                .load_artifact(identity, &item.content_digest)?
+            else {
+                return Ok(false);
+            };
+            self.executor.store_artifact(&bundle)?;
+        }
+        Ok(true)
+    }
+
+    fn publish_scan_artifacts(
+        &self,
+        identity: &crate::state::RunnerIdentityRecord,
+        result: &ResultEnvelope,
+    ) -> Result<()> {
+        let RunnerResult::ScanResult(scan) = &result.result else {
+            return Ok(());
+        };
+        let mut seen = std::collections::HashSet::new();
+        for discovery in &scan.discoveries {
+            if discovery.state != DiscoveryState::Available
+                || !seen.insert(discovery.content_digest.as_str().to_owned())
+            {
+                continue;
+            }
+            let bundle = self
+                .executor
+                .artifact_bundle(&discovery.content_digest)?
+                .context("scanned artifact is missing from the local cache")?;
+            self.transport.store_artifact(identity, &bundle)?;
+        }
+        Ok(())
     }
 
     fn flush_outbox(&self, identity: &crate::state::RunnerIdentityRecord) -> Result<()> {
@@ -204,6 +303,34 @@ mod tests {
             _request: &ClaimRunnerJobRequest,
         ) -> Result<Option<LeasedRunnerJob>> {
             Ok(self.jobs.borrow_mut().pop_front())
+        }
+
+        fn acknowledge_job(
+            &self,
+            _identity: &RunnerIdentityRecord,
+            _job_id: &str,
+            _request: &ahm_domain::AcknowledgeRunnerJobRequest,
+        ) -> Result<ahm_domain::RunnerJobAcknowledgement> {
+            Ok(ahm_domain::RunnerJobAcknowledgement {
+                accepted: true,
+                duplicate: false,
+            })
+        }
+
+        fn store_artifact(
+            &self,
+            _identity: &RunnerIdentityRecord,
+            _bundle: &ahm_domain::ArtifactBundle,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn load_artifact(
+            &self,
+            _identity: &RunnerIdentityRecord,
+            _digest: &ahm_domain::Digest,
+        ) -> Result<Option<ahm_domain::ArtifactBundle>> {
+            Ok(None)
         }
 
         fn submit_result(

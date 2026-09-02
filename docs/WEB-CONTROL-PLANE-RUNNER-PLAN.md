@@ -168,13 +168,13 @@ Demo: all milestone flows work in a normal browser with the runner installed.
   Acceptance: The web application loads in a normal browser, reflects waiting, connected, offline, expired, and revoked states, and contains no Tauri runtime dependency.
   Verify: Frontend unit tests, production build, and a browser smoke test.
 
-- [ ] **8. Deliver the remote scan and Default review slice**
+- [x] **8. Deliver the remote scan and Default review slice**
   Roadmap ref: Increment B.
   What to build: Let the web UI register a ProjectInstance, request a scan, display discoveries and conflicts, and capture the accepted project Default revision through the control plane.
   Acceptance: The server stores portable Default content and provenance while local absolute paths remain runner-only.
   Verify: End-to-end test using a temporary project and runner database.
 
-- [ ] **9. Deliver plan, approval, apply, and Use Default**
+- [x] **9. Deliver plan, approval, apply, and Use Default**
   Roadmap ref: Increment C.
   What to build: Assign an exact Setup Revision, request a local plan, approve its digest, apply it, report ownership and receipt data, and manually select the project's Default.
   Acceptance: Changed or expired plans cannot be applied; unmanaged content is preserved; repeated delivery is idempotent.
@@ -200,14 +200,15 @@ share protocol fixtures between TypeScript and Rust, separate shared PostgreSQL
 state from runner-local SQLite state, and move scan, plan, apply, rollback,
 adapters, recovery primitives, and the `ahm` CLI into `ahm-runner`. The legacy
 desktop now consumes runner-owned modules through thin path-resolution wrappers.
-Runner enrollment and outbound job transport now use protocol-v1 HTTPS polling.
+Runner enrollment and outbound job transport now use protocol-v1 held HTTPS claims.
 The runner stores its device credential, project paths, operation journal, and
 pending result outbox locally; PostgreSQL stores enrollment, capability, lease,
 cancellation, and portable result state. The browser now provides typed runner
-enrollment, health, recovery, and ProjectInstance guidance. Remote execution is deliberately
-limited to `scanProject` until portable Setup snapshots and digest-bound apply
-are carried by the protocol. Ticket 7 adds the browser connection/status UX;
-ticket 8 completes remote scan and Default review.
+enrollment, health, recovery, and ProjectInstance guidance. Remote execution
+carries portable immutable Setup snapshots, content-addressed artifact bundles,
+digest-bound approval, apply receipts, and rollback through the same declarative
+protocol. PostgreSQL is the durable job outbox; the runner persists a leased job
+before acknowledging it and persists every result before delivery.
 
 ## 10. Runner transport operations
 
@@ -225,5 +226,6 @@ ahm worker
 are never printed after enrollment, the server stores only their SHA-256 hash,
 and revocation immediately rejects subsequent claims and result delivery.
 Loopback HTTP is supported for development; other runner endpoints require
-HTTPS. The worker claims one job at a time and retries its durable result outbox
-after a disconnect without re-executing a completed job.
+HTTPS. The worker holds one outbound claim at a time for immediate dispatch and
+retries its durable result outbox after a disconnect without re-executing a
+completed job.

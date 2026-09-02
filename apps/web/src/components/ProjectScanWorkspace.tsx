@@ -19,6 +19,7 @@ import type { ControlPlaneClient } from '../api'
 import { groupDiscoveriesByTool } from '../scan-state'
 import { useProjectScan } from '../useProjectScan'
 import { CommandBlock } from './CommandBlock'
+import { ProjectSwitchWorkspace } from './ProjectSwitchWorkspace'
 
 interface ProjectScanWorkspaceProps {
   client: ControlPlaneClient
@@ -316,6 +317,15 @@ export const ProjectScanWorkspace = memo(function ProjectScanWorkspace({
           </div>
         )}
       </section>
+
+      {completedRevision && workflow.selectedProject && selectedInstance && (
+        <ProjectSwitchWorkspace
+          client={client}
+          projectId={workflow.selectedProject.projectId}
+          projectInstanceId={selectedInstance.projectInstanceId}
+          runnerOnline={workerReady}
+        />
+      )}
     </>
   )
 })

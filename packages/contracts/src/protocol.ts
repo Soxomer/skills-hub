@@ -15,6 +15,22 @@ export type ArtifactId = string
 export type DiscoveryId = string
 export type IsoTimestamp = string
 
+export interface PortableSetupRevisionItem {
+  artifactId: ArtifactId
+  artifactKind: DiscoveryKind
+  portableSource: string | null
+  contentDigest: string
+  toolId: string
+  targetName: string
+}
+
+export interface PortableSetupRevision {
+  setupId: string
+  setupRevisionId: SetupRevisionId
+  revisionNumber: number
+  items: PortableSetupRevisionItem[]
+}
+
 export interface RunnerCapabilities {
   scanProject: boolean
   planSetup: boolean
@@ -43,12 +59,15 @@ export interface PlanSetupJob {
   kind: 'planSetup'
   payload: {
     projectId: ProjectId
-    setupRevisionId: SetupRevisionId
+    revision: PortableSetupRevision
   }
 }
 
 export interface PlanApproval {
   approvalId: ApprovalId
+  organizationId: OrganizationId
+  projectInstanceId: ProjectInstanceId
+  setupRevisionId: SetupRevisionId
   planDigest: string
   approvedBy: UserId
   approvedAt: IsoTimestamp
@@ -59,7 +78,7 @@ export interface ApplyPlanJob {
   kind: 'applyPlan'
   payload: {
     projectId: ProjectId
-    setupRevisionId: SetupRevisionId
+    revision: PortableSetupRevision
     approval: PlanApproval
   }
 }
@@ -129,6 +148,7 @@ export interface CanonicalPlan {
   setupRevisionId: SetupRevisionId
   planDigest: string
   actions: PlanAction[]
+  conflicts: string[]
 }
 
 export interface PlanResult {
@@ -161,6 +181,7 @@ export interface RollbackReceipt {
   payload: {
     projectId: ProjectId
     operationId: OperationId
+    restoredSetupRevisionId: SetupRevisionId | null
     outcome: OperationOutcome
     recoverability: Recoverability
     completedAt: IsoTimestamp

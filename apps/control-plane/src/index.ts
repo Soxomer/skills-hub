@@ -8,6 +8,8 @@ export * from './projects-pg.js'
 export * from './runner-transport.js'
 export * from './runner-transport-memory.js'
 export * from './runner-transport-pg.js'
+export * from './switching.js'
+export * from './switching-pg.js'
 
 export interface ControlPlaneBoundary {
   protocolVersion: typeof PROTOCOL_VERSION

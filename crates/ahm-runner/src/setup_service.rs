@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
+use ahm_domain::PortableSetupRevision;
 use anyhow::{Context, Result};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -292,6 +293,113 @@ impl SetupService {
                 status: skill.status,
             })
             .collect())
+    }
+
+    pub fn stage_portable_revision(
+        &self,
+        revision: &PortableSetupRevision,
+        artifact_cache_root: &Path,
+    ) -> Result<String> {
+        let setup_id = format!("remote:{}", revision.setup_id.as_str());
+        let revision_id = format!("remote:{}", revision.setup_revision_id.as_str());
+        let now = now_ms();
+        let mut staged_items = Vec::with_capacity(revision.items.len());
+        for item in &revision.items {
+            validate_skill_name(item.target_name.as_str())?;
+            self.resolve_project_tool(item.tool_id.as_str())?;
+            let digest = item
+                .content_digest
+                .as_str()
+                .strip_prefix("sha256:")
+                .context("portable artifact digest must use sha256")?;
+            if digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                anyhow::bail!("portable artifact digest is invalid");
+            }
+            let central_path = artifact_cache_root.join(digest);
+            if !central_path.is_dir() || hash_dir(&central_path)? != digest {
+                anyhow::bail!("artifact is missing from the verified local cache: {digest}");
+            }
+            staged_items.push((
+                format!("remote-artifact-{digest}"),
+                item.target_name.as_str().to_owned(),
+                item.portable_source.clone(),
+                central_path.to_string_lossy().into_owned(),
+                digest.to_owned(),
+                item.tool_id.as_str().to_owned(),
+                item.target_name.as_str().to_owned(),
+            ));
+        }
+        self.store.with_conn(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
+                "INSERT OR IGNORE INTO setups
+                 (id, name, current_revision_id, created_at, updated_at, kind, initial_revision_id)
+                 VALUES (?1, ?2, NULL, ?3, ?3, 'custom', NULL)",
+                params![
+                    setup_id,
+                    format!("Remote / {}", revision.setup_id.as_str()),
+                    now
+                ],
+            )?;
+            tx.execute(
+                "INSERT OR IGNORE INTO setup_revisions
+                 (id, setup_id, revision_number, created_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![revision_id, setup_id, revision.revision_number, now],
+            )?;
+            for (skill_id, name, source_ref, central_path, digest, tool, target_name) in
+                &staged_items
+            {
+                tx.execute(
+                    "INSERT INTO skills
+                     (id, name, description, source_type, source_ref, source_subpath,
+                      source_revision, central_path, content_hash, created_at, updated_at,
+                      last_sync_at, last_seen_at, enabled, status)
+                     VALUES (?1, ?2, NULL, 'remote_cache', ?3, NULL, ?4, ?5, ?6,
+                             ?7, ?7, NULL, ?7, 1, 'ok')
+                     ON CONFLICT(id) DO UPDATE SET
+                       name = excluded.name, source_ref = excluded.source_ref,
+                       source_revision = excluded.source_revision,
+                       central_path = excluded.central_path, content_hash = excluded.content_hash,
+                       updated_at = excluded.updated_at, last_seen_at = excluded.last_seen_at,
+                       enabled = 1, status = 'ok'",
+                    params![
+                        skill_id,
+                        name,
+                        source_ref,
+                        revision.setup_revision_id.as_str(),
+                        central_path,
+                        digest,
+                        now
+                    ],
+                )?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO setup_revision_skills
+                     (revision_id, skill_id, tool, created_at, target_name)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![revision_id, skill_id, tool, now, target_name],
+                )?;
+            }
+            let stored_count: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM setup_revision_skills WHERE revision_id = ?1",
+                params![revision_id],
+                |row| row.get(0),
+            )?;
+            if stored_count != staged_items.len() as i64 {
+                anyhow::bail!("portable Setup revision changed after it was staged");
+            }
+            tx.execute(
+                "UPDATE setups SET current_revision_id = ?1, updated_at = ?2 WHERE id = ?3",
+                params![revision_id, now, setup_id],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })?;
+        Ok(setup_id)
     }
 
     pub fn preview_default_setup(
@@ -1095,6 +1203,19 @@ impl SetupService {
             plan: reconciliation.plan,
             operation_id: operation.id,
         })
+    }
+
+    pub fn rollback_operation(
+        &self,
+        project_path: &Path,
+        expected_operation_id: &str,
+    ) -> Result<ApplyResult> {
+        let project = self.resolve_project(project_path)?;
+        let operation = self.latest_operation(&project.id)?;
+        if operation.id != expected_operation_id {
+            anyhow::bail!("requested operation is not the latest recoverable operation");
+        }
+        self.rollback(project_path)
     }
 
     fn resolve_setup(&self, selector: &str) -> Result<SetupSummary> {

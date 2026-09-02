@@ -5,6 +5,8 @@ import { PostgresProjectRepository } from './projects-pg.js'
 import { ProjectService } from './projects.js'
 import { PostgresRunnerTransportRepository } from './runner-transport-pg.js'
 import { RunnerTransportService } from './runner-transport.js'
+import { PostgresSwitchingRepository } from './switching-pg.js'
+import { SwitchingService } from './switching.js'
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('DATABASE_URL is required')
@@ -17,7 +19,8 @@ const transportRepository = new PostgresRunnerTransportRepository(pool)
 const transport = new RunnerTransportService(transportRepository, { serverUrl })
 const projectRepository = new PostgresProjectRepository(pool)
 const projects = new ProjectService(projectRepository)
-const app = createControlPlaneApp(transport, projects)
+const switching = new SwitchingService(new PostgresSwitchingRepository(pool), transport)
+const app = createControlPlaneApp(transport, projects, switching)
 
 const close = async () => {
   await app.close()

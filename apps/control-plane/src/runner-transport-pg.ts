@@ -1,5 +1,6 @@
 import { PROTOCOL_VERSION } from '@ahm/contracts'
 import type {
+  ArtifactBundle,
   JobEnvelope,
   LeasedRunnerJob,
   ProtocolVersion,
@@ -14,6 +15,7 @@ import type { Pool, PoolClient, QueryResultRow } from 'pg'
 
 import type {
   JobCompletion,
+  JobAcknowledgement,
   ProjectInstanceRoute,
   RunnerAuthentication,
   RunnerDeviceRegistration,
@@ -74,6 +76,8 @@ interface JobRow extends QueryResultRow {
   state: RunnerJobStatusResponse['state']
   result_json: ResultEnvelope | null
   result_digest: string | null
+  request_digest: string | null
+  acknowledged_at: Date | null
 }
 
 function iso(value: Date | string): string {
@@ -112,7 +116,160 @@ function envelopeFromRow(row: JobRow): JobEnvelope {
     projectInstanceId: row.project_instance_id,
     issuedAt: iso(row.issued_at),
     expiresAt: iso(row.expires_at),
-    job: { kind: row.job_kind, payload: row.payload } as RunnerJob,
+    job: {
+      kind: row.job_kind,
+      payload:
+        typeof row.payload === 'string'
+          ? (JSON.parse(row.payload) as RunnerJob['payload'])
+          : row.payload,
+    } as RunnerJob,
+  }
+}
+
+function resultMatchesJob(job: JobEnvelope, result: ResultEnvelope): boolean {
+  if (
+    result.idempotencyKey !== job.idempotencyKey ||
+    result.projectInstanceId !== job.projectInstanceId
+  ) {
+    return false
+  }
+  if (result.result.kind === 'error') return true
+  if (result.result.payload.projectId !== job.job.payload.projectId) return false
+  if (job.job.kind === 'scanProject') return result.result.kind === 'scanResult'
+  if (job.job.kind === 'planSetup') {
+    return (
+      result.result.kind === 'planResult' &&
+      result.result.payload.plan.setupRevisionId === job.job.payload.revision.setupRevisionId
+    )
+  }
+  if (job.job.kind === 'applyPlan') {
+    return (
+      result.result.kind === 'applyReceipt' &&
+      result.result.payload.setupRevisionId === job.job.payload.revision.setupRevisionId &&
+      result.result.payload.planDigest === job.job.payload.approval.planDigest
+    )
+  }
+  return (
+    result.result.kind === 'rollbackReceipt' &&
+    result.result.payload.operationId === job.job.payload.operationId
+  )
+}
+
+async function persistPortableReceipt(
+  client: PoolClient,
+  job: JobEnvelope,
+  result: ResultEnvelope,
+  completedAt: string,
+): Promise<void> {
+  if (result.result.kind === 'applyReceipt') {
+    const receipt = result.result.payload
+    const approval = job.job.kind === 'applyPlan' ? job.job.payload.approval : null
+    if (!approval) throw new Error('apply receipt is missing its approved job binding')
+    await client.query(
+      `INSERT INTO operation_receipts
+       (operation_id, organization_id, device_id, project_instance_id, job_id,
+        setup_revision_id, plan_digest, outcome, recoverability, receipt, completed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)`,
+      [
+        receipt.operationId,
+        job.organizationId,
+        job.deviceId,
+        job.projectInstanceId,
+        job.jobId,
+        receipt.setupRevisionId,
+        receipt.planDigest,
+        receipt.outcome,
+        receipt.recoverability,
+        JSON.stringify(result),
+        completedAt,
+      ],
+    )
+    await client.query(
+      `INSERT INTO project_assignments
+       (organization_id, project_id, setup_revision_id, assigned_by, assigned_at)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (organization_id, project_id) DO UPDATE
+       SET setup_revision_id = EXCLUDED.setup_revision_id,
+           assigned_by = EXCLUDED.assigned_by,
+           assigned_at = EXCLUDED.assigned_at`,
+      [
+        job.organizationId,
+        receipt.projectId,
+        receipt.setupRevisionId,
+        approval.approvedBy,
+        completedAt,
+      ],
+    )
+    await client.query(
+      `INSERT INTO audit_events
+       (id, organization_id, actor_user_id, event_kind, subject_id, details, created_at)
+       VALUES ($1, $2, $3, 'setupApplied', $4, $5::jsonb, $6)`,
+      [
+        `audit_${job.jobId}`,
+        job.organizationId,
+        approval.approvedBy,
+        receipt.operationId,
+        JSON.stringify({
+          projectInstanceId: job.projectInstanceId,
+          setupRevisionId: receipt.setupRevisionId,
+          planDigest: receipt.planDigest,
+          outcome: receipt.outcome,
+        }),
+        completedAt,
+      ],
+    )
+  } else if (result.result.kind === 'rollbackReceipt') {
+    const receipt = result.result.payload
+    const updated = await client.query(
+      `UPDATE operation_receipts
+       SET outcome = 'rolledBack', recoverability = $1, receipt = $2::jsonb,
+           completed_at = $3
+       WHERE organization_id = $4 AND project_instance_id = $5 AND operation_id = $6`,
+      [
+        receipt.recoverability,
+        JSON.stringify(result),
+        completedAt,
+        job.organizationId,
+        job.projectInstanceId,
+        receipt.operationId,
+      ],
+    )
+    if (updated.rowCount !== 1) throw new Error('rollback receipt has no matching apply receipt')
+    if (receipt.restoredSetupRevisionId) {
+      await client.query(
+        `UPDATE project_assignments
+         SET setup_revision_id = $1, assigned_at = $2
+         WHERE organization_id = $3 AND project_id = (
+           SELECT project_id FROM project_instances
+           WHERE organization_id = $3 AND id = $4
+         )`,
+        [receipt.restoredSetupRevisionId, completedAt, job.organizationId, job.projectInstanceId],
+      )
+    } else {
+      await client.query(
+        `DELETE FROM project_assignments
+         WHERE organization_id = $1 AND project_id = (
+           SELECT project_id FROM project_instances
+           WHERE organization_id = $1 AND id = $2
+         )`,
+        [job.organizationId, job.projectInstanceId],
+      )
+    }
+    await client.query(
+      `INSERT INTO audit_events
+       (id, organization_id, actor_user_id, event_kind, subject_id, details, created_at)
+       VALUES ($1, $2, NULL, 'setupRolledBack', $3, $4::jsonb, $5)`,
+      [
+        `audit_${job.jobId}`,
+        job.organizationId,
+        receipt.operationId,
+        JSON.stringify({
+          projectInstanceId: job.projectInstanceId,
+          restoredSetupRevisionId: receipt.restoredSetupRevisionId,
+        }),
+        completedAt,
+      ],
+    )
   }
 }
 
@@ -348,6 +505,43 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
     )
   }
 
+  async storeArtifact(
+    runner: RunnerAuthentication,
+    bundle: ArtifactBundle,
+    now: string,
+  ): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO artifact_bundles
+       (organization_id, content_digest, bundle, uploaded_by_device_id, created_at)
+       VALUES ($1, $2, $3::jsonb, $4, $5)
+       ON CONFLICT (organization_id, content_digest) DO NOTHING`,
+      [
+        runner.organizationId,
+        bundle.contentDigest,
+        JSON.stringify(bundle),
+        runner.deviceId,
+        now,
+      ],
+    )
+  }
+
+  async loadArtifact(
+    runner: RunnerAuthentication,
+    contentDigest: string,
+  ): Promise<ArtifactBundle | null> {
+    const result = await this.pool.query<QueryResultRow & { bundle: ArtifactBundle | string }>(
+      `SELECT bundle FROM artifact_bundles
+       WHERE organization_id = $1 AND content_digest = $2`,
+      [runner.organizationId, contentDigest],
+    )
+    const bundle = result.rows[0]?.bundle
+    return bundle
+      ? typeof bundle === 'string'
+        ? (JSON.parse(bundle) as ArtifactBundle)
+        : bundle
+      : null
+  }
+
   async claimJob(
     runner: RunnerAuthentication,
     supportedKinds: readonly string[],
@@ -373,12 +567,14 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
       )
       await client.query(
         `UPDATE runner_jobs SET state = 'expired'
-         WHERE device_id = $1 AND state IN ('pending', 'leased') AND expires_at <= $2`,
+         WHERE device_id = $1 AND state IN ('pending', 'leased', 'acknowledged')
+           AND expires_at <= $2`,
         [runner.deviceId, now],
       )
       const existing = await client.query<JobRow>(
         `SELECT * FROM runner_jobs
-         WHERE organization_id = $1 AND device_id = $2 AND state = 'leased'
+         WHERE organization_id = $1 AND device_id = $2
+           AND state IN ('leased', 'acknowledged')
            AND lease_expires_at > $3 AND job_kind = ANY($4::text[])
          ORDER BY issued_at LIMIT 1`,
         [runner.organizationId, runner.deviceId, now, supportedKinds],
@@ -388,11 +584,12 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
       const selected = await client.query<JobRow>(
         `SELECT * FROM runner_jobs
          WHERE organization_id = $1 AND device_id = $2
-           AND (state = 'pending' OR (state = 'leased' AND lease_expires_at <= $3))
+           AND (state = 'pending' OR
+             (state IN ('leased', 'acknowledged') AND lease_expires_at <= $3))
            AND expires_at > $3 AND job_kind = ANY($4::text[])
          ORDER BY issued_at
-         FOR UPDATE SKIP LOCKED
-         LIMIT 1`,
+         LIMIT 1
+         FOR UPDATE SKIP LOCKED`,
         [runner.organizationId, runner.deviceId, now, supportedKinds],
       )
       const job = selected.rows[0]
@@ -400,11 +597,49 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
       const updated = await client.query<JobRow>(
         `UPDATE runner_jobs
          SET state = 'leased', lease_id = $1, lease_expires_at = $2,
+             request_digest = NULL, acknowledged_at = NULL,
              attempt_count = attempt_count + 1
          WHERE id = $3 RETURNING *`,
         [leaseId, leaseExpiresAt, job.id],
       )
       return this.leasedFromRow(updated.rows[0] as JobRow)
+    })
+  }
+
+  async acknowledgeJob(
+    runner: RunnerAuthentication,
+    jobId: string,
+    leaseId: string,
+    requestDigest: string,
+    now: string,
+  ): Promise<JobAcknowledgement> {
+    return transaction(this.pool, async (client) => {
+      const found = await client.query<JobRow>(
+        `SELECT * FROM runner_jobs
+         WHERE organization_id = $1 AND device_id = $2 AND id = $3
+         FOR UPDATE`,
+        [runner.organizationId, runner.deviceId, jobId],
+      )
+      const job = found.rows[0]
+      if (!job) return { outcome: 'unknown' }
+      if (job.state === 'acknowledged') {
+        return {
+          outcome:
+            job.lease_id === leaseId && job.request_digest === requestDigest
+              ? 'duplicate'
+              : 'conflict',
+        }
+      }
+      if (job.state !== 'leased' || job.lease_id !== leaseId) {
+        return { outcome: 'conflict' }
+      }
+      await client.query(
+        `UPDATE runner_jobs
+         SET state = 'acknowledged', request_digest = $1, acknowledged_at = $2
+         WHERE id = $3`,
+        [requestDigest, now, jobId],
+      )
+      return { outcome: 'accepted' }
     })
   }
 
@@ -428,7 +663,11 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
       if (job.result_digest) {
         return { outcome: job.result_digest === resultDigest ? 'duplicate' : 'conflict' }
       }
-      if (job.state !== 'leased' || job.lease_id !== leaseId) return { outcome: 'conflict' }
+      if (job.state !== 'acknowledged' || job.lease_id !== leaseId) {
+        return { outcome: 'conflict' }
+      }
+      const envelope = envelopeFromRow(job)
+      if (!resultMatchesJob(envelope, result)) return { outcome: 'conflict' }
       const terminalState =
         result.result.kind === 'error' && result.result.payload.code === 'jobCancelled'
           ? 'cancelled'
@@ -441,6 +680,9 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
          WHERE id = $5`,
         [terminalState, JSON.stringify(result), resultDigest, now, jobId],
       )
+      if (terminalState === 'succeeded') {
+        await persistPortableReceipt(client, envelope, result, now)
+      }
       return { outcome: 'accepted' }
     })
   }
@@ -474,7 +716,8 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
        SET cancel_requested_at = $1,
            state = CASE WHEN state = 'pending' THEN 'cancelled' ELSE state END,
            completed_at = CASE WHEN state = 'pending' THEN $1 ELSE completed_at END
-       WHERE organization_id = $2 AND id = $3 AND state IN ('pending', 'leased')`,
+       WHERE organization_id = $2 AND id = $3
+         AND state IN ('pending', 'leased', 'acknowledged')`,
       [now, organizationId, jobId],
     )
     return result.rowCount === 1
