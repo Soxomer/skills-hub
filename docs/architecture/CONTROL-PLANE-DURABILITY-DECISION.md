@@ -22,7 +22,7 @@ Rocicorp Zero was considered separately as a browser synchronization layer. It i
 
 ## Experiment
 
-The test-only DBOS fixture implements the interaction as one durable workflow and uses an idempotent port for the existing runner mailbox. It runs only when `AHM_DBOS_TEST_DATABASE_URL` points to a real PostgreSQL database.
+The temporary DBOS fixture implemented the interaction as one durable workflow and used an idempotent port for the existing runner mailbox. It ran against a real PostgreSQL database during the spike and was removed after the decision so DBOS does not remain in the repository dependency tree.
 
 The fixture verifies:
 
@@ -35,7 +35,7 @@ The fixture verifies:
 
 The experiment used `@dbos-inc/dbos-sdk` 4.27.6 and PostgreSQL 16. The focused test command passed 21 control-plane tests, including all five DBOS cases.
 
-The complete repository gate also passed: workspace boundaries, lint, 92 normal TypeScript tests, every production build, Rust formatting and Clippy, and 179 Rust tests. The five PostgreSQL-backed DBOS cases are intentionally skipped by the normal test command and run explicitly with `AHM_DBOS_TEST_DATABASE_URL`, so the standard gate does not require Docker or an external database.
+The complete repository gate also passed after the spike: workspace boundaries, lint, every production build, Rust formatting and Clippy, and the complete TypeScript and Rust test suites. The five PostgreSQL-backed DBOS cases were executed before their temporary harness and dependency were removed.
 
 DBOS created 11 tables and 33 indexes in its isolated schema:
 
@@ -73,7 +73,7 @@ Keep the current architecture for the web-runner cutover:
 
 `browser → TypeScript control plane/PostgreSQL → outbound HTTPS → Rust worker/SQLite → project filesystem`
 
-DBOS remains a development-only dependency for the reproducible fixture. It is not imported by `src`, launched by the production server, or part of the deployed runtime.
+The DBOS dependency and temporary fixture are not retained. The production server, normal development installation, and repository quality gate contain no DBOS runtime or package.
 
 Do not adopt Zero now. There is no demonstrated offline or collaborative browser-editing requirement that justifies `zero-cache`, client schema management, and PostgreSQL logical replication. Normal control-plane APIs remain authoritative.
 
