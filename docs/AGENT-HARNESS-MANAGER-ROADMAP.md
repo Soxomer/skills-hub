@@ -73,7 +73,7 @@ Every registered project owns its own Default Setup. There is no singleton Defau
 
 The primary product UI is a hosted web application backed by a shared control plane. A constrained `ahm` runner executes scans, plans, materialization, rollback, and drift checks wherever the project filesystem exists. The browser never writes directly to a workstation, and the control plane never sends arbitrary shell commands or absolute filesystem paths.
 
-Tauri is a temporary application shell rather than the long-term product boundary. It receives no product-only execution behavior that cannot be reused by the standalone runner.
+The previous application shell has been removed. Product behavior belongs to the web, control plane, or standalone runner boundaries.
 
 ## 4. Domain model
 
@@ -312,7 +312,7 @@ AI may explain findings, propose configuration changes, or draft Plugin Variants
 
 ## 10. Runner and CLI direction
 
-The CLI is the local administration surface of the `ahm` runner. The hosted web UI reaches the same constrained execution behavior through versioned declarative jobs rather than Tauri IPC. Command names below establish intent; exact syntax may evolve during implementation.
+The CLI is the local administration surface of the `ahm` runner. The hosted web UI reaches the same constrained execution behavior through versioned declarative jobs. Command names below establish intent; exact syntax may evolve during implementation.
 
 ```text
 ahm scan [--project <path>]
@@ -408,10 +408,9 @@ and local runner share contracts while the temporary desktop shell is removed.
 | Web control plane | Store organization-visible catalogs, Setup assignments, approvals, jobs, and status without handling local filesystem paths. PostgreSQL is its relational source of truth. |
 | Local runner | Resolve device-local project paths and perform constrained scan, plan, sync, rollback, and drift operations. SQLite retains only device-local mappings, ownership, recovery, and delivery state. |
 | Evaluation orchestrator | Create isolated runs and retain reproducible evidence. |
-| Tauri command layer | Disposable adapter for the legacy desktop shell during web cutover; new packages must not depend on it and it is deleted after parity. |
 | CLI command layer | Expose the same application services to shells and automation. |
 
-The Tauri command layer and CLI must not independently implement resolution or switching rules.
+The remote dispatcher and CLI must not independently implement resolution or switching rules.
 
 ### 12.1 Delivery topology
 
@@ -660,7 +659,7 @@ Proposed ticket sequence:
 
 8. **Web project switcher integration**
 
-   Expose the same preview and actions in the browser-based UI through the control-plane and runner protocol, with English and Chinese translations.
+   Expose the same preview and actions in the English browser UI through the control-plane and runner protocol.
 
 9. **Cross-platform and schema verification**
 
@@ -679,10 +678,10 @@ Before expanding the Catalog, variant, or evaluation model, establish the final 
 5. extract scan, plan, apply, rollback, adapters, recovery, and the CLI into the standalone runner;
 6. prove a read-only browser-to-runner scan;
 7. prove plan, explicit approval, apply receipt, and manual Use Default through the same path;
-8. delete the Tauri/native application and packaging after browser parity is reached.
+8. remove the superseded application and packaging after browser parity is reached.
 
-The first seven tickets in
-[`WEB-CONTROL-PLANE-RUNNER-PLAN.md`](./WEB-CONTROL-PLANE-RUNNER-PLAN.md) are complete. Shared PostgreSQL and device-local SQLite ownership are separated, and the standalone runner now owns filesystem execution, the CLI, enrollment, outbound job polling, and durable result delivery. Browser runner connection and status UX is also complete; remote scan and Default review are next.
+All ten cutover tickets in
+[`WEB-CONTROL-PLANE-RUNNER-PLAN.md`](./WEB-CONTROL-PLANE-RUNNER-PLAN.md) are complete. Shared PostgreSQL and device-local SQLite ownership are separated, the standalone runner owns filesystem execution and durable delivery, and the browser exposes connection, scan, Default review, plan/apply, rollback, drift, and recovery UX.
 
 ## 16. Inspiration and reusable patterns
 

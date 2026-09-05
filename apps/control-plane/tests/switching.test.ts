@@ -255,6 +255,14 @@ describe('Setup switching', () => {
     })
     expect(applied.statusCode).toBe(200)
     const applyJobId = applied.json<{ jobId: string; approvalId: string }>().jobId
+    expect(
+      (
+        await pool.query<{ expires_at: Date }>(
+          `SELECT expires_at FROM runner_jobs WHERE id = $1`,
+          [applyJobId],
+        )
+      ).rows[0]?.expires_at.toISOString(),
+    ).toBe('2026-09-02T10:00:30.000Z')
     const repeated = await app.inject({
       method: 'POST',
       url: '/api/v1/project-instances/instance_01/apply',
@@ -293,6 +301,27 @@ describe('Setup switching', () => {
         )
       ).rows[0]?.setup_revision_id,
     ).toBe('revision_team')
+
+    const appliedHistory = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(appliedHistory.statusCode).toBe(200)
+    expect(appliedHistory.json()).toMatchObject({
+      assignedSetupRevisionId: 'revision_team',
+      materializedSetupRevisionId: 'revision_team',
+      health: 'current',
+      operations: [
+        {
+          jobId: applyJobId,
+          kind: 'applyPlan',
+          state: 'succeeded',
+          operationId: 'operation_01',
+          recoverability: 'rollbackAvailable',
+        },
+      ],
+    })
 
     const rollback = await app.inject({
       method: 'POST',
@@ -337,6 +366,104 @@ describe('Setup switching', () => {
         )
       ).rows[0]?.outcome,
     ).toBe('rolledBack')
+    const rolledBackHistory = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(rolledBackHistory.json()).toMatchObject({
+      assignedSetupRevisionId: 'revision_default',
+      materializedSetupRevisionId: 'revision_default',
+      health: 'current',
+      operations: [
+        {
+          kind: 'rollbackOperation',
+          state: 'succeeded',
+          operationId: 'operation_01',
+          setupRevisionId: 'revision_default',
+        },
+        { kind: 'applyPlan', state: 'succeeded' },
+      ],
+    })
+    await app.close()
+    await pool.end()
+  })
+
+  it('surfaces a partially failed local mutation as manual recovery work', async () => {
+    const { app, pool } = await harness()
+    const failedResult: ResultEnvelope = {
+      protocolVersion: '1.0',
+      jobId: 'job_failed_apply',
+      idempotencyKey: 'apply-failure',
+      organizationId: 'org_01',
+      deviceId: 'device_01',
+      projectInstanceId: 'instance_01',
+      result: {
+        kind: 'error',
+        payload: {
+          code: 'operationFailed',
+          message: 'apply failed after one local change',
+          retryable: false,
+          recoverability: 'manualIntervention',
+        },
+      },
+    }
+    await pool.query(
+      `INSERT INTO runner_jobs
+       (id, organization_id, device_id, project_instance_id, protocol_version,
+        idempotency_key, job_kind, payload, state, issued_at, expires_at, completed_at,
+        result_json, result_digest)
+       VALUES ($1, 'org_01', 'device_01', 'instance_01', '1.0', 'apply-failure',
+        'applyPlan', $2::jsonb, 'failed', $3, $4, $3, $5::jsonb, $6)`,
+      [
+        failedResult.jobId,
+        JSON.stringify({
+          projectId: 'project_01',
+          revision: {
+            setupId: 'setup_team',
+            setupRevisionId: 'revision_team',
+            revisionNumber: 1,
+            items: [],
+          },
+          approval: {
+            approvalId: 'approval_failed',
+            organizationId: 'org_01',
+            projectInstanceId: 'instance_01',
+            setupRevisionId: 'revision_team',
+            planDigest: `sha256:${'d'.repeat(64)}`,
+            approvedBy: 'user_01',
+            approvedAt: now,
+            expiresAt: '2026-09-02T10:00:30.000Z',
+          },
+        }),
+        now,
+        '2026-09-02T10:00:30.000Z',
+        JSON.stringify(failedResult),
+        `sha256:${'f'.repeat(64)}`,
+      ],
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      assignedSetupRevisionId: 'revision_default',
+      materializedSetupRevisionId: null,
+      health: 'attention',
+      operations: [
+        {
+          jobId: 'job_failed_apply',
+          state: 'failed',
+          setupRevisionId: 'revision_team',
+          errorCode: 'operationFailed',
+          retryable: false,
+          recoverability: 'manualIntervention',
+        },
+      ],
+    })
     await app.close()
     await pool.end()
   })

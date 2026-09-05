@@ -3,9 +3,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 
-const DB_FILE_NAME: &str = "skills_hub.db";
-const LEGACY_APP_IDENTIFIERS: &[&str] = &["com.tauri.dev", "com.tauri.dev.skillshub"];
-
 // Schema versioning: bump when making changes and add a migration step.
 const SCHEMA_VERSION: i32 = 10;
 
@@ -931,79 +928,6 @@ fn now_ms() -> i64 {
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
     now.as_millis() as i64
-}
-
-pub fn migrate_legacy_db_if_needed(target_db_path: &Path) -> Result<()> {
-    let Some(data_dir) = dirs::data_dir() else {
-        return Ok(());
-    };
-
-    if let Ok(true) = db_has_any_skills(target_db_path) {
-        return Ok(());
-    }
-
-    let legacy_db_path = LEGACY_APP_IDENTIFIERS
-        .iter()
-        .map(|id| data_dir.join(id).join(DB_FILE_NAME))
-        .find(|path| path.exists());
-
-    let Some(legacy_db_path) = legacy_db_path else {
-        return Ok(());
-    };
-
-    if legacy_db_path == target_db_path {
-        return Ok(());
-    }
-
-    if let Some(parent) = target_db_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create app data dir {:?}", parent))?;
-    }
-
-    if target_db_path.exists() {
-        let backup = target_db_path.with_extension(format!(
-            "bak-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs()
-        ));
-        std::fs::rename(target_db_path, &backup).with_context(|| {
-            format!(
-                "failed to backup existing db {:?} -> {:?}",
-                target_db_path, backup
-            )
-        })?;
-    }
-
-    std::fs::copy(&legacy_db_path, target_db_path).with_context(|| {
-        format!(
-            "failed to migrate legacy db {:?} -> {:?}",
-            legacy_db_path, target_db_path
-        )
-    })?;
-
-    Ok(())
-}
-
-fn db_has_any_skills(db_path: &Path) -> Result<bool> {
-    if !db_path.exists() {
-        return Ok(false);
-    }
-
-    let conn =
-        Connection::open(db_path).with_context(|| format!("failed to open db at {:?}", db_path))?;
-    let has_table: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='skills';",
-        [],
-        |row| row.get(0),
-    )?;
-    if has_table == 0 {
-        return Ok(false);
-    }
-
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM skills;", [], |row| row.get(0))?;
-    Ok(count > 0)
 }
 
 #[cfg(test)]

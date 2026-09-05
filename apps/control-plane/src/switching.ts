@@ -6,6 +6,7 @@ import {
   type ApplyReviewedPlanResponse,
   type JobEnvelope,
   type PortableSetupRevision,
+  type ProjectInstanceOperationsResponse,
   type ProjectSetupStateResponse,
   type QueuedRunnerJobResponse,
   type RequestSetupPlanRequest,
@@ -51,6 +52,10 @@ export interface SwitchingRepository {
     organizationId: string,
     projectId: string,
   ): Promise<ProjectSetupStateResponse | null>
+  projectInstanceOperations(
+    organizationId: string,
+    projectInstanceId: string,
+  ): Promise<ProjectInstanceOperationsResponse | null>
   revisionContext(
     organizationId: string,
     projectInstanceId: string,
@@ -108,6 +113,7 @@ export interface SwitchingServiceOptions {
   now?: () => Date
   randomId?: () => string
   jobTtlMs?: number
+  interactiveJobTtlMs?: number
   runnerFreshnessMs?: number
 }
 
@@ -122,6 +128,7 @@ export class SwitchingService {
   private readonly now: () => Date
   private readonly randomId: () => string
   private readonly jobTtlMs: number
+  private readonly interactiveJobTtlMs: number
   private readonly runnerFreshnessMs: number
 
   constructor(
@@ -132,6 +139,7 @@ export class SwitchingService {
     this.now = options.now ?? (() => new Date())
     this.randomId = options.randomId ?? randomUUID
     this.jobTtlMs = options.jobTtlMs ?? 5 * 60_000
+    this.interactiveJobTtlMs = options.interactiveJobTtlMs ?? 30_000
     this.runnerFreshnessMs = options.runnerFreshnessMs ?? 45_000
   }
 
@@ -145,6 +153,24 @@ export class SwitchingService {
     )
     if (!state) throw new SwitchingError(404, 'projectNotFound', 'project was not found')
     return state
+  }
+
+  async projectInstanceOperations(
+    actor: RequestActor,
+    projectInstanceId: string,
+  ): Promise<ProjectInstanceOperationsResponse> {
+    const history = await this.repository.projectInstanceOperations(
+      actor.organizationId,
+      requireIdentifier(projectInstanceId, 'project instance ID'),
+    )
+    if (!history) {
+      throw new SwitchingError(
+        404,
+        'projectInstanceNotFound',
+        'project instance was not found',
+      )
+    }
+    return history
   }
 
   async requestPlan(
@@ -201,7 +227,7 @@ export class SwitchingService {
       approvalId: `approval_${this.randomId()}`,
       applyJobId: `job_${this.randomId()}`,
       issuedAt: now.toISOString(),
-      expiresAt: new Date(now.getTime() + this.jobTtlMs).toISOString(),
+      expiresAt: new Date(now.getTime() + this.interactiveJobTtlMs).toISOString(),
       runnerFreshAfter: new Date(now.getTime() - this.runnerFreshnessMs).toISOString(),
     })
     if (outcome.outcome === 'planMissing') {
@@ -242,7 +268,7 @@ export class SwitchingService {
       operationId: requireIdentifier(request?.operationId, 'operation ID'),
       jobId: `job_${this.randomId()}`,
       issuedAt: now.toISOString(),
-      expiresAt: new Date(now.getTime() + this.jobTtlMs).toISOString(),
+      expiresAt: new Date(now.getTime() + this.interactiveJobTtlMs).toISOString(),
       runnerFreshAfter: new Date(now.getTime() - this.runnerFreshnessMs).toISOString(),
     })
     if (outcome.outcome === 'receiptMissing') {

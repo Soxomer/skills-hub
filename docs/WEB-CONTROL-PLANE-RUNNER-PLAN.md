@@ -1,13 +1,13 @@
 # Web Control Plane and Local Runner — Implementation Plan
 
-Status: tickets 1–7 complete; remote scan and Default review are next
+Status: tickets 1–10 complete; web and runner cutover delivered
 
 Last updated: 2026-09-01
 
 ## 1. Outcome
 
-Move Agent Harness Manager from a Tauri-centered application to a hosted web
-control plane connected to a constrained local `ahm` runner.
+Deliver Agent Harness Manager as a hosted web control plane connected to a
+constrained local `ahm` runner.
 
 The milestone is complete when a user can open the web application, connect a
 runner, select a registered project, request a scan, review the project's
@@ -48,14 +48,11 @@ crates/
   ahm-domain/             Portable identifiers, desired-state and protocol types
   ahm-runner/             CLI, local SQLite and filesystem execution
 
-legacy/
-  desktop/                Temporary migration input; deleted after web cutover
 ```
 
-The physical move should be incremental. Code is extracted behind stable
-boundaries and kept passing before the old location is removed. Tauri receives
-no new product behavior, no new package may depend on it, and the native shell
-is deleted after browser parity is reached.
+The removed application shell is retained in repository history only. Supported
+builds and releases contain the web application, control plane, contracts,
+runner, and CLI.
 
 ## 4. Identity model
 
@@ -98,7 +95,7 @@ Create the workspace, split portable contracts from local execution, and keep
 the existing CLI behavior passing. No networking is required yet.
 
 Demo: the standalone runner executes the existing per-project Default scan and
-tests without linking to Tauri.
+tests as a headless process.
 
 ### Increment B — Read-only web-to-runner slice
 
@@ -120,7 +117,7 @@ its project Default without losing unmanaged content.
 ### Increment D — Web cutover
 
 Move the remaining useful React screens behind the web API, add drift and
-offline states, and delete the Tauri/native application and packaging.
+offline states, and remove the superseded application shell and packaging.
 
 Demo: all milestone flows work in a normal browser with the runner installed.
 
@@ -134,8 +131,8 @@ Demo: all milestone flows work in a normal browser with the runner installed.
 
 - [x] **2. Create web, control-plane, contracts, and Rust workspace boundaries**
   Roadmap ref: Architecture boundaries.
-  What to build: Introduce the target directories and build orchestration without changing behavior. Quarantine the Tauri shell as disposable migration input with no imports from new packages.
-  Acceptance: Web, API, contracts, runner, and legacy desktop targets build independently from the repository root.
+  What to build: Introduce the target directories and build orchestration without changing behavior.
+  Acceptance: Web, API, contracts, and runner targets build independently from the repository root.
   Verify: Root build commands plus a clean dependency-boundary check.
 
 - [x] **3. Publish protocol version 1 and golden fixtures**
@@ -153,7 +150,7 @@ Demo: all milestone flows work in a normal browser with the runner installed.
 - [x] **5. Extract the standalone runner**
   Roadmap ref: Increment A.
   What to build: Move scanning, planning, application, rollback, adapters, and local journal behind the runner interface. Preserve CLI commands for local administration.
-  Acceptance: The runner has no Tauri dependency and all filesystem mutations pass through the same execution service.
+  Acceptance: The runner is headless and all filesystem mutations pass through the same execution service.
   Verify: Rust tests plus CLI integration tests in temporary directories.
 
 - [x] **6. Add enrollment and outbound job transport**
@@ -164,8 +161,8 @@ Demo: all milestone flows work in a normal browser with the runner installed.
 
 - [x] **7. Add browser runner connection and status UX**
   Roadmap ref: Increment B and web cutover.
-  What to build: Add a typed control-plane client, single-use connection command, runner health and recovery states, ProjectInstance registration guidance, and English/Chinese browser UI.
-  Acceptance: The web application loads in a normal browser, reflects waiting, connected, offline, expired, and revoked states, and contains no Tauri runtime dependency.
+  What to build: Add a typed control-plane client, single-use connection command, runner health and recovery states, ProjectInstance registration guidance, and English browser UI.
+  Acceptance: The web application loads in a normal browser and reflects waiting, connected, offline, expired, and revoked states.
   Verify: Frontend unit tests, production build, and a browser smoke test.
 
 - [x] **8. Deliver the remote scan and Default review slice**
@@ -180,9 +177,9 @@ Demo: all milestone flows work in a normal browser with the runner installed.
   Acceptance: Changed or expired plans cannot be applied; unmanaged content is preserved; repeated delivery is idempotent.
   Verify: Browser-to-runner end-to-end test across two independent projects.
 
-- [ ] **10. Complete cutover, delete the native app, and finish recovery UX**
+- [x] **10. Complete cutover, remove the superseded app, and finish recovery UX**
   Roadmap ref: Increment D.
-  What to build: Add runner offline, drift, partial failure, recovery, credential revocation, and operation-history experiences; remove Tauri, the native shell, and its packaging.
+  What to build: Add runner offline, drift, partial failure, recovery, credential revocation, and operation-history experiences; remove the superseded shell and packaging.
   Acceptance: Users can understand whether desired and materialized state match and can recover without direct database manipulation.
   Verify: Failure-injection tests and manual browser walkthrough.
 
@@ -195,20 +192,20 @@ must not expand this milestone.
 
 ## 9. First handoff
 
-Tickets 1–7 preserve the passing baseline, establish the workspace boundaries,
-share protocol fixtures between TypeScript and Rust, separate shared PostgreSQL
-state from runner-local SQLite state, and move scan, plan, apply, rollback,
-adapters, recovery primitives, and the `ahm` CLI into `ahm-runner`. The legacy
-desktop now consumes runner-owned modules through thin path-resolution wrappers.
-Runner enrollment and outbound job transport now use protocol-v1 held HTTPS claims.
+Tickets 1–10 establish the workspace boundaries, share protocol fixtures between
+TypeScript and Rust, separate shared PostgreSQL state from runner-local SQLite
+state, and move scan, plan, apply, rollback, adapters, recovery primitives, and
+the `ahm` CLI into `ahm-runner`. Runner enrollment and outbound job transport use
+protocol-v1 held HTTPS claims.
 The runner stores its device credential, project paths, operation journal, and
 pending result outbox locally; PostgreSQL stores enrollment, capability, lease,
-cancellation, and portable result state. The browser now provides typed runner
-enrollment, health, recovery, and ProjectInstance guidance. Remote execution
+cancellation, and portable result state. The browser provides typed runner
+enrollment, health, drift, recovery, operation history, and ProjectInstance guidance. Remote execution
 carries portable immutable Setup snapshots, content-addressed artifact bundles,
 digest-bound approval, apply receipts, and rollback through the same declarative
 protocol. PostgreSQL is the durable job outbox; the runner persists a leased job
-before acknowledging it and persists every result before delivery.
+before acknowledging it and persists every result before delivery. The superseded
+shell, packaging, updater, localization bundle, and native-only dependencies are removed.
 
 ## 10. Runner transport operations
 

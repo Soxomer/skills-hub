@@ -1,48 +1,32 @@
 # Contributing
 
-Thanks for taking the time to contribute to Skills Hub!
+Thanks for contributing to Agent Harness Manager.
 
-## Development Requirements
+## Development requirements
 
-- Node.js 18+ (recommended: 20+)
-- Rust (stable)
-- Tauri system dependencies (install per the official Tauri docs for macOS/Windows/Linux)
+- Node.js 20 or newer
+- Rust stable
+- PostgreSQL 16 or newer for control-plane integration work
 
-## Run Locally
+## Run locally
 
 ```bash
 npm install
-npm run tauri:dev
+npm run dev:control-plane
 ```
 
-## Quality Checks
+Start `npm run dev` in another terminal. Install the local CLI with `cargo install --path crates/ahm-runner --locked` when testing a real browser-to-runner flow.
+
+## Before submitting
+
+Run the complete gate:
 
 ```bash
-npm run lint
-npm run build
+npm run check
 ```
 
-## Run Unit Tests
+Keep changes scoped, preserve the browser/control-plane/runner dependency boundaries, and include screenshots or a short recording for visible UI changes. Tests that touch project files must use temporary directories and preserve unmanaged content.
 
-Rust unit tests live under `src-tauri/src/core/tests/`.
+## Reporting issues
 
-```bash
-cd src-tauri
-cargo test
-```
-
-## Before Submitting a PR
-
-- Ensure `npm run lint` and `npm run build` pass
-- Ensure `cd src-tauri && cargo test` pass
-- Keep changes small and focused (do not commit local configs/caches/build artifacts)
-- For UI changes, include screenshots or a short recording
-
-## Reporting Issues
-
-Please include the following in your issue report:
-
-- OS version (macOS/Windows/Linux)
-- Skills Hub version
-- Steps to reproduce and expected vs. actual behavior
-- Relevant logs (please redact local paths and any sensitive information)
+Include the operating system, `ahm --version`, reproduction steps, expected and actual behavior, and redacted logs. Never include credentials or private project paths.

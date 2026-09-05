@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   ArrowRight,
   Clock3,
-  Languages,
   Laptop,
   LoaderCircle,
   RefreshCw,
@@ -21,16 +20,16 @@ import { ProjectScanWorkspace } from './components/ProjectScanWorkspace'
 import { connectionDisplayState } from './runner-status'
 import { useRunnerConnection } from './useRunnerConnection'
 
-function dateTime(value: string | null, language: string): string | null {
+function dateTime(value: string | null): string | null {
   if (!value) return null
-  return new Intl.DateTimeFormat(language.startsWith('zh') ? 'zh-CN' : 'en', {
+  return new Intl.DateTimeFormat('en', {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value))
 }
 
 export const App = memo(function App() {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const client = useMemo(() => createBrowserClient(), [])
   const connection = useRunnerConnection(client)
   const effectiveStatus =
@@ -44,14 +43,6 @@ export const App = memo(function App() {
         }
       : null)
   const displayState = connectionDisplayState(effectiveStatus, connection.runner)
-  const language = i18n.resolvedLanguage ?? 'en'
-
-  const toggleLanguage = async () => {
-    const nextLanguage = language.startsWith('zh') ? 'en' : 'zh'
-    localStorage.setItem('ahm.language', nextLanguage)
-    await i18n.changeLanguage(nextLanguage)
-  }
-
   return (
     <div className="app-shell" data-protocol-version={PROTOCOL_VERSION}>
       <header className="topbar">
@@ -64,15 +55,7 @@ export const App = memo(function App() {
             <small>{t('brand.eyebrow')}</small>
           </span>
         </a>
-        <button
-          className="language-button"
-          type="button"
-          onClick={() => void toggleLanguage()}
-          aria-label={t('language.aria')}
-        >
-          <Languages aria-hidden="true" size={17} />
-          {t('language.action')}
-        </button>
+        <span className="topbar-label">{t('page.controlPlane')}</span>
       </header>
 
       <main id="main-content" className="workspace">
@@ -152,7 +135,7 @@ export const App = memo(function App() {
                 <Clock3 aria-hidden="true" size={15} />
                 {t('enrollment.expires', {
                   time:
-                    dateTime(connection.enrollment.expiresAt, language) ?? t('time.unavailable'),
+                    dateTime(connection.enrollment.expiresAt) ?? t('time.unavailable'),
                 })}
               </span>
               <button
@@ -200,7 +183,7 @@ export const App = memo(function App() {
 
         {(displayState === 'connected' || displayState === 'offline') && connection.runner && (
           <div className="connected-layout">
-            <RunnerSummary runner={connection.runner} language={language} />
+            <RunnerSummary runner={connection.runner} />
 
             {displayState === 'offline' && (
               <div className="notice notice--warning" role="status">
@@ -224,7 +207,7 @@ export const App = memo(function App() {
   )
 })
 
-function RunnerSummary({ runner, language }: { runner: RunnerStatusResponse; language: string }) {
+function RunnerSummary({ runner }: { runner: RunnerStatusResponse }) {
   const { t } = useTranslation()
   return (
     <section className="runner-summary" aria-labelledby="runner-title">
@@ -243,7 +226,7 @@ function RunnerSummary({ runner, language }: { runner: RunnerStatusResponse; lan
         </div>
         <div>
           <dt>{t('runner.lastSeen')}</dt>
-          <dd>{dateTime(runner.lastSeenAt, language) ?? t('runner.neverSeen')}</dd>
+          <dd>{dateTime(runner.lastSeenAt) ?? t('runner.neverSeen')}</dd>
         </div>
         <div>
           <dt>{t('runner.version')}</dt>

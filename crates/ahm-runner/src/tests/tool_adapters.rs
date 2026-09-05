@@ -367,23 +367,3 @@ fn scan_tool_dir_skips_codex_system_and_includes_symlink_dir() {
         assert!(link.link_target.is_some());
     }
 }
-
-#[test]
-fn scan_tool_dir_skips_app_support_path() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir
-        .path()
-        .join("Library/Application Support/com.tauri.dev/skills");
-    std::fs::create_dir_all(root.join("foo")).unwrap();
-    std::fs::write(root.join("foo/SKILL.md"), "# Ignored Skill").unwrap();
-
-    let tool = ToolAdapter {
-        id: ToolId::Cursor,
-        display_name: "Cursor",
-        relative_skills_dir: "ignored",
-        relative_detect_dir: "ignored",
-    };
-
-    let out = scan_tool_dir(&tool, &root).unwrap();
-    assert!(out.is_empty());
-}

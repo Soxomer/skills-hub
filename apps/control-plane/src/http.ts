@@ -94,6 +94,12 @@ export function createControlPlaneApp(
       async (request) => switching.projectSetupState(actor(request), request.params.projectId),
     )
 
+    app.get<{ Params: { projectInstanceId: string } }>(
+      '/api/v1/project-instances/:projectInstanceId/operations',
+      async (request) =>
+        switching.projectInstanceOperations(actor(request), request.params.projectInstanceId),
+    )
+
     app.post<{
       Params: { projectInstanceId: string }
       Body: RequestSetupPlanRequest

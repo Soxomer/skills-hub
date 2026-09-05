@@ -25,7 +25,10 @@ fn groups_by_name_and_detects_conflicts_by_fingerprint() {
     assert_eq!(plan.total_skills_found, 2);
     assert_eq!(plan.groups.len(), 1);
     assert_eq!(plan.groups[0].name, "foo");
-    assert!(plan.groups[0].has_conflict, "同名但内容不同应冲突");
+    assert!(
+        plan.groups[0].has_conflict,
+        "same-name discoveries with different content should conflict"
+    );
     assert_eq!(plan.groups[0].variants.len(), 2);
 }
 

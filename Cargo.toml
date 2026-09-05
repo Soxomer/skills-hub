@@ -1,6 +1,5 @@
 [workspace]
 members = [
-  "src-tauri",
   "crates/ahm-domain",
   "crates/ahm-runner",
 ]

@@ -176,7 +176,7 @@ pub fn sync_dir_for_tool_with_overwrite(
     target: &Path,
     overwrite: bool,
 ) -> Result<SyncOutcome> {
-    // Cursor 目前不支持软链/junction：强制使用 copy，避免同步后在 Cursor 内不可用。
+    // Cursor does not support linked skill directories, so always copy this target.
     if tool_key.eq_ignore_ascii_case("cursor") {
         return sync_dir_copy_with_overwrite(source, target, overwrite);
     }
@@ -198,9 +198,8 @@ pub(crate) fn remove_path_any(path: &Path) -> Result<()> {
     };
     let ft = meta.file_type();
 
-    // 删除链接本身：symlink 用 remove_file；Windows junction 虽然 is_symlink()==true，
-    // 但底层是目录 reparse point，remove_file 会报 os error 5，必须用 remove_dir
-    // （RemoveDirectoryW 只移除链接本身，不会穿透到目标）
+    // Remove only the link. Unix symlinks use remove_file; Windows junctions are
+    // directory reparse points and require remove_dir, which does not traverse the target.
     if ft.is_symlink() {
         #[cfg(windows)]
         {

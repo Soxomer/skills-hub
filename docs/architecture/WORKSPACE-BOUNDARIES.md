@@ -1,95 +1,52 @@
 # Workspace boundaries
 
-The product is moving to three durable runtime boundaries:
+The product has three runtime boundaries and two portable contract packages:
 
 | Boundary | Responsibility | May depend on |
 | --- | --- | --- |
-| Web application | Browser product experience | Contracts and web-only libraries |
-| Control plane | Shared desired state, authorization, jobs, approvals, and audit history | Contracts and hosted-service libraries |
-| Local runner and CLI | Device-local discovery, planning, application, rollback, and recovery | Portable domain contracts and local adapters |
-
-The existing root React application and `src-tauri` package are migration input,
-not a fourth permanent runtime. They remain buildable while behavior moves to the
-web application and runner, then they are deleted. New packages must never import
-Tauri or legacy application modules.
+| Web application | Browser product experience | Contracts and browser libraries |
+| Control plane | Shared desired state, authorization, jobs, approvals, receipts, and audit history | Contracts, PostgreSQL, hosted-service libraries |
+| Local runner and CLI | Discovery, planning, application, rollback, recovery, local persistence, and adapters | Portable Rust domain and local libraries |
+| TypeScript contracts | Protocol types and golden fixtures | No product runtime |
+| Rust domain | Portable protocol types | Serialization only |
 
 ## Source layout
 
 ```text
 apps/
-  web/                 browser application boundary
-  control-plane/       hosted API and outbound runner-job transport
+  web/                 browser application
+  control-plane/       hosted API and runner-job transport
 packages/
-  contracts/           protocol schemas, TypeScript types, and golden fixtures
+  contracts/           TypeScript protocol types and fixtures
 crates/
   ahm-domain/          portable Rust protocol types
-  ahm-runner/          headless worker and CLI boundary
-src/ + src-tauri/      temporary legacy desktop implementation
+  ahm-runner/          headless worker, CLI, SQLite, and filesystem adapters
 ```
 
-`npm run boundary:check` enforces dependency direction. The web, control-plane,
-contracts, domain, and runner targets build independently from root commands.
+`npm run boundary:check` rejects removed application surfaces, native-runtime packages, forbidden dependency directions, and device-local path columns in control-plane persistence.
 
-## Protocol v1 behavior
+## Protocol behavior
 
 - Jobs contain identifiers and declarative payloads, never shell commands or server-provided absolute paths.
 - The runner resolves `ProjectInstanceId` to a local path outside the protocol.
 - Every mutating job carries an idempotency key.
-- Planning returns a digest; applying requires an approval bound to that digest and an expiry.
-- JSON objects are strict. Unknown fields are rejected in TypeScript schema validation and Rust deserialization.
-- Version `1.0` is the only supported version. Unsupported versions fail validation; capability negotiation returns no compatible version.
+- Planning returns a digest; Apply requires an approval bound to that digest.
+- Interactive Apply and Rollback jobs must be claimed within 30 seconds. Enrollment codes have an independent ten-minute lifetime.
+- JSON objects are strict and protocol `1.0` is the only supported version.
 - Plan destinations are project-relative and reject drive-qualified, rooted, and parent-traversing paths.
-
-Persistence ownership is defined below. Enrollment and outbound HTTPS polling
-are implemented; browser UI migration remains the next boundary task.
-
-## Standalone execution ownership
-
-`crates/ahm-runner` owns the `ahm` CLI, discovery scanner, Setup execution
-service, filesystem reconciliation planner, apply and rollback behavior, tool
-adapters, content hashing, local persistence, and recovery primitives. CLI
-scan, plan, sync, and rollback commands enter through `RunnerExecutionService`.
-
-The legacy desktop depends on the runner crate and retains only native app-data
-path resolution wrappers for the modules that still serve old screens. The
-boundary check rejects native-runtime imports and legacy application imports in
-the runner. A real-process CLI integration test exercises scan, plan, apply, and
-rollback in temporary home and project directories while preserving unmanaged
-content.
 
 ## Persistence ownership
 
 | Control-plane PostgreSQL | Runner SQLite |
 | --- | --- |
-| Organizations, users, and membership | Local device credential |
+| Organizations, users, membership | Device credential |
 | Logical projects | `ProjectInstanceId` to absolute checkout path |
-| Setups, immutable revisions, and assignments | Scan cache |
-| Portable artifact references | Materializations and physical target paths |
-| Runner jobs and plan approvals | Operation and rollback journal |
-| Portable receipts and audit events | Pending result-delivery outbox |
+| Setups, immutable revisions, assignments | Scan cache and artifact cache |
+| Runner jobs and digest-bound approvals | Claimed-job inbox and lease acknowledgement |
+| Portable receipts and audit events | Operation/rollback journal and result outbox |
 
-The control-plane migrations live in `apps/control-plane/migrations`. Their
-schema tests execute the complete migration sequence and reject every
-machine-local path column. The runner migration
-lives in `crates/ahm-runner/src/state.rs`; its schema tests reject shared Setup,
-assignment, approval, and organization tables.
+The databases are not replicated. PostgreSQL is the durable server outbox; the runner commits a claim before acknowledging it, executes locally, commits the result before delivery, and keeps retrying until PostgreSQL acknowledges the receipt.
 
-The combined legacy SQLite schema remains local migration input for existing CLI
-users. It is not the storage model for the browser product; organization-visible
-records use control-plane PostgreSQL, while new worker state uses runner SQLite.
+## Recovery surface
 
-## Runner transport
-
-The runner initiates all network traffic through versioned HTTP endpoints. A
-short-lived, single-use enrollment code yields a revocable bearer credential;
-the control plane stores only its SHA-256 hash. Each held claim reports
-capabilities and leases no more than one declarative job to a runner. The runner
-commits the lease to its SQLite operation inbox before acknowledging it.
-Completed results are journaled with an idempotency digest and committed to the
-SQLite result outbox before delivery; they remain pending until the control
-plane acknowledges durable receipt.
-
-Plan, apply, and rollback carry portable immutable Setup snapshots and
-content-addressed artifact references. Apply recomputes the local plan and
-requires the exact reviewed digest. Jobs never contain shell commands or
-server-selected absolute paths.
+The control plane derives browser-visible operation history and materialization health from durable jobs, receipts, assignments, and the latest plan result. The browser exposes offline/revoked states, drift/conflicts, manual-intervention failures, rollback, and fresh-plan recovery without requiring database access.

@@ -871,8 +871,6 @@ pub fn scan_tool_dir(tool: &ToolAdapter, dir: &Path) -> Result<Vec<DetectedSkill
         return Ok(results);
     }
 
-    let ignore_hint = "Application Support/com.tauri.dev/skills";
-
     for entry in std::fs::read_dir(dir).with_context(|| format!("read dir {:?}", dir))? {
         let entry = entry?;
         let path = entry.path();
@@ -902,14 +900,6 @@ pub fn scan_tool_dir(tool: &ToolAdapter, dir: &Path) -> Result<Vec<DetectedSkill
             continue;
         }
         let (is_link, link_target) = detect_link(&path);
-        if path.to_string_lossy().contains(ignore_hint)
-            || link_target
-                .as_ref()
-                .map(|p| p.to_string_lossy().contains(ignore_hint))
-                .unwrap_or(false)
-        {
-            continue;
-        }
         results.push(DetectedSkill {
             tool: tool.id.clone(),
             name,

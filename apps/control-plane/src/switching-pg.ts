@@ -2,6 +2,8 @@ import {
   PROTOCOL_VERSION,
   type JobEnvelope,
   type PortableSetupRevision,
+  type ProjectInstanceOperationsResponse,
+  type ProjectOperationSummary,
   type ProjectSetupStateResponse,
   type ResultEnvelope,
   type RunnerCapabilities,
@@ -58,6 +60,16 @@ interface ExistingApplyRow extends QueryResultRow {
 interface ReceiptRow extends RouteRow {
   outcome: string
   recoverability: string
+}
+
+interface OperationRow extends QueryResultRow {
+  id: string
+  job_kind: 'applyPlan' | 'rollbackOperation'
+  state: ProjectOperationSummary['state']
+  payload: JobEnvelope['job']['payload'] | string
+  result_json: ResultEnvelope | string | null
+  issued_at: Date | string
+  completed_at: Date | string | null
 }
 
 function iso(value: Date | string): string {
@@ -190,6 +202,105 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
         itemCount: Number(row.item_count),
         createdAt: iso(row.created_at),
       })),
+    }
+  }
+
+  async projectInstanceOperations(
+    organizationId: string,
+    projectInstanceId: string,
+  ): Promise<ProjectInstanceOperationsResponse | null> {
+    const instance = await this.pool.query<QueryResultRow & { assigned_setup_revision_id: string | null }>(
+      `SELECT pa.setup_revision_id AS assigned_setup_revision_id
+       FROM project_instances pi
+       LEFT JOIN project_assignments pa
+         ON pa.organization_id = pi.organization_id AND pa.project_id = pi.project_id
+       WHERE pi.organization_id = $1 AND pi.id = $2`,
+      [organizationId, projectInstanceId],
+    )
+    if (!instance.rows[0]) return null
+
+    const [operationRows, latestPlanRows] = await Promise.all([
+      this.pool.query<OperationRow>(
+        `SELECT id, job_kind, state, payload, result_json, issued_at, completed_at
+         FROM runner_jobs
+         WHERE organization_id = $1 AND project_instance_id = $2
+           AND job_kind IN ('applyPlan', 'rollbackOperation')
+         ORDER BY issued_at DESC, completed_at DESC, id DESC
+         LIMIT 10`,
+        [organizationId, projectInstanceId],
+      ),
+      this.pool.query<QueryResultRow & { result_json: ResultEnvelope | string }>(
+        `SELECT result_json
+         FROM runner_jobs
+         WHERE organization_id = $1 AND project_instance_id = $2
+           AND job_kind = 'planSetup' AND state = 'succeeded' AND result_json IS NOT NULL
+         ORDER BY completed_at DESC
+         LIMIT 1`,
+        [organizationId, projectInstanceId],
+      ),
+    ])
+
+    const operations = operationRows.rows.map((row): ProjectOperationSummary => {
+      const payload = objectValue(row.payload)
+      const result = row.result_json ? objectValue(row.result_json).result : null
+      const receipt = result?.kind === 'applyReceipt' || result?.kind === 'rollbackReceipt'
+        ? result.payload
+        : null
+      const error = result?.kind === 'error' ? result.payload : null
+      const setupRevisionId = row.job_kind === 'applyPlan' && 'revision' in payload
+        ? payload.revision.setupRevisionId
+        : receipt && 'restoredSetupRevisionId' in receipt
+          ? receipt.restoredSetupRevisionId
+          : receipt && 'setupRevisionId' in receipt
+            ? receipt.setupRevisionId
+            : null
+      const operationId = receipt?.operationId ??
+        (row.job_kind === 'rollbackOperation' && 'operationId' in payload
+          ? payload.operationId
+          : null)
+      return {
+        jobId: row.id,
+        kind: row.job_kind,
+        state: row.state,
+        setupRevisionId,
+        operationId,
+        outcome: receipt?.outcome ?? null,
+        recoverability: receipt?.recoverability ?? error?.recoverability ?? null,
+        errorCode: error?.code ?? null,
+        retryable: error?.retryable ?? null,
+        issuedAt: iso(row.issued_at),
+        completedAt: row.completed_at ? iso(row.completed_at) : null,
+      }
+    })
+
+    const latestCompleted = operations.find((operation) => operation.state === 'succeeded')
+    const latestOperation = operations[0] ?? null
+    const latestPlanResult = latestPlanRows.rows[0]
+      ? objectValue(latestPlanRows.rows[0].result_json).result
+      : null
+    const assignedSetupRevisionId = instance.rows[0].assigned_setup_revision_id
+    const materializedSetupRevisionId = latestCompleted?.setupRevisionId ?? null
+    const requiresAttention =
+      latestOperation?.state === 'failed' &&
+      latestOperation.recoverability === 'manualIntervention'
+    const hasDrift =
+      latestPlanResult?.kind === 'planResult' && latestPlanResult.payload.plan.conflicts.length > 0
+    const health = requiresAttention
+      ? 'attention'
+      : hasDrift ||
+          (materializedSetupRevisionId !== null &&
+            materializedSetupRevisionId !== assignedSetupRevisionId)
+        ? 'drifted'
+        : materializedSetupRevisionId !== null || assignedSetupRevisionId === null
+          ? 'current'
+          : 'unknown'
+
+    return {
+      projectInstanceId,
+      assignedSetupRevisionId,
+      materializedSetupRevisionId,
+      health,
+      operations,
     }
   }
 

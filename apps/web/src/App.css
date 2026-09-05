@@ -56,7 +56,6 @@
   font-size: 12px;
 }
 
-.language-button,
 .primary-button,
 .secondary-button,
 .text-button,
@@ -76,20 +75,18 @@
     transform 140ms ease;
 }
 
-.language-button,
 .secondary-button {
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
 }
 
-.language-button {
-  min-height: 36px;
-  padding: 0 11px;
+.topbar-label {
+  color: var(--text-secondary);
   font-size: 13px;
+  font-weight: 650;
 }
 
-.language-button:hover,
 .secondary-button:hover {
   border-color: var(--border-strong);
   background: var(--surface-subtle);
@@ -335,6 +332,14 @@
 .copy-button:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  outline-offset: 2px;
 }
 
 .waiting-row {
@@ -955,6 +960,89 @@
   margin-bottom: 0;
 }
 
+.materialization-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+  padding: 17px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.materialization-status--current > svg {
+  color: var(--success);
+}
+
+.materialization-status--drifted > svg,
+.materialization-status--unknown > svg {
+  color: var(--warning);
+}
+
+.materialization-status--attention > svg {
+  color: var(--error);
+}
+
+.materialization-copy {
+  min-width: 0;
+}
+
+.materialization-copy > strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.materialization-copy > p {
+  max-width: 66ch;
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.materialization-copy dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px 24px;
+  margin: 12px 0 0;
+}
+
+.materialization-copy dl > div {
+  min-width: 0;
+}
+
+.materialization-copy dt {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.materialization-copy dd {
+  overflow: hidden;
+  max-width: 300px;
+  margin: 3px 0 0;
+  color: var(--text);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manual-recovery {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 9px;
+  padding-top: 13px;
+  border-top: 1px solid var(--border);
+}
+
+.manual-recovery > p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .setup-picker {
   max-width: none;
   margin: 0;
@@ -1160,6 +1248,96 @@
   border-top: 1px solid var(--border);
 }
 
+.operation-history {
+  padding-top: 2px;
+}
+
+.operation-history-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.operation-history-heading > svg {
+  margin-top: 1px;
+  color: var(--text-secondary);
+}
+
+.operation-history h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.operation-history-heading p {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.operation-history ol {
+  margin: 12px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+
+.operation-history li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  min-height: 58px;
+  padding: 9px 0;
+}
+
+.operation-history li + li {
+  border-top: 1px solid var(--border);
+}
+
+.operation-history li strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.operation-history li p {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.history-state {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+.history-state--succeeded {
+  background: var(--success);
+}
+
+.history-state--error {
+  background: var(--error);
+}
+
+.history-meta {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.history-meta code {
+  overflow: hidden;
+  max-width: 190px;
+  font-family: var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .spin {
   animation: spin 900ms linear infinite;
 }
@@ -1228,6 +1406,15 @@
   .approval-bar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .materialization-status {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .materialization-status > .secondary-button {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .capture-bar .primary-button {
@@ -1340,6 +1527,15 @@
   .operation-result .secondary-button {
     width: 100%;
     margin-left: 0;
+  }
+
+  .operation-history li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .history-meta {
+    grid-column: 2;
+    justify-items: start;
   }
 
   .plan-review-heading {

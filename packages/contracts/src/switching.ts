@@ -1,6 +1,9 @@
 import type {
   CanonicalPlan,
   OperationId,
+  OperationOutcome,
+  ProtocolErrorCode,
+  Recoverability,
   SetupRevisionId,
 } from './protocol.js'
 
@@ -19,6 +22,30 @@ export interface ProjectSetupStateResponse {
   defaultSetupRevisionId: SetupRevisionId | null
   assignedSetupRevisionId: SetupRevisionId | null
   revisions: SetupRevisionSummary[]
+}
+
+export type ProjectMaterializationHealth = 'unknown' | 'current' | 'drifted' | 'attention'
+
+export interface ProjectOperationSummary {
+  jobId: string
+  kind: 'applyPlan' | 'rollbackOperation'
+  state: 'pending' | 'leased' | 'acknowledged' | 'succeeded' | 'failed' | 'expired' | 'cancelled'
+  setupRevisionId: SetupRevisionId | null
+  operationId: OperationId | null
+  outcome: OperationOutcome | null
+  recoverability: Recoverability | null
+  errorCode: ProtocolErrorCode | null
+  retryable: boolean | null
+  issuedAt: string
+  completedAt: string | null
+}
+
+export interface ProjectInstanceOperationsResponse {
+  projectInstanceId: string
+  assignedSetupRevisionId: SetupRevisionId | null
+  materializedSetupRevisionId: SetupRevisionId | null
+  health: ProjectMaterializationHealth
+  operations: ProjectOperationSummary[]
 }
 
 export interface RequestSetupPlanRequest {

@@ -291,7 +291,7 @@ fn skill_targets_upsert_unique_constraint_and_list_order() {
             .unwrap()
             .id,
         "t1",
-        "unique(skill_id, tool) 冲突时应更新现有行而不是替换 id"
+        "a unique(skill_id, tool) conflict should update the existing row without replacing its ID"
     );
     assert_eq!(
         store

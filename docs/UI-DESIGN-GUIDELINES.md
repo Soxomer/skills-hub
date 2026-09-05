@@ -26,7 +26,7 @@ Do not expand this file with details that are already obvious from the code. Add
 
 ## Design posture
 
-Skills Hub uses a neutral, modern utility aesthetic: calm, compact, and quietly confident. It is a desktop management tool, so clarity and operational density take priority over decoration.
+Agent Harness Manager uses a neutral, modern utility aesthetic: calm, compact, and quietly confident. It is a browser control plane for local operations, so clarity and operational density take priority over decoration.
 
 - Make the current task and primary action obvious.
 - Prefer whitespace, alignment, and subtle borders over extra containers.
@@ -124,7 +124,7 @@ Color rules:
 
 ## Responsive reduction
 
-Skills Hub is desktop-first, but the interface must remain usable in constrained windows.
+Agent Harness Manager is browser-first and must remain usable from wide desktop layouts through narrow mobile viewports.
 
 When space decreases, adapt in this order:
 
@@ -134,15 +134,15 @@ When space decreases, adapt in this order:
 4. hide or defer low-priority metadata;
 5. allow dense data regions to scroll when restructuring would damage comprehension.
 
-Do not scale the complete desktop interface down uniformly. Preserve readable text, usable targets, and task priority.
+Do not scale the wide interface down uniformly. Preserve readable text, usable targets, and task priority.
 
 ## Accessibility and localization
 
 - Use semantic controls and meaningful labels before adding ARIA.
 - Do not use color as the only indicator of state.
 - Keep focus visible and preserve logical keyboard order in dialogs, drawers, menus, and forms.
-- Ensure layouts tolerate longer English and Chinese strings without clipping essential actions.
-- All user-visible product copy belongs in i18n resources with both English and Chinese entries.
+- Ensure layouts tolerate realistic English strings without clipping essential actions.
+- All user-visible product copy belongs in the English resource bundle.
 
 ## Review checklist
 

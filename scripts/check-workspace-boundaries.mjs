@@ -54,11 +54,23 @@ function rejectSourcePatterns(relativeDirectory, patterns) {
 }
 
 for (const packagePath of [
+  'package.json',
   'apps/web/package.json',
   'apps/control-plane/package.json',
   'packages/contracts/package.json',
 ]) {
   rejectDependencies(packagePath, ['@tauri-apps/'])
+}
+
+for (const removedPath of [
+  'src/main.tsx',
+  'src-tauri/Cargo.toml',
+  'index.html',
+  'vite.config.ts',
+]) {
+  if (existsSync(join(repositoryRoot, removedPath))) {
+    violations.push(`${removedPath} is a removed native application surface`)
+  }
 }
 
 const legacyImportPatterns = [

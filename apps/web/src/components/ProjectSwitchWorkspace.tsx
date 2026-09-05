@@ -1,5 +1,11 @@
-import type { CanonicalPlan, ProjectSetupStateResponse } from '@ahm/contracts'
+import type {
+  CanonicalPlan,
+  ProjectInstanceOperationsResponse,
+  ProjectOperationSummary,
+  ProjectSetupStateResponse,
+} from '@ahm/contracts'
 import {
+  Activity,
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
@@ -7,6 +13,8 @@ import {
   FileCheck2,
   Link2,
   LoaderCircle,
+  SearchCheck,
+  ShieldAlert,
   RotateCcw,
   Sparkles,
   Trash2,
@@ -15,6 +23,7 @@ import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { ControlPlaneClient } from '../api'
+import { CommandBlock } from './CommandBlock'
 import { jobInFlight } from '../switch-state'
 import { useSetupSwitch } from '../useSetupSwitch'
 
@@ -74,6 +83,16 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
             <p>{t('switchFlow.errors.recovery')}</p>
           </div>
         </div>
+      )}
+
+      {workflow.operations && (
+        <MaterializationStatus
+          state={workflow.state}
+          status={workflow.operations}
+          runnerOnline={runnerOnline}
+          busy={isWorking}
+          onVerify={() => void workflow.preparePlan()}
+        />
       )}
 
       {workflow.loading ? (
@@ -247,9 +266,146 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
           )}
         </>
       )}
+
+      {workflow.operations && <OperationHistory status={workflow.operations} />}
     </section>
   )
 })
+
+function revisionLabel(
+  state: ProjectSetupStateResponse | null,
+  revisionId: string | null,
+  fallback: string,
+): string {
+  if (!revisionId) return fallback
+  const revision = state?.revisions.find((candidate) => candidate.setupRevisionId === revisionId)
+  return revision ? `${revision.name} · v${revision.revisionNumber}` : revisionId
+}
+
+function MaterializationStatus({
+  state,
+  status,
+  runnerOnline,
+  busy,
+  onVerify,
+}: {
+  state: ProjectSetupStateResponse | null
+  status: ProjectInstanceOperationsResponse
+  runnerOnline: boolean
+  busy: boolean
+  onVerify: () => void
+}) {
+  const { t } = useTranslation()
+  const needsAction = status.health === 'drifted' || status.health === 'attention'
+  const Icon =
+    status.health === 'current'
+      ? CheckCircle2
+      : status.health === 'attention'
+        ? ShieldAlert
+        : SearchCheck
+  return (
+    <div className={`materialization-status materialization-status--${status.health}`}>
+      <Icon aria-hidden="true" size={21} />
+      <div className="materialization-copy">
+        <strong>{t(`switchFlow.health.${status.health}.title`)}</strong>
+        <p>{t(`switchFlow.health.${status.health}.description`)}</p>
+        <dl>
+          <div>
+            <dt>{t('switchFlow.health.assigned')}</dt>
+            <dd>
+              {revisionLabel(state, status.assignedSetupRevisionId, t('switchFlow.health.none'))}
+            </dd>
+          </div>
+          <div>
+            <dt>{t('switchFlow.health.materialized')}</dt>
+            <dd>
+              {revisionLabel(
+                state,
+                status.materializedSetupRevisionId,
+                t('switchFlow.health.unverified'),
+              )}
+            </dd>
+          </div>
+        </dl>
+      </div>
+      {needsAction && (
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={!runnerOnline || busy}
+          onClick={onVerify}
+        >
+          <SearchCheck aria-hidden="true" size={15} />
+          {t('switchFlow.health.verify')}
+        </button>
+      )}
+      {status.health === 'attention' && (
+        <div className="manual-recovery">
+          <p>{t('switchFlow.health.attention.command')}</p>
+          <CommandBlock command="ahm rollback" name={t('switchFlow.health.attention.commandName')} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function operationTime(value: string): string {
+  return new Intl.DateTimeFormat('en', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value))
+}
+
+function OperationHistory({ status }: { status: ProjectInstanceOperationsResponse }) {
+  const { t } = useTranslation()
+  return (
+    <section className="operation-history" aria-labelledby="operation-history-title">
+      <div className="operation-history-heading">
+        <Activity aria-hidden="true" size={18} />
+        <div>
+          <h3 id="operation-history-title">{t('switchFlow.history.title')}</h3>
+          <p>{t('switchFlow.history.description')}</p>
+        </div>
+      </div>
+      {status.operations.length === 0 ? (
+        <p className="empty-state">{t('switchFlow.history.empty')}</p>
+      ) : (
+        <ol>
+          {status.operations.map((operation) => (
+            <OperationHistoryItem key={operation.jobId} operation={operation} />
+          ))}
+        </ol>
+      )}
+    </section>
+  )
+}
+
+function OperationHistoryItem({ operation }: { operation: ProjectOperationSummary }) {
+  const { t } = useTranslation()
+  const failed = ['failed', 'expired', 'cancelled'].includes(operation.state)
+  return (
+    <li>
+      <span
+        className={`history-state history-state--${failed ? 'error' : operation.state}`}
+        aria-hidden="true"
+      />
+      <div>
+        <strong>{t(`switchFlow.history.kind.${operation.kind}`)}</strong>
+        <p>
+          {operation.errorCode
+            ? t(`switchFlow.errors.${operation.errorCode}`)
+            : t(`switchFlow.job.${operation.state}`)}
+        </p>
+      </div>
+      <div className="history-meta">
+        <time dateTime={operation.completedAt ?? operation.issuedAt}>
+          {operationTime(operation.completedAt ?? operation.issuedAt)}
+        </time>
+        <code>{operation.operationId ?? operation.jobId}</code>
+      </div>
+    </li>
+  )
+}
 
 function SetupPicker({
   state,

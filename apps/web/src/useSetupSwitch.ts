@@ -1,6 +1,7 @@
 import type {
   ApplyReceipt,
   CanonicalPlan,
+  ProjectInstanceOperationsResponse,
   ProjectSetupStateResponse,
   RollbackReceipt,
   RunnerJobStatusResponse,
@@ -42,6 +43,7 @@ export function useSetupSwitch(
   projectInstanceId: string,
 ) {
   const [state, setState] = useState<ProjectSetupStateResponse | null>(null)
+  const [operations, setOperations] = useState<ProjectInstanceOperationsResponse | null>(null)
   const [selectedRevisionId, setSelectedRevisionId] = useState('')
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null)
   const [jobStatus, setJobStatus] = useState<RunnerJobStatusResponse | null>(null)
@@ -53,11 +55,15 @@ export function useSetupSwitch(
   const [error, setError] = useState<SetupSwitchError | null>(null)
 
   const refreshState = useCallback(async () => {
-    if (!projectId) return
+    if (!projectId || !projectInstanceId) return
     setLoading(true)
     try {
-      const next = await client.setupRevisions(projectId)
+      const [next, nextOperations] = await Promise.all([
+        client.setupRevisions(projectId),
+        client.projectOperations(projectInstanceId),
+      ])
       setState(next)
+      setOperations(nextOperations)
       setSelectedRevisionId((current) =>
         current && next.revisions.some((revision) => revision.setupRevisionId === current)
           ? current
@@ -69,10 +75,11 @@ export function useSetupSwitch(
     } finally {
       setLoading(false)
     }
-  }, [client, projectId])
+  }, [client, projectId, projectInstanceId])
 
   useEffect(() => {
     setState(null)
+    setOperations(null)
     setSelectedRevisionId('')
     setActiveJob(null)
     setJobStatus(null)
@@ -205,6 +212,7 @@ export function useSetupSwitch(
 
   return {
     state,
+    operations,
     selectedRevisionId,
     selectedRevision:
       state?.revisions.find((revision) => revision.setupRevisionId === selectedRevisionId) ?? null,

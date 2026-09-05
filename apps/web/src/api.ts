@@ -6,6 +6,7 @@ import type {
   CreateProjectRequest,
   CreateRunnerEnrollmentResponse,
   ProjectListResponse,
+  ProjectInstanceOperationsResponse,
   ProjectSetupStateResponse,
   RequestSetupPlanRequest,
   RollbackOperationRequest,
@@ -92,6 +93,12 @@ export class ControlPlaneClient {
 
   setupRevisions(projectId: string): Promise<ProjectSetupStateResponse> {
     return this.send(`/api/v1/projects/${encodeURIComponent(projectId)}/setup-revisions`)
+  }
+
+  projectOperations(projectInstanceId: string): Promise<ProjectInstanceOperationsResponse> {
+    return this.send(
+      `/api/v1/project-instances/${encodeURIComponent(projectInstanceId)}/operations`,
+    )
   }
 
   prepareSetupPlan(

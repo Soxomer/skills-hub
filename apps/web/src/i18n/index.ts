@@ -3,12 +3,9 @@ import { initReactI18next } from 'react-i18next'
 
 import { resources } from './resources'
 
-const savedLanguage = localStorage.getItem('ahm.language')
-const initialLanguage = savedLanguage ?? (navigator.language.startsWith('zh') ? 'zh' : 'en')
-
 void i18n.use(initReactI18next).init({
   resources,
-  lng: initialLanguage,
+  lng: 'en',
   fallbackLng: 'en',
   interpolation: { escapeValue: false },
 })
