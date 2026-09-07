@@ -16,6 +16,7 @@
           {
             "actionId": "action_01",
             "kind": "link",
+            "change": "add",
             "artifactId": "artifact_pdf_01",
             "destination": {
               "toolId": "codex",

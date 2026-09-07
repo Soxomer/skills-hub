@@ -1,5 +1,7 @@
 import type {
   CanonicalPlan,
+  PlanAction,
+  PlanChangeKind,
   ProjectInstanceOperationsResponse,
   ProjectOperationSummary,
   ProjectSetupStateResponse,
@@ -10,9 +12,13 @@ import {
   CheckCircle2,
   ChevronDown,
   Download,
+  Equal,
   FileCheck2,
   Link2,
   LoaderCircle,
+  Minus,
+  Plus,
+  RefreshCw,
   SearchCheck,
   ShieldAlert,
   RotateCcw,
@@ -23,7 +29,6 @@ import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { ControlPlaneClient } from '../api'
-import { CommandBlock } from './CommandBlock'
 import { useSetupSwitch } from '../useSetupSwitch'
 
 interface ProjectSwitchWorkspaceProps {
@@ -36,7 +41,7 @@ interface ProjectSwitchWorkspaceProps {
 const inFlightJobStates = ['pending', 'leased', 'acknowledged'] as const
 
 function activeKindFromOperation(
-  kind: ProjectInstanceOperationsResponse['activeOperation'],
+  kind: ProjectInstanceOperationsResponse['activeOperation'] | undefined,
 ): 'plan' | 'apply' | 'rollback' | null {
   if (!kind) return null
   const map = {
@@ -70,6 +75,15 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
     trackedActiveKind && isInFlightJobState(trackedState),
   )
   const isWorking = workflow.submitting || operationInProgress
+  const statusMatchesActive =
+    workflow.jobStatus?.jobId ===
+    (workflow.activeJob?.jobId ?? workflow.operations?.activeOperation?.jobId)
+  const cancelRequested = Boolean(
+    (statusMatchesActive ? workflow.jobStatus?.cancelRequested : false) ||
+      workflow.operations?.activeOperation?.cancelRequested,
+  )
+  const activeRevisionId =
+    workflow.activeJob?.setupRevisionId ?? workflow.operations?.activeOperation?.setupRevisionId ?? null
   const terminalFailure =
     workflow.jobStatus &&
     ['failed', 'expired', 'cancelled'].includes(workflow.jobStatus.state)
@@ -112,13 +126,65 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
         </div>
       )}
 
+      {workflow.operationConflict && (
+        <div className="operation-decision" role="alert" aria-live="assertive">
+          <ShieldAlert aria-hidden="true" size={21} />
+          <div>
+            <strong>{t('switchFlow.decision.title')}</strong>
+            <p>
+              {t('switchFlow.decision.description', {
+                setup: revisionLabel(workflow.state, activeRevisionId, t('switchFlow.health.none')),
+              })}
+            </p>
+          </div>
+          <div className="operation-decision-actions">
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={workflow.keepOperationRunning}
+            >
+              {t('switchFlow.decision.keep')}
+            </button>
+            <button
+              className="secondary-button cancel-button"
+              type="button"
+              disabled={workflow.submitting || cancelRequested}
+              onClick={() => void workflow.cancelActiveOperation()}
+            >
+              {t('switchFlow.decision.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {operationInProgress && (
+        <ActiveOperation
+          kind={trackedActiveKind}
+          state={trackedState}
+          setup={revisionLabel(workflow.state, activeRevisionId, t('switchFlow.health.none'))}
+          cancelRequested={cancelRequested}
+          cancelling={workflow.submitting}
+          onCancel={() => void workflow.cancelActiveOperation()}
+        />
+      )}
+
+      {workflow.planWasStale && (
+        <div className="notice notice--warning switch-notice" role="status">
+          <RefreshCw aria-hidden="true" size={18} />
+          <div>
+            <strong>{t('switchFlow.stale.title')}</strong>
+            <p>{t('switchFlow.stale.description')}</p>
+          </div>
+        </div>
+      )}
+
       {workflow.operations && (
         <MaterializationStatus
           state={workflow.state}
           status={workflow.operations}
           runnerOnline={runnerOnline}
           busy={isWorking}
-          onVerify={() => void workflow.preparePlan()}
+          onVerify={() => void workflow.retryRecovery()}
         />
       )}
 
@@ -182,45 +248,35 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
               </button>
             )}
           </div>
-          {trackedActiveKind === 'rollback' && isInFlightJobState(trackedState) && (
-            <div className="switch-progress" aria-live="polite">
-              <LoaderCircle className="spin" aria-hidden="true" size={20} />
+        </>
+      ) : (
+        <>
+          {workflow.cancellation && (
+            <div
+              className={`operation-result operation-result--${
+                workflow.cancellation.outcome === 'cancelledAndRestored' ? 'success' : 'warning'
+              }`}
+              role="status"
+            >
+              <ShieldAlert aria-hidden="true" size={24} />
               <div>
-                <strong>{t('switchFlow.progress.rollback')}</strong>
-                <p>{t(`switchFlow.job.${trackedState ?? 'pending'}`)}</p>
+                <strong>{t('switchFlow.cancellation.title')}</strong>
+                <p>
+                  {workflow.cancellation.outcome === 'cancelledAndRestored'
+                    ? t('switchFlow.cancellation.cancelledAndRestored')
+                    : t('switchFlow.cancellation.needsAttention')}
+                </p>
+                <code>
+                  {workflow.cancellation.operationId ?? t('switchFlow.cancellation.pendingId')}
+                </code>
               </div>
             </div>
           )}
-        </>
-      ) : workflow.cancellation ? (
-        <div className="operation-result operation-result--warning" role="status">
-          <ShieldAlert aria-hidden="true" size={24} />
-          <div>
-            <strong>{t('switchFlow.cancellation.title')}</strong>
-            <p>
-              {workflow.cancellation.outcome === 'cancelledAndRestored'
-                ? t('switchFlow.cancellation.cancelledAndRestored')
-                : t('switchFlow.cancellation.needsAttention')}
-            </p>
-            <code>{workflow.cancellation.operationId ?? t('switchFlow.cancellation.pendingId')}</code>
-          </div>
-          <p className="operation-result-details">
-            {t('switchFlow.receipt.summary', { count: workflow.cancellation.actionsApplied })}
-          </p>
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={workflow.recoverFromCancellation}
-          >
-            {t('switchFlow.cancellation.returnToSetup')}
-          </button>
-        </div>
-      ) : (
-        <>
+
           <SetupPicker
             state={workflow.state}
             selectedRevisionId={workflow.selectedRevisionId}
-            disabled={isWorking}
+            disabled={isWorking || workflow.operations?.health === 'attention'}
             onChange={workflow.selectRevision}
           />
 
@@ -242,7 +298,7 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
                   <button
                     className="secondary-button"
                     type="button"
-                    disabled={!runnerOnline || isWorking}
+                    disabled={!runnerOnline || isWorking || workflow.operations?.health === 'attention'}
                     onClick={() =>
                       void workflow.preparePlan(workflow.state?.defaultSetupRevisionId ?? '')
                     }
@@ -254,7 +310,12 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
               <button
                 className="primary-button"
                 type="button"
-                disabled={!runnerOnline || !workflow.selectedRevisionId || isWorking}
+                disabled={
+                  !runnerOnline ||
+                  !workflow.selectedRevisionId ||
+                  isWorking ||
+                  workflow.operations?.health === 'attention'
+                }
                 onClick={() => void workflow.preparePlan()}
               >
                 {isWorking && trackedActiveKind === 'plan' ? (
@@ -269,16 +330,6 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
             </div>
           </div>
 
-          {trackedActiveKind && isInFlightJobState(trackedState) && (
-            <div className="switch-progress" aria-live="polite">
-              <LoaderCircle className="spin" aria-hidden="true" size={20} />
-              <div>
-                <strong>{t(`switchFlow.progress.${trackedActiveKind}`)}</strong>
-                <p>{t(`switchFlow.job.${trackedState ?? 'pending'}`)}</p>
-              </div>
-            </div>
-          )}
-
           {terminalFailure && (
             <div className="switch-terminal" role="alert">
               <AlertTriangle aria-hidden="true" size={20} />
@@ -291,7 +342,9 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
 
           {workflow.plan && <PlanReview plan={workflow.plan} />}
 
-          {workflow.plan && workflow.plan.conflicts.length === 0 && (
+          {workflow.plan &&
+            workflow.plan.conflicts.length === 0 &&
+            workflow.operations?.health !== 'attention' && (
             <div className="approval-bar">
               <div>
                 <strong>{t('switchFlow.approval.title')}</strong>
@@ -386,15 +439,52 @@ function MaterializationStatus({
           onClick={onVerify}
         >
           <SearchCheck aria-hidden="true" size={15} />
-          {t('switchFlow.health.verify')}
+          {status.health === 'attention'
+            ? t('switchFlow.health.attention.retry')
+            : t('switchFlow.health.verify')}
         </button>
       )}
-      {status.health === 'attention' && (
-        <div className="manual-recovery">
-          <p>{t('switchFlow.health.attention.command')}</p>
-          <CommandBlock command="ahm rollback" name={t('switchFlow.health.attention.commandName')} />
-        </div>
-      )}
+    </div>
+  )
+}
+
+function ActiveOperation({
+  kind,
+  state,
+  setup,
+  cancelRequested,
+  cancelling,
+  onCancel,
+}: {
+  kind: 'plan' | 'apply' | 'rollback' | null
+  state: string | null
+  setup: string
+  cancelRequested: boolean
+  cancelling: boolean
+  onCancel: () => void
+}) {
+  const { t } = useTranslation()
+  if (!kind) return null
+  const phase = cancelRequested
+    ? kind === 'plan'
+      ? 'cancelling'
+      : 'restoring'
+    : kind
+  return (
+    <div className="switch-progress" aria-live="polite">
+      <LoaderCircle className="spin" aria-hidden="true" size={20} />
+      <div>
+        <strong>{t(`switchFlow.progress.${phase}`)}</strong>
+        <p>{t('switchFlow.progress.detail', { setup, state: t(`switchFlow.job.${state ?? 'pending'}`) })}</p>
+      </div>
+      <button
+        className="secondary-button cancel-button"
+        type="button"
+        disabled={cancelRequested || cancelling}
+        onClick={onCancel}
+      >
+        {cancelRequested ? t('switchFlow.progress.cancelRequested') : t('switchFlow.decision.cancel')}
+      </button>
     </div>
   )
 }
@@ -493,35 +583,57 @@ function SetupPicker({
   )
 }
 
+const planGroups: PlanChangeKind[] = ['add', 'replace', 'remove', 'unchanged']
+
+function planChange(action: PlanAction): PlanChangeKind {
+  return action.change ?? (action.kind === 'removeManaged' ? 'remove' : 'add')
+}
+
 function PlanReview({ plan }: { plan: CanonicalPlan }) {
   const { t } = useTranslation()
+  const actionableCount = plan.actions.filter((action) => planChange(action) !== 'unchanged').length
   return (
     <div className="plan-review">
       <div className="plan-review-heading">
         <div>
           <strong>{t('switchFlow.plan.title')}</strong>
-          <p>{t('switchFlow.plan.summary', { count: plan.actions.length })}</p>
+          <p>{t('switchFlow.plan.summary', { count: actionableCount })}</p>
         </div>
         <code title={plan.planDigest}>{plan.planDigest.slice(0, 20)}…</code>
       </div>
       {plan.actions.length === 0 ? (
         <p className="empty-state">{t('switchFlow.plan.noChanges')}</p>
       ) : (
-        <ul className="plan-action-list">
-          {plan.actions.map((action) => {
-            const Icon = action.kind === 'removeManaged' ? Trash2 : Link2
+        <div className="plan-groups">
+          {planGroups.map((group) => {
+            const actions = plan.actions.filter((action) => planChange(action) === group)
+            if (actions.length === 0) return null
+            const Icon = group === 'add' ? Plus : group === 'replace' ? RefreshCw : group === 'remove' ? Minus : Equal
             return (
-              <li key={action.actionId}>
-                <Icon aria-hidden="true" size={16} />
-                <span>
-                  <strong>{t(`switchFlow.action.${action.kind}`)}</strong>
-                  <code>{action.destination.projectRelativePath}</code>
-                </span>
-                <small>{action.destination.toolId}</small>
-              </li>
+              <section className="plan-group" key={group} aria-labelledby={`plan-group-${group}`}>
+                <h4 id={`plan-group-${group}`}>
+                  <Icon aria-hidden="true" size={15} />
+                  {t(`switchFlow.plan.group.${group}`, { count: actions.length })}
+                </h4>
+                <ul className="plan-action-list">
+                  {actions.map((action) => {
+                    const ActionIcon = action.kind === 'removeManaged' ? Trash2 : Link2
+                    return (
+                      <li key={action.actionId}>
+                        <ActionIcon aria-hidden="true" size={16} />
+                        <span>
+                          <strong>{t(`switchFlow.action.${action.kind}`)}</strong>
+                          <code>{action.destination.projectRelativePath}</code>
+                        </span>
+                        <small>{action.destination.toolId}</small>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </section>
             )
           })}
-        </ul>
+        </div>
       )}
       {plan.conflicts.length > 0 && (
         <div className="plan-conflicts" role="alert">

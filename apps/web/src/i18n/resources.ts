@@ -171,10 +171,25 @@ export const resources = {
         prepare: 'Prepare plan',
         preparing: 'Preparing files…',
         prepareAgain: 'Prepare another plan',
+        decision: {
+          title: 'Another Setup operation is already active',
+          description: '{{setup}} is running for this checkout. Keep it running or cancel it safely.',
+          keep: 'Keep it running',
+          cancel: 'Cancel current operation',
+        },
+        stale: {
+          title: 'Nothing was applied',
+          description:
+            'The checkout changed after review. A fresh plan is being prepared and must be reviewed again.',
+        },
         progress: {
           plan: 'Preparing files and calculating the plan',
           apply: 'Applying the approved plan',
           rollback: 'Restoring the previous Setup',
+          cancelling: 'Cancelling the operation',
+          restoring: 'Cancelling and restoring the previous state',
+          detail: '{{setup}} · {{state}}',
+          cancelRequested: 'Cancellation requested',
         },
         job: {
           pending: 'Sent to the local runner',
@@ -208,9 +223,7 @@ export const resources = {
             title: 'A local operation needs recovery',
             description:
               'The runner reported a partial filesystem failure. Existing state and receipts are preserved.',
-            command:
-              'Open a terminal in this checkout and restore the last journaled state. Then prepare a fresh plan here.',
-            commandName: 'local recovery command',
+            retry: 'Retry recovery',
           },
         },
         history: {
@@ -227,6 +240,12 @@ export const resources = {
           summary: '{{count}} managed changes',
           noChanges: 'This checkout already matches the selected Setup.',
           conflicts: '{{count}} conflicts must be resolved before Apply',
+          group: {
+            add: 'Add · {{count}}',
+            replace: 'Replace · {{count}}',
+            remove: 'Remove · {{count}}',
+            unchanged: 'Unchanged · {{count}}',
+          },
         },
         action: {
           link: 'Link from cache',
@@ -267,6 +286,7 @@ export const resources = {
           status: 'The operation status could not be refreshed.',
           apply: 'The reviewed plan could not be applied.',
           rollback: 'The operation could not be rolled back.',
+          cancel: 'The cancellation request could not be sent.',
           invalidRequest: 'The Setup request is incomplete.',
           projectNotFound: 'This logical project no longer exists.',
           projectInstanceNotFound: 'This checkout is no longer connected.',
@@ -291,6 +311,7 @@ export const resources = {
           idempotencyMismatch: 'The saved operation does not match this request.',
           receiptNotFound: 'The operation receipt no longer exists.',
           rollbackUnavailable: 'This operation cannot be rolled back.',
+          projectOperationInProgress: 'Another Setup operation is already active.',
           recovery: 'Keep the worker running, resolve the issue, then prepare a fresh plan.',
         },
       },

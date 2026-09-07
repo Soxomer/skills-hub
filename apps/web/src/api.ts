@@ -6,6 +6,7 @@ import type {
   CreateProjectRequest,
   CreateRunnerEnrollmentResponse,
   ProjectListResponse,
+  ProjectActiveOperation,
   ProjectInstanceOperationsResponse,
   ProjectSetupStateResponse,
   RequestSetupPlanRequest,
@@ -30,12 +31,19 @@ export interface ControlPlaneClientOptions {
 export class ControlPlaneApiError extends Error {
   readonly status: number
   readonly code: string | null
+  readonly activeOperation: ProjectActiveOperation | null
 
-  constructor(status: number, message: string, code: string | null = null) {
+  constructor(
+    status: number,
+    message: string,
+    code: string | null = null,
+    activeOperation: ProjectActiveOperation | null = null,
+  ) {
     super(message)
     this.name = 'ControlPlaneApiError'
     this.status = status
     this.code = code
+    this.activeOperation = activeOperation
   }
 }
 
@@ -79,6 +87,10 @@ export class ControlPlaneClient {
 
   job(jobId: string): Promise<RunnerJobStatusResponse> {
     return this.send(`/api/v1/jobs/${encodeURIComponent(jobId)}`)
+  }
+
+  cancelJob(jobId: string): Promise<void> {
+    return this.send(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' })
   }
 
   captureDefault(
@@ -154,16 +166,29 @@ export class ControlPlaneClient {
       const body = (await response.json().catch(() => null)) as {
         code?: unknown
         error?: unknown
+        activeOperation?: unknown
       } | null
       if (typeof body?.error === 'string' && body.error.trim()) message = body.error
       throw new ControlPlaneApiError(
         response.status,
         message,
         typeof body?.code === 'string' ? body.code : null,
+        isProjectActiveOperation(body?.activeOperation) ? body.activeOperation : null,
       )
     }
+    if (response.status === 204) return undefined as T
     return (await response.json()) as T
   }
+}
+
+function isProjectActiveOperation(value: unknown): value is ProjectActiveOperation {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<ProjectActiveOperation>
+  return (
+    typeof candidate.jobId === 'string' &&
+    ['planSetup', 'applyPlan', 'rollbackOperation'].includes(candidate.kind ?? '') &&
+    ['pending', 'leased', 'acknowledged'].includes(candidate.state ?? '')
+  )
 }
 
 export function createBrowserClient(): ControlPlaneClient {

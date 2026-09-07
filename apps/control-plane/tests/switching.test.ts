@@ -605,6 +605,106 @@ describe('Setup switching', () => {
     await pool.end()
   })
 
+  it('derives health only from a newer plan for the assigned Setup', async () => {
+    const { app, pool } = await harness()
+    const result = (
+      jobId: string,
+      setupRevisionId: string,
+      change: 'add' | 'unchanged',
+      conflicts: string[] = [],
+    ): ResultEnvelope => ({
+      protocolVersion: '1.0',
+      jobId,
+      idempotencyKey: `idem-${jobId}`,
+      organizationId: 'org_01',
+      deviceId: 'device_01',
+      projectInstanceId: 'instance_01',
+      result: {
+        kind: 'planResult',
+        payload: {
+          projectId: 'project_01',
+          plan: {
+            setupRevisionId,
+            planDigest: `sha256:${jobId.endsWith('team') ? 'a' : change === 'add' ? 'b' : 'c'}`.padEnd(71, jobId.endsWith('team') ? 'a' : change === 'add' ? 'b' : 'c'),
+            conflicts,
+            actions: [
+              {
+                actionId: `action_${jobId}`,
+                kind: 'link',
+                change,
+                artifactId: 'artifact_default',
+                destination: {
+                  toolId: 'codex',
+                  projectRelativePath: '.agents/skills/default',
+                },
+              },
+            ],
+          },
+        },
+      },
+    })
+    const insertPlan = async (jobId: string, completedAt: string, envelope: ResultEnvelope) => {
+      await pool.query(
+        `INSERT INTO runner_jobs
+         (id, organization_id, device_id, project_instance_id, protocol_version,
+          idempotency_key, job_kind, payload, state, issued_at, expires_at, completed_at,
+          result_json, result_digest)
+         VALUES ($1, 'org_01', 'device_01', 'instance_01', '1.0', $2, 'planSetup',
+          $3::jsonb, 'succeeded', $4, $5, $4, $6::jsonb, $7)`,
+        [
+          jobId,
+          envelope.idempotencyKey,
+          JSON.stringify({ projectId: 'project_01', revision: { setupRevisionId: envelope.result.kind === 'planResult' ? envelope.result.payload.plan.setupRevisionId : '' } }),
+          completedAt,
+          '2026-09-02T11:00:00.000Z',
+          JSON.stringify(envelope),
+          `sha256:${'f'.repeat(64)}`,
+        ],
+      )
+    }
+
+    await insertPlan(
+      'job_plan_team',
+      '2026-09-02T10:01:00.000Z',
+      result('job_plan_team', 'revision_team', 'add', ['unmanaged target']),
+    )
+    const alternative = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(alternative.json()).toMatchObject({ health: 'unknown' })
+
+    await insertPlan(
+      'job_plan_default_change',
+      '2026-09-02T10:02:00.000Z',
+      result('job_plan_default_change', 'revision_default', 'add'),
+    )
+    const drifted = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(drifted.json()).toMatchObject({ health: 'drifted' })
+
+    await insertPlan(
+      'job_plan_default_current',
+      '2026-09-02T10:03:00.000Z',
+      result('job_plan_default_current', 'revision_default', 'unchanged'),
+    )
+    const current = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(current.json()).toMatchObject({
+      health: 'current',
+      materializedSetupRevisionId: 'revision_default',
+    })
+    await app.close()
+    await pool.end()
+  })
+
   it('surfaces a partially failed local mutation as manual recovery work', async () => {
     const { app, pool } = await harness()
     const failedResult: ResultEnvelope = {

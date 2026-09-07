@@ -960,6 +960,43 @@ select:focus-visible {
   margin-bottom: 0;
 }
 
+.operation-decision {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--warning) 32%, var(--border));
+  border-radius: 10px;
+  background: var(--warning-soft);
+}
+
+.operation-decision > svg {
+  color: var(--warning);
+}
+
+.operation-decision strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.operation-decision p {
+  max-width: 66ch;
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.operation-decision-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cancel-button {
+  color: var(--error);
+}
+
 .materialization-status {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -1123,6 +1160,12 @@ select:focus-visible {
   color: var(--success);
 }
 
+.operation-result--warning {
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
 .operation-result > div,
 .switch-progress > div,
 .switch-terminal > div {
@@ -1175,6 +1218,25 @@ select:focus-visible {
 
 .plan-review > .empty-state {
   margin: 12px;
+}
+
+.plan-groups {
+  display: grid;
+}
+
+.plan-group + .plan-group {
+  border-top: 1px solid var(--border);
+}
+
+.plan-group h4 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 9px 13px;
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+  font-size: 11px;
 }
 
 .plan-action-list {
@@ -1417,6 +1479,24 @@ select:focus-visible {
     justify-self: start;
   }
 
+  .operation-decision {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .operation-decision-actions {
+    grid-column: 2;
+    flex-wrap: wrap;
+  }
+
+  .switch-progress {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .switch-progress .cancel-button {
+    margin-left: 38px;
+  }
+
   .capture-bar .primary-button {
     width: 100%;
   }
@@ -1519,9 +1599,20 @@ select:focus-visible {
   }
 
   .setup-action-buttons,
-  .operation-result {
+  .operation-result,
+  .operation-decision-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .operation-decision-actions {
+    grid-column: 1 / -1;
+  }
+
+  .operation-decision-actions button,
+  .switch-progress .cancel-button {
+    width: 100%;
+    margin-left: 0;
   }
 
   .operation-result .secondary-button {

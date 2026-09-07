@@ -3,8 +3,8 @@ use std::{fmt, path::PathBuf};
 use ahm_domain::{
     ApplyReceipt, ArtifactBundle, CancellationOutcome, CancellationReceipt, CanonicalPlan, Digest,
     DiscoveryKind, DiscoveryState, ErrorResult, Identifier, IsoTimestamp, JobEnvelope,
-    LeasedRunnerJob, OperationOutcome, PlanAction, PlanActionKind, PlanDestination, PlanResult,
-    ProjectId, ProjectRelativePath, ProtocolErrorCode, Recoverability, ResultEnvelope,
+    LeasedRunnerJob, OperationOutcome, PlanAction, PlanActionKind, PlanChangeKind, PlanDestination,
+    PlanResult, ProjectId, ProjectRelativePath, ProtocolErrorCode, Recoverability, ResultEnvelope,
     RollbackReceipt, RunnerCapabilities, RunnerJob, RunnerResult, ScanDiscovery, ScanResult,
     SetupRevisionId, PROTOCOL_VERSION,
 };
@@ -361,7 +361,14 @@ impl JobExecutor for LocalJobExecutor {
                                     should_cancel,
                                 ) {
                                     Ok((applied, plan)) => {
-                                        let actions_applied = plan.actions.len() as u64;
+                                        let actions_applied = plan
+                                            .actions
+                                            .iter()
+                                            .filter(|action| {
+                                                action.change != Some(PlanChangeKind::Unchanged)
+                                            })
+                                            .count()
+                                            as u64;
                                         RunnerResult::ApplyReceipt(ApplyReceipt {
                                             project_id: project.project_id.clone(),
                                             operation_id: Identifier::new(applied.operation_id)
@@ -542,9 +549,6 @@ fn canonical_plan(
         .collect::<std::collections::HashMap<_, _>>();
     let mut actions = Vec::new();
     for action in &local.actions {
-        if action.kind == ApplyActionKind::Keep {
-            continue;
-        }
         let relative = std::path::Path::new(&action.target_path)
             .strip_prefix(project_root)
             .with_context(|| "plan destination is outside its registered project")?;
@@ -559,6 +563,12 @@ fn canonical_plan(
             PlanActionKind::Copy
         } else {
             PlanActionKind::Link
+        };
+        let change = match action.kind {
+            ApplyActionKind::Add => PlanChangeKind::Add,
+            ApplyActionKind::Replace | ApplyActionKind::UpdateRecords => PlanChangeKind::Replace,
+            ApplyActionKind::Remove => PlanChangeKind::Remove,
+            ApplyActionKind::Keep => PlanChangeKind::Unchanged,
         };
         let artifact_id = artifact_by_skill
             .get(&action.skill_id)
@@ -575,7 +585,8 @@ fn canonical_plan(
                 .unwrap_or_else(|| "managed".to_owned()),
         )?;
         let action_key = format!(
-            "{:?}:{}:{}",
+            "{:?}:{:?}:{}:{}",
+            change,
             kind,
             artifact_id.as_str(),
             project_relative_path
@@ -583,6 +594,7 @@ fn canonical_plan(
         actions.push(PlanAction {
             action_id: Identifier::new(format!("action_{}", &sha256_hex(&action_key)[..24]))?,
             kind,
+            change: Some(change),
             artifact_id,
             destination: PlanDestination {
                 tool_id,
@@ -944,6 +956,10 @@ mod tests {
             panic!("expected plan result")
         };
         assert_eq!(plan_result.plan.actions.len(), 1);
+        assert_eq!(
+            plan_result.plan.actions[0].change,
+            Some(PlanChangeKind::Add)
+        );
         let plan_digest = plan_result.plan.plan_digest;
         let apply_result = executor.execute(
             &identity,
@@ -977,6 +993,27 @@ mod tests {
             .join("skills")
             .join("remote-skill")
             .exists());
+        let verification_result = executor.execute(
+            &identity,
+            Some(&project),
+            &envelope(
+                "job_verify",
+                RunnerJob::PlanSetup(PlanSetupJob {
+                    project_id: identifier("project_01"),
+                    revision: revision.clone(),
+                }),
+            ),
+            &now,
+            &mut || Ok(false),
+        );
+        let RunnerResult::PlanResult(verification) = verification_result.result else {
+            panic!("expected verification plan")
+        };
+        assert_eq!(verification.plan.actions.len(), 1);
+        assert_eq!(
+            verification.plan.actions[0].change,
+            Some(PlanChangeKind::Unchanged)
+        );
         let rollback_result = executor.execute(
             &identity,
             Some(&project),

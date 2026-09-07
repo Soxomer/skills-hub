@@ -20,8 +20,9 @@ import {
 } from './switch-state'
 
 const POLL_INTERVAL_MS = 750
+const OPERATIONS_POLL_INTERVAL_MS = 1_500
 
-type SwitchStage = 'revisions' | 'plan' | 'status' | 'apply' | 'rollback'
+type SwitchStage = 'revisions' | 'plan' | 'status' | 'apply' | 'rollback' | 'cancel'
 
 export interface SetupSwitchError {
   stage: SwitchStage
@@ -31,9 +32,10 @@ export interface SetupSwitchError {
 interface ActiveJob {
   kind: 'plan' | 'apply' | 'rollback'
   jobId: string
+  setupRevisionId: string | null
 }
 
-function mapActiveOperation(operation: ProjectActiveOperation | null): ActiveJob | null {
+function mapActiveOperation(operation: ProjectActiveOperation | null | undefined): ActiveJob | null {
   if (!operation) return null
   const map: Record<ProjectActiveOperation['kind'], ActiveJob['kind']> = {
     planSetup: 'plan',
@@ -43,6 +45,7 @@ function mapActiveOperation(operation: ProjectActiveOperation | null): ActiveJob
   return {
     kind: map[operation.kind],
     jobId: operation.jobId,
+    setupRevisionId: operation.setupRevisionId,
   }
 }
 
@@ -68,6 +71,8 @@ export function useSetupSwitch(
   const [cancellation, setCancellation] = useState<CancellationReceipt['payload'] | null>(null)
   const [receipt, setReceipt] = useState<ApplyReceipt['payload'] | null>(null)
   const [restored, setRestored] = useState<RollbackReceipt['payload'] | null>(null)
+  const [operationConflict, setOperationConflict] = useState<ProjectActiveOperation | null>(null)
+  const [planWasStale, setPlanWasStale] = useState(false)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<SetupSwitchError | null>(null)
@@ -82,6 +87,11 @@ export function useSetupSwitch(
       ])
       setState(next)
       setOperations(nextOperations)
+      const serverJob = mapActiveOperation(nextOperations.activeOperation)
+      if (serverJob) {
+        setActiveJob(serverJob)
+        if (serverJob.setupRevisionId) setSelectedRevisionId(serverJob.setupRevisionId)
+      }
       setSelectedRevisionId((current) =>
         current && next.revisions.some((revision) => revision.setupRevisionId === current)
           ? current
@@ -106,9 +116,39 @@ export function useSetupSwitch(
     setCancellation(null)
     setReceipt(null)
     setRestored(null)
+    setOperationConflict(null)
+    setPlanWasStale(false)
     setError(null)
     void refreshState()
   }, [projectInstanceId, refreshState])
+
+  const refreshOperations = useCallback(async () => {
+    if (!projectInstanceId) return
+    try {
+      const nextOperations = await client.projectOperations(projectInstanceId)
+      setOperations(nextOperations)
+      const serverJob = mapActiveOperation(nextOperations.activeOperation)
+      if (serverJob) {
+        setActiveJob((current) =>
+          current?.jobId === serverJob.jobId ? current : serverJob,
+        )
+        if (serverJob.setupRevisionId) setSelectedRevisionId(serverJob.setupRevisionId)
+      }
+    } catch (nextError) {
+      setError(workflowError('status', nextError))
+    }
+  }, [client, projectInstanceId])
+
+  useEffect(() => {
+    if (!projectInstanceId) return
+    const interval = window.setInterval(() => void refreshOperations(), OPERATIONS_POLL_INTERVAL_MS)
+    const onFocus = () => void refreshOperations()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [projectInstanceId, refreshOperations])
 
   const refreshJob = useCallback(async () => {
     const trackedJob = activeJob ?? mapActiveOperation(operations?.activeOperation)
@@ -148,7 +188,30 @@ export function useSetupSwitch(
         await refreshState()
         setActiveJob((current) => (current?.jobId === trackedJob.jobId ? null : current))
       }
-      if (status.state === 'failed' && status.result?.result.kind === 'error') {
+      if (
+        trackedJob.kind === 'apply' &&
+        status.state === 'failed' &&
+        status.result?.result.kind === 'error' &&
+        status.result.result.payload.code === 'planDigestMismatch' &&
+        trackedJob.setupRevisionId
+      ) {
+        setPlanWasStale(true)
+        setError(null)
+        const queued = await client.prepareSetupPlan(projectInstanceId, {
+          setupRevisionId: trackedJob.setupRevisionId,
+        })
+        setActiveJob({
+          kind: 'plan',
+          jobId: queued.jobId,
+          setupRevisionId: trackedJob.setupRevisionId,
+        })
+        setJobStatus({
+          jobId: queued.jobId,
+          state: 'pending',
+          result: null,
+          cancelRequested: false,
+        })
+      } else if (status.state === 'failed' && status.result?.result.kind === 'error') {
         setError({ stage: trackedJob.kind, code: status.result.result.payload.code })
       } else {
         setError((current) => (current?.stage === 'status' ? null : current))
@@ -156,7 +219,7 @@ export function useSetupSwitch(
     } catch (nextError) {
       setError(workflowError('status', nextError))
     }
-  }, [activeJob, client, operations?.activeOperation, refreshState])
+  }, [activeJob, client, operations?.activeOperation, projectInstanceId, refreshState])
 
   useEffect(() => {
     if (activeJob || !operations?.activeOperation) return
@@ -164,7 +227,7 @@ export function useSetupSwitch(
     if (pending) {
       setActiveJob(pending)
     }
-  }, [activeJob, operations?.activeOperation?.jobId, operations?.activeOperation?.kind])
+  }, [activeJob, operations?.activeOperation])
 
   useEffect(() => {
     const trackedJob = activeJob ?? mapActiveOperation(operations?.activeOperation)
@@ -187,6 +250,8 @@ export function useSetupSwitch(
     setCancellation(null)
     setReceipt(null)
     setRestored(null)
+    setOperationConflict(null)
+    setPlanWasStale(false)
     setError(null)
   }, [])
 
@@ -199,7 +264,7 @@ export function useSetupSwitch(
       const queued = await client.prepareSetupPlan(projectInstanceId, {
         setupRevisionId: revisionId,
       })
-      setActiveJob({ kind: 'plan', jobId: queued.jobId })
+      setActiveJob({ kind: 'plan', jobId: queued.jobId, setupRevisionId: revisionId })
       setJobStatus({
         jobId: queued.jobId,
         state: 'pending',
@@ -213,6 +278,17 @@ export function useSetupSwitch(
       setRestored(null)
       return true
     } catch (nextError) {
+      if (nextError instanceof ControlPlaneApiError && nextError.activeOperation) {
+        const serverJob = mapActiveOperation(nextError.activeOperation)
+        setOperationConflict(nextError.activeOperation)
+        setOperations((current) =>
+          current ? { ...current, activeOperation: nextError.activeOperation } : current,
+        )
+        setActiveJob(serverJob)
+        if (serverJob?.setupRevisionId) setSelectedRevisionId(serverJob.setupRevisionId)
+        setError(null)
+        return false
+      }
       setError(workflowError('plan', nextError))
       return false
     } finally {
@@ -229,7 +305,11 @@ export function useSetupSwitch(
         planJobId,
         planDigest: plan.planDigest,
       })
-      setActiveJob({ kind: 'apply', jobId: queued.jobId })
+      setActiveJob({
+        kind: 'apply',
+        jobId: queued.jobId,
+        setupRevisionId: plan.setupRevisionId,
+      })
       setJobStatus({
         jobId: queued.jobId,
         state: 'pending',
@@ -239,12 +319,19 @@ export function useSetupSwitch(
       setCancellation(null)
       return true
     } catch (nextError) {
+      if (nextError instanceof ControlPlaneApiError && nextError.code === 'planDigestMismatch') {
+        setPlanWasStale(true)
+        setPlan(null)
+        setPlanJobId(null)
+        setSubmitting(false)
+        return preparePlan(plan.setupRevisionId)
+      }
       setError(workflowError('apply', nextError))
       return false
     } finally {
       setSubmitting(false)
     }
-  }, [client, plan, planJobId, projectInstanceId])
+  }, [client, plan, planJobId, preparePlan, projectInstanceId])
 
   const rollback = useCallback(async () => {
     if (!receipt || !projectInstanceId) return false
@@ -254,7 +341,7 @@ export function useSetupSwitch(
       const queued = await client.rollbackSetup(projectInstanceId, {
         operationId: receipt.operationId,
       })
-      setActiveJob({ kind: 'rollback', jobId: queued.jobId })
+      setActiveJob({ kind: 'rollback', jobId: queued.jobId, setupRevisionId: null })
       setJobStatus({
         jobId: queued.jobId,
         state: 'pending',
@@ -271,14 +358,40 @@ export function useSetupSwitch(
     }
   }, [client, projectInstanceId, receipt])
 
-  const recoverFromCancellation = useCallback(() => {
-    setActiveJob(null)
-    setJobStatus(null)
-    setPlan(null)
-    setPlanJobId(null)
-    setCancellation(null)
+  const keepOperationRunning = useCallback(() => setOperationConflict(null), [])
+
+  const cancelActiveOperation = useCallback(async () => {
+    const trackedJob = activeJob ?? mapActiveOperation(operations?.activeOperation)
+    if (!trackedJob) return false
+    setSubmitting(true)
     setError(null)
-  }, [])
+    try {
+      await client.cancelJob(trackedJob.jobId)
+      setOperationConflict(null)
+      setJobStatus((current) =>
+        current?.jobId === trackedJob.jobId ? { ...current, cancelRequested: true } : current,
+      )
+      setOperations((current) =>
+        current?.activeOperation?.jobId === trackedJob.jobId
+          ? {
+              ...current,
+              activeOperation: { ...current.activeOperation, cancelRequested: true },
+            }
+          : current,
+      )
+      return true
+    } catch (nextError) {
+      setError(workflowError('cancel', nextError))
+      return false
+    } finally {
+      setSubmitting(false)
+    }
+  }, [activeJob, client, operations?.activeOperation])
+
+  const retryRecovery = useCallback(() => {
+    const revisionId = state?.assignedSetupRevisionId ?? selectedRevisionId
+    return preparePlan(revisionId)
+  }, [preparePlan, selectedRevisionId, state?.assignedSetupRevisionId])
 
   return {
     state,
@@ -292,6 +405,8 @@ export function useSetupSwitch(
     cancellation,
     receipt,
     restored,
+    operationConflict,
+    planWasStale,
     loading,
     submitting,
     error,
@@ -301,6 +416,8 @@ export function useSetupSwitch(
     preparePlan,
     applyPlan,
     rollback,
-    recoverFromCancellation,
+    keepOperationRunning,
+    cancelActiveOperation,
+    retryRecovery,
   }
 }

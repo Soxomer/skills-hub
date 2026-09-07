@@ -624,7 +624,7 @@ Acceptance:
 
 ## 15. First implementation milestone
 
-The next development milestone is **Default Setup and Manual Project Switching**. It should be delivered as a thin vertical slice before plugin variants or evaluation.
+The current development milestone is **Default Setup and Manual Project Switching**. Its implementation is in final acceptance before plugin variants or evaluation begin.
 
 Proposed ticket sequence:
 
@@ -667,7 +667,7 @@ Proposed ticket sequence:
 
 The milestone is complete only when two disposable projects can retain independent Defaults, and each can move from its own detected Default Setup to another Setup and back through both the shared backend and at least one consumer, without losing unmanaged content.
 
-### 15.1 Next milestone — web control plane and local runner split
+### 15.1 Current architecture — web control plane and local runner split
 
 Before expanding the Catalog, variant, or evaluation model, establish the final deployment boundary:
 
@@ -680,8 +680,8 @@ Before expanding the Catalog, variant, or evaluation model, establish the final 
 7. prove plan, explicit approval, apply receipt, and manual Use Default through the same path;
 8. remove the superseded application and packaging after browser parity is reached.
 
-All ten cutover tickets in
-[`WEB-CONTROL-PLANE-RUNNER-PLAN.md`](./WEB-CONTROL-PLANE-RUNNER-PLAN.md) are complete. Shared PostgreSQL and device-local SQLite ownership are separated, the standalone runner owns filesystem execution and durable delivery, and the browser exposes connection, scan, Default review, plan/apply, rollback, drift, and recovery UX.
+The cutover implementation in
+[`WEB-CONTROL-PLANE-RUNNER-PLAN.md`](./WEB-CONTROL-PLANE-RUNNER-PLAN.md) is present: shared PostgreSQL and device-local SQLite ownership are separated, and the standalone runner owns filesystem execution and durable delivery. Final milestone acceptance remains open until the browser switching workflow is verified against two disposable projects, including cancellation, stale plans, drift, recovery, and preservation of unmanaged content.
 
 ## 16. Inspiration and reusable patterns
 

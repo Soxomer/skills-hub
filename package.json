@@ -29,7 +29,7 @@
     "rust:fmt:check": "cargo fmt --manifest-path Cargo.toml --all -- --check",
     "rust:clippy": "cargo clippy --manifest-path Cargo.toml --workspace --all-targets --all-features -- -D warnings",
     "rust:test": "cargo test --manifest-path Cargo.toml --workspace",
-    "check": "npm run boundary:check && npm run lint && npm run test && npm run build && npm run rust:fmt:check && npm run rust:clippy && npm run rust:test",
+    "check": "npm run version:check && npm run boundary:check && npm run build:contracts && npm run lint && npm run test && npm run build && npm run rust:fmt:check && npm run rust:clippy && npm run rust:test",
     "preview": "npm exec --workspace @ahm/web -- vite preview",
     "version:set": "node scripts/version.mjs set",
     "version:sync": "node scripts/version.mjs sync",

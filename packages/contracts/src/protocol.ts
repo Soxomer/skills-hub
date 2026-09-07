@@ -131,6 +131,7 @@ export interface ScanResult {
 }
 
 export type PlanActionKind = 'link' | 'copy' | 'removeManaged'
+export type PlanChangeKind = 'add' | 'replace' | 'remove' | 'unchanged'
 
 export interface PlanDestination {
   toolId: string
@@ -140,6 +141,7 @@ export interface PlanDestination {
 export interface PlanAction {
   actionId: string
   kind: PlanActionKind
+  change?: PlanChangeKind
   artifactId: ArtifactId
   destination: PlanDestination
 }

@@ -318,6 +318,15 @@ pub enum PlanActionKind {
     RemoveManaged,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlanChangeKind {
+    Add,
+    Replace,
+    Remove,
+    Unchanged,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PlanDestination {
@@ -330,6 +339,8 @@ pub struct PlanDestination {
 pub struct PlanAction {
     pub action_id: Identifier,
     pub kind: PlanActionKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub change: Option<PlanChangeKind>,
     pub artifact_id: ArtifactId,
     pub destination: PlanDestination,
 }

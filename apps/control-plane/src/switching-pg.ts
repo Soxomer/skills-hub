@@ -288,8 +288,10 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
          LIMIT 10`,
         [organizationId, projectInstanceId],
       ),
-      this.pool.query<QueryResultRow & { result_json: ResultEnvelope | string }>(
-        `SELECT result_json
+      this.pool.query<
+        QueryResultRow & { result_json: ResultEnvelope | string; completed_at: Date }
+      >(
+        `SELECT result_json, completed_at
          FROM runner_jobs
          WHERE organization_id = $1 AND project_instance_id = $2
            AND job_kind = 'planSetup' AND state = 'succeeded' AND result_json IS NOT NULL
@@ -350,13 +352,31 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
     const latestPlanResult = latestPlanRows.rows[0]
       ? objectValue(latestPlanRows.rows[0].result_json).result
       : null
+    const latestPlanCompletedAt = latestPlanRows.rows[0]?.completed_at ?? null
     const assignedSetupRevisionId = instance.rows[0].assigned_setup_revision_id
-    const materializedSetupRevisionId = latestCompleted?.setupRevisionId ?? null
+    const planForAssignment =
+      latestPlanResult?.kind === 'planResult' &&
+      latestPlanResult.payload.plan.setupRevisionId === assignedSetupRevisionId
+        ? latestPlanResult.payload.plan
+        : null
+    const planIsNewerThanLatestOperation = Boolean(
+      latestPlanCompletedAt &&
+        (!latestOperation?.completedAt ||
+          latestPlanCompletedAt.getTime() > new Date(latestOperation.completedAt).getTime()),
+    )
+    const planHasChanges = Boolean(
+      planForAssignment?.conflicts.length ||
+        planForAssignment?.actions.some((action) => action.change !== 'unchanged'),
+    )
     const requiresAttention =
       latestOperation?.recoverability === 'manualIntervention' &&
-      (latestOperation.state === 'failed' || latestOperation.state === 'cancelled')
-    const hasDrift =
-      latestPlanResult?.kind === 'planResult' && latestPlanResult.payload.plan.conflicts.length > 0
+      (latestOperation.state === 'failed' || latestOperation.state === 'cancelled') &&
+      !(planForAssignment && planIsNewerThanLatestOperation)
+    const materializedSetupRevisionId =
+      planForAssignment && planIsNewerThanLatestOperation && !planHasChanges
+        ? assignedSetupRevisionId
+        : (latestCompleted?.setupRevisionId ?? null)
+    const hasDrift = Boolean(planForAssignment && planIsNewerThanLatestOperation && planHasChanges)
     const health = requiresAttention
       ? 'attention'
       : hasDrift ||

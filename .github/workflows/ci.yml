@@ -21,9 +21,9 @@ jobs:
       - run: npm ci
       - run: npm run version:check
       - run: npm run boundary:check
+      - run: npm run build:contracts
       - run: npm run lint
       - run: npm run test
-      - run: npm run build:contracts
       - run: npm run build:control-plane
       - run: npm run build:web
 

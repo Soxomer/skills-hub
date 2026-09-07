@@ -136,4 +136,39 @@ describe('ControlPlaneClient', () => {
       }),
     )
   })
+
+  it('cancels a job and accepts an empty response', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }))
+
+    await expect(client(request).cancelJob('job with spaces')).resolves.toBeUndefined()
+    expect(request).toHaveBeenCalledWith(
+      'https://hub.example.test/api/v1/jobs/job%20with%20spaces/cancel',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('preserves the active operation returned by a single-flight conflict', async () => {
+    const activeOperation = {
+      jobId: 'job_02',
+      kind: 'applyPlan' as const,
+      state: 'acknowledged' as const,
+      setupRevisionId: 'revision_02',
+      cancelRequested: false,
+      issuedAt: '2026-09-07T12:00:00.000Z',
+    }
+    const request = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 'projectOperationInProgress',
+          error: 'another Setup operation is already in progress',
+          activeOperation,
+        }),
+        { status: 409 },
+      ),
+    )
+
+    await expect(
+      client(request).prepareSetupPlan('instance_01', { setupRevisionId: 'revision_03' }),
+    ).rejects.toEqual(expect.objectContaining({ activeOperation }))
+  })
 })
