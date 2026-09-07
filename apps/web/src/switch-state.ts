@@ -34,6 +34,22 @@ export function cancellationReceipt(
     : null
 }
 
+export function cancelledWithoutMutation(status: RunnerJobStatusResponse | null): boolean {
+  if (!status) return false
+  if (status.state === 'cancelled' && status.result === null) return true
+  return Boolean(
+    status.result?.result.kind === 'error' &&
+      status.result.result.payload.code === 'jobCancelled' &&
+      status.result.result.payload.recoverability !== 'manualIntervention',
+  )
+}
+
+export function actionablePlanCount(plan: CanonicalPlan): number {
+  return plan.actions.filter(
+    (action) => action.change !== 'unchanged' || action.metadataOnly === true,
+  ).length
+}
+
 export function jobInFlight(status: RunnerJobStatusResponse | null): boolean {
   return Boolean(
     status &&

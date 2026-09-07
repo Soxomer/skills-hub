@@ -294,6 +294,7 @@
         "actionId": { "$ref": "#/$defs/identifier" },
         "kind": { "enum": ["link", "copy", "removeManaged"] },
         "change": { "enum": ["add", "replace", "remove", "unchanged"] },
+        "metadataOnly": { "type": "boolean" },
         "artifactId": { "$ref": "#/$defs/identifier" },
         "destination": {
           "type": "object",

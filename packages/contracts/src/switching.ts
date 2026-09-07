@@ -65,6 +65,7 @@ export interface ProjectInstanceOperationsResponse {
   materializedSetupRevisionId: SetupRevisionId | null
   health: ProjectMaterializationHealth
   activeOperation: ProjectActiveOperation | null
+  reviewedPlan: ReviewedPlan | null
   operations: ProjectOperationSummary[]
 }
 

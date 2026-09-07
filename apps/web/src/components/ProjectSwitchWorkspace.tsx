@@ -29,6 +29,7 @@ import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { ControlPlaneClient } from '../api'
+import { actionablePlanCount } from '../switch-state'
 import { useSetupSwitch } from '../useSetupSwitch'
 
 interface ProjectSwitchWorkspaceProps {
@@ -86,7 +87,9 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
     workflow.activeJob?.setupRevisionId ?? workflow.operations?.activeOperation?.setupRevisionId ?? null
   const terminalFailure =
     workflow.jobStatus &&
-    ['failed', 'expired', 'cancelled'].includes(workflow.jobStatus.state)
+    ['failed', 'expired', 'cancelled'].includes(workflow.jobStatus.state) &&
+    !workflow.cancelledSafely &&
+    !workflow.cancellation
 
   return (
     <section className="step-panel setup-switch" aria-labelledby="setup-switch-title">
@@ -251,10 +254,13 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
         </>
       ) : (
         <>
-          {workflow.cancellation && (
+          {(workflow.cancellation || workflow.cancelledSafely) && (
             <div
               className={`operation-result operation-result--${
-                workflow.cancellation.outcome === 'cancelledAndRestored' ? 'success' : 'warning'
+                !workflow.cancellation ||
+                workflow.cancellation.outcome === 'cancelledAndRestored'
+                  ? 'success'
+                  : 'warning'
               }`}
               role="status"
             >
@@ -262,13 +268,15 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
               <div>
                 <strong>{t('switchFlow.cancellation.title')}</strong>
                 <p>
-                  {workflow.cancellation.outcome === 'cancelledAndRestored'
-                    ? t('switchFlow.cancellation.cancelledAndRestored')
-                    : t('switchFlow.cancellation.needsAttention')}
+                  {workflow.cancelledSafely
+                    ? t('switchFlow.cancellation.cancelledWithoutChanges')
+                    : workflow.cancellation?.outcome === 'cancelledAndRestored'
+                      ? t('switchFlow.cancellation.cancelledAndRestored')
+                      : t('switchFlow.cancellation.needsAttention')}
                 </p>
-                <code>
-                  {workflow.cancellation.operationId ?? t('switchFlow.cancellation.pendingId')}
-                </code>
+                {workflow.cancellation?.operationId && (
+                  <code>{workflow.cancellation.operationId}</code>
+                )}
               </div>
             </div>
           )}
@@ -591,7 +599,7 @@ function planChange(action: PlanAction): PlanChangeKind {
 
 function PlanReview({ plan }: { plan: CanonicalPlan }) {
   const { t } = useTranslation()
-  const actionableCount = plan.actions.filter((action) => planChange(action) !== 'unchanged').length
+  const actionableCount = actionablePlanCount(plan)
   return (
     <div className="plan-review">
       <div className="plan-review-heading">
@@ -622,7 +630,13 @@ function PlanReview({ plan }: { plan: CanonicalPlan }) {
                       <li key={action.actionId}>
                         <ActionIcon aria-hidden="true" size={16} />
                         <span>
-                          <strong>{t(`switchFlow.action.${action.kind}`)}</strong>
+                          <strong>
+                            {action.metadataOnly
+                              ? t('switchFlow.action.metadataOnly')
+                              : planChange(action) === 'unchanged'
+                                ? t('switchFlow.action.unchanged')
+                                : t(`switchFlow.action.${action.kind}`)}
+                          </strong>
                           <code>{action.destination.projectRelativePath}</code>
                         </span>
                         <small>{action.destination.toolId}</small>

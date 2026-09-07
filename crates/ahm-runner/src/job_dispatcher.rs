@@ -366,6 +366,7 @@ impl JobExecutor for LocalJobExecutor {
                                             .iter()
                                             .filter(|action| {
                                                 action.change != Some(PlanChangeKind::Unchanged)
+                                                    || action.metadata_only == Some(true)
                                             })
                                             .count()
                                             as u64;
@@ -566,10 +567,11 @@ fn canonical_plan(
         };
         let change = match action.kind {
             ApplyActionKind::Add => PlanChangeKind::Add,
-            ApplyActionKind::Replace | ApplyActionKind::UpdateRecords => PlanChangeKind::Replace,
+            ApplyActionKind::Replace => PlanChangeKind::Replace,
             ApplyActionKind::Remove => PlanChangeKind::Remove,
-            ApplyActionKind::Keep => PlanChangeKind::Unchanged,
+            ApplyActionKind::Keep | ApplyActionKind::UpdateRecords => PlanChangeKind::Unchanged,
         };
+        let metadata_only = action.kind == ApplyActionKind::UpdateRecords;
         let artifact_id = artifact_by_skill
             .get(&action.skill_id)
             .cloned()
@@ -585,8 +587,9 @@ fn canonical_plan(
                 .unwrap_or_else(|| "managed".to_owned()),
         )?;
         let action_key = format!(
-            "{:?}:{:?}:{}:{}",
+            "{:?}:{}:{:?}:{}:{}",
             change,
+            metadata_only,
             kind,
             artifact_id.as_str(),
             project_relative_path
@@ -595,6 +598,7 @@ fn canonical_plan(
             action_id: Identifier::new(format!("action_{}", &sha256_hex(&action_key)[..24]))?,
             kind,
             change: Some(change),
+            metadata_only: metadata_only.then_some(true),
             artifact_id,
             destination: PlanDestination {
                 tool_id,

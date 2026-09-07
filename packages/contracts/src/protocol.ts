@@ -142,6 +142,7 @@ export interface PlanAction {
   actionId: string
   kind: PlanActionKind
   change?: PlanChangeKind
+  metadataOnly?: boolean
   artifactId: ArtifactId
   destination: PlanDestination
 }

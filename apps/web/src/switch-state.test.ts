@@ -2,7 +2,9 @@ import type { RunnerJobStatusResponse } from '@ahm/contracts'
 import { describe, expect, it } from 'vitest'
 
 import {
+  actionablePlanCount,
   applyReceipt,
+  cancelledWithoutMutation,
   cancellationReceipt,
   jobInFlight,
   preparedPlan,
@@ -79,5 +81,65 @@ describe('Setup switch state', () => {
 
     expect(cancellationReceipt(status)?.operationId).toBe('operation_01')
     expect(cancellationReceipt({ ...status, state: 'succeeded' })).toBeNull()
+  })
+
+  it('recognizes cancellation before any local mutation as a safe outcome', () => {
+    expect(cancelledWithoutMutation({ ...base, state: 'cancelled' })).toBe(true)
+    expect(
+      cancelledWithoutMutation({
+        ...base,
+        state: 'failed',
+        result: {
+          protocolVersion: '1.0',
+          jobId: 'job_01',
+          idempotencyKey: 'plan-job-01',
+          organizationId: 'org_01',
+          deviceId: 'device_01',
+          projectInstanceId: 'instance_01',
+          result: {
+            kind: 'error',
+            payload: {
+              code: 'jobCancelled',
+              message: 'cancelled before mutation',
+              retryable: false,
+              recoverability: 'notNeeded',
+            },
+          },
+        },
+      }),
+    ).toBe(true)
+  })
+
+  it('counts ownership-only updates as actionable plan work', () => {
+    expect(
+      actionablePlanCount({
+        setupRevisionId: 'revision_01',
+        planDigest: `sha256:${'a'.repeat(64)}`,
+        conflicts: [],
+        actions: [
+          {
+            actionId: 'action_01',
+            artifactId: 'artifact_01',
+            destination: {
+              toolId: 'codex',
+              projectRelativePath: '.codex/skills/pdf',
+            },
+            kind: 'copy',
+            change: 'unchanged',
+            metadataOnly: true,
+          },
+          {
+            actionId: 'action_02',
+            artifactId: 'artifact_02',
+            destination: {
+              toolId: 'codex',
+              projectRelativePath: '.codex/skills/docs',
+            },
+            kind: 'copy',
+            change: 'unchanged',
+          },
+        ],
+      }),
+    ).toBe(1)
   })
 })

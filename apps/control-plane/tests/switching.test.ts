@@ -42,6 +42,7 @@ async function harness() {
     '0003_default_capture.sql',
     '0004_runner_delivery.sql',
     '0005_project_operation_singleflight.sql',
+    '0006_runner_job_setup_revision.sql',
   ]) {
     const path = fileURLToPath(new URL(`../migrations/${migrationName}`, import.meta.url))
     database.public.none(readFileSync(path, 'utf8'))
@@ -305,6 +306,18 @@ describe('Setup switching', () => {
       },
     })
 
+    const reviewState = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(reviewState.json()).toMatchObject({
+      reviewedPlan: {
+        jobId: planJobId,
+        plan: { setupRevisionId: 'revision_team', planDigest },
+      },
+    })
+
     const stale = await app.inject({
       method: 'POST',
       url: '/api/v1/project-instances/instance_01/apply',
@@ -322,6 +335,12 @@ describe('Setup switching', () => {
     })
     expect(applied.statusCode).toBe(200)
     const applyJobId = applied.json<{ jobId: string; approvalId: string }>().jobId
+    const applyingState = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(applyingState.json()).toMatchObject({ reviewedPlan: null })
     expect(
       (
         await pool.query<{ expires_at: Date }>(
@@ -612,6 +631,7 @@ describe('Setup switching', () => {
       setupRevisionId: string,
       change: 'add' | 'unchanged',
       conflicts: string[] = [],
+      metadataOnly = false,
     ): ResultEnvelope => ({
       protocolVersion: '1.0',
       jobId,
@@ -632,6 +652,7 @@ describe('Setup switching', () => {
                 actionId: `action_${jobId}`,
                 kind: 'link',
                 change,
+                ...(metadataOnly ? { metadataOnly: true } : {}),
                 artifactId: 'artifact_default',
                 destination: {
                   toolId: 'codex',
@@ -644,17 +665,22 @@ describe('Setup switching', () => {
       },
     })
     const insertPlan = async (jobId: string, completedAt: string, envelope: ResultEnvelope) => {
+      const setupRevisionId =
+        envelope.result.kind === 'planResult'
+          ? envelope.result.payload.plan.setupRevisionId
+          : null
       await pool.query(
         `INSERT INTO runner_jobs
          (id, organization_id, device_id, project_instance_id, protocol_version,
-          idempotency_key, job_kind, payload, state, issued_at, expires_at, completed_at,
+          idempotency_key, job_kind, payload, setup_revision_id, state, issued_at, expires_at, completed_at,
           result_json, result_digest)
          VALUES ($1, 'org_01', 'device_01', 'instance_01', '1.0', $2, 'planSetup',
-          $3::jsonb, 'succeeded', $4, $5, $4, $6::jsonb, $7)`,
+          $3::jsonb, $4, 'succeeded', $5, $6, $5, $7::jsonb, $8)`,
         [
           jobId,
           envelope.idempotencyKey,
-          JSON.stringify({ projectId: 'project_01', revision: { setupRevisionId: envelope.result.kind === 'planResult' ? envelope.result.payload.plan.setupRevisionId : '' } }),
+          JSON.stringify({ projectId: 'project_01', revision: { setupRevisionId } }),
+          setupRevisionId,
           completedAt,
           '2026-09-02T11:00:00.000Z',
           JSON.stringify(envelope),
@@ -688,6 +714,30 @@ describe('Setup switching', () => {
     expect(drifted.json()).toMatchObject({ health: 'drifted' })
 
     await insertPlan(
+      'job_plan_team_later',
+      '2026-09-02T10:02:30.000Z',
+      result('job_plan_team_later', 'revision_team', 'add', ['unmanaged target']),
+    )
+    const driftPreserved = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(driftPreserved.json()).toMatchObject({ health: 'drifted' })
+
+    await insertPlan(
+      'job_plan_default_metadata',
+      '2026-09-02T10:02:45.000Z',
+      result('job_plan_default_metadata', 'revision_default', 'unchanged', [], true),
+    )
+    const metadataDrift = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(metadataDrift.json()).toMatchObject({ health: 'drifted' })
+
+    await insertPlan(
       'job_plan_default_current',
       '2026-09-02T10:03:00.000Z',
       result('job_plan_default_current', 'revision_default', 'unchanged'),
@@ -701,6 +751,58 @@ describe('Setup switching', () => {
       health: 'current',
       materializedSetupRevisionId: 'revision_default',
     })
+
+    const failedPlan: ResultEnvelope = {
+      protocolVersion: '1.0',
+      jobId: 'job_plan_failed_later',
+      idempotencyKey: 'idem-job_plan_failed_later',
+      organizationId: 'org_01',
+      deviceId: 'device_01',
+      projectInstanceId: 'instance_01',
+      result: {
+        kind: 'error',
+        payload: {
+          code: 'operationFailed',
+          message: 'plan failed',
+          retryable: true,
+          recoverability: 'notNeeded',
+        },
+      },
+    }
+    await pool.query(
+      `INSERT INTO runner_jobs
+       (id, organization_id, device_id, project_instance_id, protocol_version,
+        idempotency_key, job_kind, payload, setup_revision_id, state, issued_at, expires_at,
+        completed_at, result_json, result_digest)
+       VALUES ($1, 'org_01', 'device_01', 'instance_01', '1.0', $2, 'planSetup',
+        $3::jsonb, 'revision_team', 'failed', $4, $5, $4, $6::jsonb, $7)`,
+      [
+        failedPlan.jobId,
+        failedPlan.idempotencyKey,
+        JSON.stringify({ projectId: 'project_01', revision: { setupRevisionId: 'revision_team' } }),
+        '2026-09-02T10:04:00.000Z',
+        '2026-09-02T11:00:00.000Z',
+        JSON.stringify(failedPlan),
+        `sha256:${'e'.repeat(64)}`,
+      ],
+    )
+    const superseded = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(superseded.json()).toMatchObject({ health: 'current', reviewedPlan: null })
+    const applySuperseded = await app.inject({
+      method: 'POST',
+      url: '/api/v1/project-instances/instance_01/apply',
+      headers: actorHeaders,
+      payload: {
+        planJobId: 'job_plan_default_current',
+        planDigest: `sha256:${'c'.repeat(64)}`,
+      },
+    })
+    expect(applySuperseded.statusCode).toBe(409)
+    expect(applySuperseded.json()).toMatchObject({ code: 'planDigestMismatch' })
     await app.close()
     await pool.end()
   })

@@ -83,6 +83,14 @@ interface ActiveOperationRow extends QueryResultRow {
   issued_at: Date | string
 }
 
+interface PlanAttemptRow extends QueryResultRow {
+  id: string
+  state: ProjectOperationSummary['state']
+  result_json: ResultEnvelope | string | null
+  issued_at: Date | string
+  completed_at: Date | string | null
+}
+
 function iso(value: Date | string): string {
   return typeof value === 'string' ? new Date(value).toISOString() : value.toISOString()
 }
@@ -171,11 +179,15 @@ async function transaction<T>(pool: Pool, operation: (client: PoolClient) => Pro
 }
 
 async function insertJob(client: Pick<Pool, 'query'>, job: JobEnvelope): Promise<void> {
+  const setupRevisionId =
+    job.job.kind === 'planSetup' || job.job.kind === 'applyPlan'
+      ? job.job.payload.revision.setupRevisionId
+      : null
   await client.query(
     `INSERT INTO runner_jobs
      (id, organization_id, device_id, project_instance_id, protocol_version,
-      idempotency_key, job_kind, payload, state, issued_at, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 'pending', $9, $10)`,
+      idempotency_key, job_kind, payload, setup_revision_id, state, issued_at, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, 'pending', $10, $11)`,
     [
       job.jobId,
       job.organizationId,
@@ -185,6 +197,7 @@ async function insertJob(client: Pick<Pool, 'query'>, job: JobEnvelope): Promise
       job.idempotencyKey,
       job.job.kind,
       JSON.stringify(job.job.payload),
+      setupRevisionId,
       job.issuedAt,
       job.expiresAt,
     ],
@@ -278,7 +291,9 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
     )
     if (!instance.rows[0]) return null
 
-    const [operationRows, latestPlanRows, activeOperationRows] = await Promise.all([
+    const assignedSetupRevisionId = instance.rows[0].assigned_setup_revision_id
+    const [operationRows, latestPlanAttemptRows, latestAssignedPlanRows, activeOperationRows] =
+      await Promise.all([
       this.pool.query<OperationRow>(
         `SELECT id, job_kind, state, payload, result_json, issued_at, completed_at
          FROM runner_jobs
@@ -288,16 +303,24 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
          LIMIT 10`,
         [organizationId, projectInstanceId],
       ),
-      this.pool.query<
-        QueryResultRow & { result_json: ResultEnvelope | string; completed_at: Date }
-      >(
-        `SELECT result_json, completed_at
+      this.pool.query<PlanAttemptRow>(
+        `SELECT id, state, result_json, issued_at, completed_at
+         FROM runner_jobs
+         WHERE organization_id = $1 AND project_instance_id = $2
+           AND job_kind = 'planSetup'
+         ORDER BY issued_at DESC, id DESC
+         LIMIT 1`,
+        [organizationId, projectInstanceId],
+      ),
+      this.pool.query<PlanAttemptRow>(
+        `SELECT id, state, result_json, issued_at, completed_at
          FROM runner_jobs
          WHERE organization_id = $1 AND project_instance_id = $2
            AND job_kind = 'planSetup' AND state = 'succeeded' AND result_json IS NOT NULL
-         ORDER BY completed_at DESC
+           AND setup_revision_id = $3
+         ORDER BY completed_at DESC, id DESC
          LIMIT 1`,
-        [organizationId, projectInstanceId],
+        [organizationId, projectInstanceId, assignedSetupRevisionId],
       ),
       this.pool.query<ActiveOperationRow>(
         `SELECT id, job_kind, state, payload, cancel_requested_at, issued_at
@@ -309,7 +332,7 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
          LIMIT 1`,
         [organizationId, projectInstanceId],
       ),
-    ])
+      ])
 
     const operations = operationRows.rows.map((row): ProjectOperationSummary => {
       const payload = objectValue(row.payload)
@@ -349,24 +372,30 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
 
     const latestCompleted = operations.find((operation) => operation.state === 'succeeded')
     const latestOperation = operations[0] ?? null
-    const latestPlanResult = latestPlanRows.rows[0]
-      ? objectValue(latestPlanRows.rows[0].result_json).result
+    const latestPlanAttempt = latestPlanAttemptRows.rows[0] ?? null
+    const latestPlanResult = latestPlanAttempt?.result_json
+      ? objectValue(latestPlanAttempt.result_json).result
       : null
-    const latestPlanCompletedAt = latestPlanRows.rows[0]?.completed_at ?? null
-    const assignedSetupRevisionId = instance.rows[0].assigned_setup_revision_id
+    const latestAssignedPlan = latestAssignedPlanRows.rows[0] ?? null
+    const latestAssignedPlanResult = latestAssignedPlan?.result_json
+      ? objectValue(latestAssignedPlan.result_json).result
+      : null
+    const latestPlanCompletedAt = latestAssignedPlan?.completed_at ?? null
     const planForAssignment =
-      latestPlanResult?.kind === 'planResult' &&
-      latestPlanResult.payload.plan.setupRevisionId === assignedSetupRevisionId
-        ? latestPlanResult.payload.plan
+      latestAssignedPlanResult?.kind === 'planResult'
+        ? latestAssignedPlanResult.payload.plan
         : null
+    const latestOperationBarrier = latestOperation?.completedAt ?? latestOperation?.issuedAt ?? null
     const planIsNewerThanLatestOperation = Boolean(
       latestPlanCompletedAt &&
-        (!latestOperation?.completedAt ||
-          latestPlanCompletedAt.getTime() > new Date(latestOperation.completedAt).getTime()),
+        (!latestOperationBarrier ||
+          new Date(latestPlanCompletedAt).getTime() > new Date(latestOperationBarrier).getTime()),
     )
     const planHasChanges = Boolean(
       planForAssignment?.conflicts.length ||
-        planForAssignment?.actions.some((action) => action.change !== 'unchanged'),
+        planForAssignment?.actions.some(
+          (action) => action.change !== 'unchanged' || action.metadataOnly,
+        ),
     )
     const requiresAttention =
       latestOperation?.recoverability === 'manualIntervention' &&
@@ -377,6 +406,14 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
         ? assignedSetupRevisionId
         : (latestCompleted?.setupRevisionId ?? null)
     const hasDrift = Boolean(planForAssignment && planIsNewerThanLatestOperation && planHasChanges)
+    const latestPlanIsReviewable = Boolean(
+      latestPlanAttempt?.state === 'succeeded' &&
+        latestPlanResult?.kind === 'planResult' &&
+        latestPlanAttempt.completed_at &&
+        (!latestOperationBarrier ||
+          new Date(latestPlanAttempt.completed_at).getTime() >
+            new Date(latestOperationBarrier).getTime()),
+    )
     const health = requiresAttention
       ? 'attention'
       : hasDrift ||
@@ -395,6 +432,10 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
       activeOperation: activeOperationRows.rows[0]
         ? activeOperationFromRow(activeOperationRows.rows[0])
         : null,
+      reviewedPlan:
+        latestPlanIsReviewable && latestPlanAttempt && latestPlanResult?.kind === 'planResult'
+          ? { jobId: latestPlanAttempt.id, plan: latestPlanResult.payload.plan }
+          : null,
       operations,
     }
   }
@@ -500,6 +541,14 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
       )
       const row = found.rows[0]
       if (!row || !row.state) return { outcome: 'planMissing' }
+      const latestPlanAttempt = await client.query<QueryResultRow & { id: string }>(
+        `SELECT id FROM runner_jobs
+         WHERE organization_id = $1 AND project_instance_id = $2 AND job_kind = 'planSetup'
+         ORDER BY issued_at DESC, id DESC
+         LIMIT 1`,
+        [input.actor.organizationId, input.projectInstanceId],
+      )
+      if (latestPlanAttempt.rows[0]?.id !== input.planJobId) return { outcome: 'planMismatch' }
       if (row.state !== 'succeeded' || !row.result_json) return { outcome: 'planNotReady' }
       const result = objectValue(row.result_json)
       const payload = objectValue(row.payload)

@@ -341,6 +341,8 @@ pub struct PlanAction {
     pub kind: PlanActionKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub change: Option<PlanChangeKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata_only: Option<bool>,
     pub artifact_id: ArtifactId,
     pub destination: PlanDestination,
 }

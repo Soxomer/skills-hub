@@ -8,12 +8,13 @@ import type {
   RollbackReceipt,
   RunnerJobStatusResponse,
 } from '@ahm/contracts'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ControlPlaneApiError, type ControlPlaneClient } from './api'
 import {
   applyReceipt,
   cancellationReceipt,
+  cancelledWithoutMutation,
   jobInFlight,
   preparedPlan,
   rollbackReceipt,
@@ -61,6 +62,11 @@ export function useSetupSwitch(
   projectId: string,
   projectInstanceId: string,
 ) {
+  const contextKey = `${projectId}:${projectInstanceId}`
+  const contextKeyRef = useRef(contextKey)
+  contextKeyRef.current = contextKey
+  const [loadedContextKey, setLoadedContextKey] = useState(contextKey)
+  const contextReady = loadedContextKey === contextKey
   const [state, setState] = useState<ProjectSetupStateResponse | null>(null)
   const [operations, setOperations] = useState<ProjectInstanceOperationsResponse | null>(null)
   const [selectedRevisionId, setSelectedRevisionId] = useState('')
@@ -73,25 +79,70 @@ export function useSetupSwitch(
   const [restored, setRestored] = useState<RollbackReceipt['payload'] | null>(null)
   const [operationConflict, setOperationConflict] = useState<ProjectActiveOperation | null>(null)
   const [planWasStale, setPlanWasStale] = useState(false)
+  const [cancelledSafely, setCancelledSafely] = useState(false)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<SetupSwitchError | null>(null)
+  const refreshingJob = useRef(false)
+  const jobRequestSequence = useRef(0)
+  const handledTerminalJobs = useRef(new Set<string>())
+  const operationsRequestSequence = useRef(0)
+  const adoptedReviewedPlanJobId = useRef<string | null>(null)
+  const dismissedReviewedPlanJobId = useRef<string | null>(null)
+  const planJobIdRef = useRef<string | null>(null)
+  planJobIdRef.current = planJobId
+
+  const adoptOperations = useCallback((next: ProjectInstanceOperationsResponse) => {
+    setOperations(next)
+    const serverJob = mapActiveOperation(next.activeOperation)
+    if (serverJob) {
+      setActiveJob((current) => (current?.jobId === serverJob.jobId ? current : serverJob))
+      if (serverJob.setupRevisionId) setSelectedRevisionId(serverJob.setupRevisionId)
+      return
+    }
+    if (
+      next.reviewedPlan &&
+      next.reviewedPlan.jobId !== dismissedReviewedPlanJobId.current
+    ) {
+      setPlan(next.reviewedPlan.plan)
+      setPlanJobId(next.reviewedPlan.jobId)
+      if (adoptedReviewedPlanJobId.current !== next.reviewedPlan.jobId) {
+        setSelectedRevisionId(next.reviewedPlan.plan.setupRevisionId)
+        adoptedReviewedPlanJobId.current = next.reviewedPlan.jobId
+      }
+    } else {
+      setPlan(null)
+      setPlanJobId(null)
+      if (!next.reviewedPlan) adoptedReviewedPlanJobId.current = null
+    }
+  }, [])
+
+  const adoptOperationConflict = useCallback((nextError: unknown): boolean => {
+    if (!(nextError instanceof ControlPlaneApiError) || !nextError.activeOperation) return false
+    const serverJob = mapActiveOperation(nextError.activeOperation)
+    setOperationConflict(nextError.activeOperation)
+    setOperations((current) =>
+      current ? { ...current, activeOperation: nextError.activeOperation } : current,
+    )
+    setActiveJob(serverJob)
+    if (serverJob?.setupRevisionId) setSelectedRevisionId(serverJob.setupRevisionId)
+    setError(null)
+    return true
+  }, [])
 
   const refreshState = useCallback(async () => {
     if (!projectId || !projectInstanceId) return
+    const requestContext = contextKey
+    const requestSequence = ++operationsRequestSequence.current
     setLoading(true)
     try {
       const [next, nextOperations] = await Promise.all([
         client.setupRevisions(projectId),
         client.projectOperations(projectInstanceId),
       ])
+      if (contextKeyRef.current !== requestContext) return
       setState(next)
-      setOperations(nextOperations)
-      const serverJob = mapActiveOperation(nextOperations.activeOperation)
-      if (serverJob) {
-        setActiveJob(serverJob)
-        if (serverJob.setupRevisionId) setSelectedRevisionId(serverJob.setupRevisionId)
-      }
+      if (operationsRequestSequence.current === requestSequence) adoptOperations(nextOperations)
       setSelectedRevisionId((current) =>
         current && next.revisions.some((revision) => revision.setupRevisionId === current)
           ? current
@@ -99,13 +150,16 @@ export function useSetupSwitch(
       )
       setError((current) => (current?.stage === 'revisions' ? null : current))
     } catch (nextError) {
-      setError(workflowError('revisions', nextError))
+      if (contextKeyRef.current === requestContext) {
+        setError(workflowError('revisions', nextError))
+      }
     } finally {
-      setLoading(false)
+      if (contextKeyRef.current === requestContext) setLoading(false)
     }
-  }, [client, projectId, projectInstanceId])
+  }, [adoptOperations, client, contextKey, projectId, projectInstanceId])
 
   useEffect(() => {
+    setLoadedContextKey(contextKey)
     setState(null)
     setOperations(null)
     setSelectedRevisionId('')
@@ -118,26 +172,35 @@ export function useSetupSwitch(
     setRestored(null)
     setOperationConflict(null)
     setPlanWasStale(false)
+    setCancelledSafely(false)
+    setSubmitting(false)
     setError(null)
+    refreshingJob.current = false
+    jobRequestSequence.current += 1
+    handledTerminalJobs.current.clear()
+    operationsRequestSequence.current += 1
+    adoptedReviewedPlanJobId.current = null
+    dismissedReviewedPlanJobId.current = null
     void refreshState()
-  }, [projectInstanceId, refreshState])
+  }, [contextKey, refreshState])
 
   const refreshOperations = useCallback(async () => {
     if (!projectInstanceId) return
+    const requestContext = contextKey
+    const requestSequence = ++operationsRequestSequence.current
     try {
       const nextOperations = await client.projectOperations(projectInstanceId)
-      setOperations(nextOperations)
-      const serverJob = mapActiveOperation(nextOperations.activeOperation)
-      if (serverJob) {
-        setActiveJob((current) =>
-          current?.jobId === serverJob.jobId ? current : serverJob,
-        )
-        if (serverJob.setupRevisionId) setSelectedRevisionId(serverJob.setupRevisionId)
-      }
+      if (
+        contextKeyRef.current !== requestContext ||
+        operationsRequestSequence.current !== requestSequence
+      ) return
+      adoptOperations(nextOperations)
     } catch (nextError) {
-      setError(workflowError('status', nextError))
+      if (contextKeyRef.current === requestContext) {
+        setError(workflowError('status', nextError))
+      }
     }
-  }, [client, projectInstanceId])
+  }, [adoptOperations, client, contextKey, projectInstanceId])
 
   useEffect(() => {
     if (!projectInstanceId) return
@@ -151,13 +214,23 @@ export function useSetupSwitch(
   }, [projectInstanceId, refreshOperations])
 
   const refreshJob = useCallback(async () => {
+    if (!contextReady) return
     const trackedJob = activeJob ?? mapActiveOperation(operations?.activeOperation)
-    if (!trackedJob) return
+    if (!trackedJob || refreshingJob.current) return
+    const requestContext = contextKey
+    const requestSequence = ++jobRequestSequence.current
+    refreshingJob.current = true
     try {
       const status = await client.job(trackedJob.jobId)
+      if (contextKeyRef.current !== requestContext) return
       setJobStatus(status)
+      if (!jobInFlight(status)) {
+        if (handledTerminalJobs.current.has(trackedJob.jobId)) return
+        handledTerminalJobs.current.add(trackedJob.jobId)
+      }
       const nextPlan = preparedPlan(status)
       const nextCancellation = cancellationReceipt(status)
+      const nextSafeCancellation = cancelledWithoutMutation(status)
       const nextReceipt = applyReceipt(status)
       const nextRestored = rollbackReceipt(status)
       if (nextPlan) {
@@ -165,20 +238,26 @@ export function useSetupSwitch(
         setPlanJobId(trackedJob.jobId)
       }
       if (nextReceipt) {
+        setCancelledSafely(false)
         setCancellation(null)
         setReceipt(nextReceipt)
         setRestored(null)
-        await refreshState()
       } else if (nextRestored) {
+        setCancelledSafely(false)
         setCancellation(null)
         setReceipt(null)
         setRestored(nextRestored)
-        await refreshState()
       } else if (nextCancellation) {
+        setCancelledSafely(false)
         setCancellation(nextCancellation)
         setReceipt(null)
         setRestored(null)
-        await refreshState()
+      } else if (nextSafeCancellation) {
+        setCancellation(null)
+        setCancelledSafely(true)
+        setReceipt(null)
+        setRestored(null)
+        setError(null)
       }
       if (!jobInFlight(status)) {
         if (trackedJob.kind === 'apply') {
@@ -186,6 +265,7 @@ export function useSetupSwitch(
           setPlanJobId(null)
         }
         await refreshState()
+        if (contextKeyRef.current !== requestContext) return
         setActiveJob((current) => (current?.jobId === trackedJob.jobId ? null : current))
       }
       if (
@@ -197,51 +277,77 @@ export function useSetupSwitch(
       ) {
         setPlanWasStale(true)
         setError(null)
-        const queued = await client.prepareSetupPlan(projectInstanceId, {
-          setupRevisionId: trackedJob.setupRevisionId,
-        })
-        setActiveJob({
-          kind: 'plan',
-          jobId: queued.jobId,
-          setupRevisionId: trackedJob.setupRevisionId,
-        })
-        setJobStatus({
-          jobId: queued.jobId,
-          state: 'pending',
-          result: null,
-          cancelRequested: false,
-        })
-      } else if (status.state === 'failed' && status.result?.result.kind === 'error') {
+        try {
+          const queued = await client.prepareSetupPlan(projectInstanceId, {
+            setupRevisionId: trackedJob.setupRevisionId,
+          })
+          if (contextKeyRef.current !== requestContext) return
+          setActiveJob({
+            kind: 'plan',
+            jobId: queued.jobId,
+            setupRevisionId: trackedJob.setupRevisionId,
+          })
+          setJobStatus({
+            jobId: queued.jobId,
+            state: 'pending',
+            result: null,
+            cancelRequested: false,
+          })
+        } catch (nextError) {
+          if (contextKeyRef.current !== requestContext) return
+          if (!adoptOperationConflict(nextError)) setError(workflowError('status', nextError))
+        }
+      } else if (
+        !nextSafeCancellation &&
+        status.state === 'failed' &&
+        status.result?.result.kind === 'error'
+      ) {
         setError({ stage: trackedJob.kind, code: status.result.result.payload.code })
       } else {
         setError((current) => (current?.stage === 'status' ? null : current))
       }
     } catch (nextError) {
-      setError(workflowError('status', nextError))
+      if (contextKeyRef.current === requestContext) {
+        setError(workflowError('status', nextError))
+      }
+    } finally {
+      if (jobRequestSequence.current === requestSequence) refreshingJob.current = false
     }
-  }, [activeJob, client, operations?.activeOperation, projectInstanceId, refreshState])
+  }, [
+    activeJob,
+    adoptOperationConflict,
+    client,
+    contextKey,
+    contextReady,
+    operations?.activeOperation,
+    projectInstanceId,
+    refreshState,
+  ])
 
   useEffect(() => {
-    if (activeJob || !operations?.activeOperation) return
+    if (!contextReady || activeJob || !operations?.activeOperation) return
     const pending = mapActiveOperation(operations.activeOperation)
     if (pending) {
       setActiveJob(pending)
     }
-  }, [activeJob, operations?.activeOperation])
+  }, [activeJob, contextReady, operations?.activeOperation])
 
   useEffect(() => {
     const trackedJob = activeJob ?? mapActiveOperation(operations?.activeOperation)
     if (
+      !contextReady ||
       !trackedJob ||
       (jobStatus && jobStatus.jobId === trackedJob.jobId && !jobInFlight(jobStatus))
     ) {
       return
     }
-    const interval = window.setInterval(() => void refreshJob(), POLL_INTERVAL_MS)
-    return () => window.clearInterval(interval)
-  }, [activeJob, jobStatus, operations?.activeOperation, refreshJob])
+    const timeout = window.setTimeout(() => void refreshJob(), POLL_INTERVAL_MS)
+    return () => window.clearTimeout(timeout)
+  }, [activeJob, contextReady, jobStatus, operations?.activeOperation, refreshJob])
 
   const selectRevision = useCallback((revisionId: string) => {
+    if (!contextReady) return
+    dismissedReviewedPlanJobId.current = planJobIdRef.current
     setSelectedRevisionId(revisionId)
     setActiveJob(null)
     setJobStatus(null)
@@ -252,11 +358,12 @@ export function useSetupSwitch(
     setRestored(null)
     setOperationConflict(null)
     setPlanWasStale(false)
+    setCancelledSafely(false)
     setError(null)
-  }, [])
+  }, [contextReady])
 
   const preparePlan = useCallback(async (revisionId = selectedRevisionId) => {
-    if (!revisionId || !projectInstanceId) return false
+    if (!contextReady || !revisionId || !projectInstanceId) return false
     setSubmitting(true)
     setError(null)
     try {
@@ -264,6 +371,8 @@ export function useSetupSwitch(
       const queued = await client.prepareSetupPlan(projectInstanceId, {
         setupRevisionId: revisionId,
       })
+      if (contextKeyRef.current !== contextKey) return false
+      dismissedReviewedPlanJobId.current = null
       setActiveJob({ kind: 'plan', jobId: queued.jobId, setupRevisionId: revisionId })
       setJobStatus({
         jobId: queued.jobId,
@@ -272,32 +381,24 @@ export function useSetupSwitch(
         cancelRequested: false,
       })
       setCancellation(null)
+      setCancelledSafely(false)
       setPlan(null)
       setPlanJobId(null)
       setReceipt(null)
       setRestored(null)
       return true
     } catch (nextError) {
-      if (nextError instanceof ControlPlaneApiError && nextError.activeOperation) {
-        const serverJob = mapActiveOperation(nextError.activeOperation)
-        setOperationConflict(nextError.activeOperation)
-        setOperations((current) =>
-          current ? { ...current, activeOperation: nextError.activeOperation } : current,
-        )
-        setActiveJob(serverJob)
-        if (serverJob?.setupRevisionId) setSelectedRevisionId(serverJob.setupRevisionId)
-        setError(null)
-        return false
-      }
+      if (contextKeyRef.current !== contextKey) return false
+      if (adoptOperationConflict(nextError)) return false
       setError(workflowError('plan', nextError))
       return false
     } finally {
-      setSubmitting(false)
+      if (contextKeyRef.current === contextKey) setSubmitting(false)
     }
-  }, [client, projectInstanceId, selectedRevisionId])
+  }, [adoptOperationConflict, client, contextKey, contextReady, projectInstanceId, selectedRevisionId])
 
   const applyPlan = useCallback(async () => {
-    if (!plan || !planJobId) return false
+    if (!contextReady || !plan || !planJobId) return false
     setSubmitting(true)
     setError(null)
     try {
@@ -305,6 +406,7 @@ export function useSetupSwitch(
         planJobId,
         planDigest: plan.planDigest,
       })
+      if (contextKeyRef.current !== contextKey) return false
       setActiveJob({
         kind: 'apply',
         jobId: queued.jobId,
@@ -317,8 +419,11 @@ export function useSetupSwitch(
         cancelRequested: false,
       })
       setCancellation(null)
+      setCancelledSafely(false)
       return true
     } catch (nextError) {
+      if (contextKeyRef.current !== contextKey) return false
+      if (adoptOperationConflict(nextError)) return false
       if (nextError instanceof ControlPlaneApiError && nextError.code === 'planDigestMismatch') {
         setPlanWasStale(true)
         setPlan(null)
@@ -329,18 +434,28 @@ export function useSetupSwitch(
       setError(workflowError('apply', nextError))
       return false
     } finally {
-      setSubmitting(false)
+      if (contextKeyRef.current === contextKey) setSubmitting(false)
     }
-  }, [client, plan, planJobId, preparePlan, projectInstanceId])
+  }, [
+    adoptOperationConflict,
+    client,
+    contextKey,
+    contextReady,
+    plan,
+    planJobId,
+    preparePlan,
+    projectInstanceId,
+  ])
 
   const rollback = useCallback(async () => {
-    if (!receipt || !projectInstanceId) return false
+    if (!contextReady || !receipt || !projectInstanceId) return false
     setSubmitting(true)
     setError(null)
     try {
       const queued = await client.rollbackSetup(projectInstanceId, {
         operationId: receipt.operationId,
       })
+      if (contextKeyRef.current !== contextKey) return false
       setActiveJob({ kind: 'rollback', jobId: queued.jobId, setupRevisionId: null })
       setJobStatus({
         jobId: queued.jobId,
@@ -349,24 +464,29 @@ export function useSetupSwitch(
         cancelRequested: false,
       })
       setCancellation(null)
+      setCancelledSafely(false)
       return true
     } catch (nextError) {
+      if (contextKeyRef.current !== contextKey) return false
+      if (adoptOperationConflict(nextError)) return false
       setError(workflowError('rollback', nextError))
       return false
     } finally {
-      setSubmitting(false)
+      if (contextKeyRef.current === contextKey) setSubmitting(false)
     }
-  }, [client, projectInstanceId, receipt])
+  }, [adoptOperationConflict, client, contextKey, contextReady, projectInstanceId, receipt])
 
   const keepOperationRunning = useCallback(() => setOperationConflict(null), [])
 
   const cancelActiveOperation = useCallback(async () => {
+    if (!contextReady) return false
     const trackedJob = activeJob ?? mapActiveOperation(operations?.activeOperation)
     if (!trackedJob) return false
     setSubmitting(true)
     setError(null)
     try {
       await client.cancelJob(trackedJob.jobId)
+      if (contextKeyRef.current !== contextKey) return false
       setOperationConflict(null)
       setJobStatus((current) =>
         current?.jobId === trackedJob.jobId ? { ...current, cancelRequested: true } : current,
@@ -381,12 +501,13 @@ export function useSetupSwitch(
       )
       return true
     } catch (nextError) {
+      if (contextKeyRef.current !== contextKey) return false
       setError(workflowError('cancel', nextError))
       return false
     } finally {
-      setSubmitting(false)
+      if (contextKeyRef.current === contextKey) setSubmitting(false)
     }
-  }, [activeJob, client, operations?.activeOperation])
+  }, [activeJob, client, contextKey, contextReady, operations?.activeOperation])
 
   const retryRecovery = useCallback(() => {
     const revisionId = state?.assignedSetupRevisionId ?? selectedRevisionId
@@ -394,22 +515,26 @@ export function useSetupSwitch(
   }, [preparePlan, selectedRevisionId, state?.assignedSetupRevisionId])
 
   return {
-    state,
-    operations,
-    selectedRevisionId,
+    state: contextReady ? state : null,
+    operations: contextReady ? operations : null,
+    selectedRevisionId: contextReady ? selectedRevisionId : '',
     selectedRevision:
-      state?.revisions.find((revision) => revision.setupRevisionId === selectedRevisionId) ?? null,
-    activeJob,
-    jobStatus,
-    plan,
-    cancellation,
-    receipt,
-    restored,
-    operationConflict,
-    planWasStale,
-    loading,
-    submitting,
-    error,
+      contextReady
+        ? (state?.revisions.find((revision) => revision.setupRevisionId === selectedRevisionId) ??
+          null)
+        : null,
+    activeJob: contextReady ? activeJob : null,
+    jobStatus: contextReady ? jobStatus : null,
+    plan: contextReady ? plan : null,
+    cancellation: contextReady ? cancellation : null,
+    receipt: contextReady ? receipt : null,
+    restored: contextReady ? restored : null,
+    operationConflict: contextReady ? operationConflict : null,
+    planWasStale: contextReady && planWasStale,
+    cancelledSafely: contextReady && cancelledSafely,
+    loading: !contextReady || loading,
+    submitting: contextReady && submitting,
+    error: contextReady ? error : null,
     refreshState,
     refreshJob,
     selectRevision,

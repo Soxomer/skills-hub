@@ -19,12 +19,16 @@ const fourthMigrationPath = fileURLToPath(
 const fifthMigrationPath = fileURLToPath(
   new URL('../migrations/0005_project_operation_singleflight.sql', import.meta.url),
 )
+const sixthMigrationPath = fileURLToPath(
+  new URL('../migrations/0006_runner_job_setup_revision.sql', import.meta.url),
+)
 const migrations = [
   firstMigrationPath,
   secondMigrationPath,
   thirdMigrationPath,
   fourthMigrationPath,
   fifthMigrationPath,
+  sixthMigrationPath,
 ].map((path) => readFileSync(path, 'utf8'))
 
 function createMigratedDatabase() {
@@ -78,8 +82,40 @@ describe('control-plane migration', () => {
         database.public.one<{ version: number }>(
           'SELECT MAX(version) AS version FROM control_plane_schema_migrations',
         ).version,
-      ).toBe(5)
+      ).toBe(6)
     }
+  })
+
+  it('backfills the Setup revision used by existing plan jobs', () => {
+    const database = newDb({ autoCreateForeignKeyIndices: true })
+    for (const migration of migrations.slice(0, -1)) database.public.none(migration)
+    database.public.none(`
+      INSERT INTO organizations (id, name, created_at)
+      VALUES ('org_01', 'Example', '2026-09-05T00:00:00Z');
+      INSERT INTO projects (id, organization_id, name, created_at, updated_at)
+      VALUES ('project_01', 'org_01', 'Project', '2026-09-05T00:00:00Z', '2026-09-05T00:00:00Z');
+      INSERT INTO runner_devices
+        (id, organization_id, label, credential_hash, status, enrolled_at)
+      VALUES ('device_01', 'org_01', 'Runner', 'secret', 'active', '2026-09-05T00:00:00Z');
+      INSERT INTO project_instances
+        (id, organization_id, project_id, device_id, registered_at)
+      VALUES ('instance_01', 'org_01', 'project_01', 'device_01', '2026-09-05T00:00:00Z');
+      INSERT INTO runner_jobs
+        (id, organization_id, device_id, project_instance_id, protocol_version,
+         idempotency_key, job_kind, payload, state, issued_at, expires_at)
+      VALUES
+        ('plan_01', 'org_01', 'device_01', 'instance_01', '1.0', 'plan-01',
+         'planSetup', '{"revision":{"setupRevisionId":"revision_01"}}', 'pending',
+         '2026-09-05T00:00:00Z', '2026-09-05T00:05:00Z');
+    `)
+
+    database.public.none(migrations.at(-1)!)
+
+    expect(
+      database.public.one<{ setup_revision_id: string }>(
+        "SELECT setup_revision_id FROM runner_jobs WHERE id = 'plan_01'",
+      ).setup_revision_id,
+    ).toBe('revision_01')
   })
 
   it('enforces one active Setup operation per project instance', () => {

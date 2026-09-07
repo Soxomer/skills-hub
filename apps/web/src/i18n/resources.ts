@@ -251,6 +251,8 @@ export const resources = {
           link: 'Link from cache',
           copy: 'Copy from cache',
           removeManaged: 'Remove managed target',
+          unchanged: 'Already materialized',
+          metadataOnly: 'Update shared ownership records',
         },
         approval: {
           title: 'Ready to apply',
@@ -275,6 +277,7 @@ export const resources = {
         cancellation: {
           title: 'Operation cancelled',
           cancelledAndRestored: 'The setup operation was cancelled and recovery was applied.',
+          cancelledWithoutChanges: 'Cancelled before any local changes were made.',
           needsAttention:
             'The setup operation was cancelled before completion. Review state and prepare again.',
           pendingId: 'operation id pending',

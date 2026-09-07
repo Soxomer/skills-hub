@@ -221,7 +221,8 @@ describe('Postgres Default capture persistence', () => {
       '0002_runner_transport.sql',
       '0003_default_capture.sql',
       '0004_runner_delivery.sql',
-      '0005_project_operation_singleflight.sql',
+    '0005_project_operation_singleflight.sql',
+    '0006_runner_job_setup_revision.sql',
     ]) {
       const path = fileURLToPath(new URL(`../migrations/${migrationName}`, import.meta.url))
       database.public.none(readFileSync(path, 'utf8'))
