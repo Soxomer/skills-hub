@@ -22,6 +22,17 @@
               "toolId": "codex",
               "projectRelativePath": ".agents/skills/pdf"
             }
+          },
+          {
+            "actionId": "action_02",
+            "kind": "link",
+            "change": "unchanged",
+            "metadataOnly": true,
+            "artifactId": "artifact_docs_01",
+            "destination": {
+              "toolId": "claude-code",
+              "projectRelativePath": ".agents/skills/docs"
+            }
           }
         ],
         "conflicts": []

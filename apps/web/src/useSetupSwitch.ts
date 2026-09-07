@@ -119,6 +119,7 @@ export function useSetupSwitch(
 
   const adoptOperationConflict = useCallback((nextError: unknown): boolean => {
     if (!(nextError instanceof ControlPlaneApiError) || !nextError.activeOperation) return false
+    operationsRequestSequence.current += 1
     const serverJob = mapActiveOperation(nextError.activeOperation)
     setOperationConflict(nextError.activeOperation)
     setOperations((current) =>
@@ -196,7 +197,10 @@ export function useSetupSwitch(
       ) return
       adoptOperations(nextOperations)
     } catch (nextError) {
-      if (contextKeyRef.current === requestContext) {
+      if (
+        contextKeyRef.current === requestContext &&
+        operationsRequestSequence.current === requestSequence
+      ) {
         setError(workflowError('status', nextError))
       }
     }
@@ -282,6 +286,7 @@ export function useSetupSwitch(
             setupRevisionId: trackedJob.setupRevisionId,
           })
           if (contextKeyRef.current !== requestContext) return
+          operationsRequestSequence.current += 1
           setActiveJob({
             kind: 'plan',
             jobId: queued.jobId,
@@ -372,6 +377,7 @@ export function useSetupSwitch(
         setupRevisionId: revisionId,
       })
       if (contextKeyRef.current !== contextKey) return false
+      operationsRequestSequence.current += 1
       dismissedReviewedPlanJobId.current = null
       setActiveJob({ kind: 'plan', jobId: queued.jobId, setupRevisionId: revisionId })
       setJobStatus({
@@ -407,6 +413,7 @@ export function useSetupSwitch(
         planDigest: plan.planDigest,
       })
       if (contextKeyRef.current !== contextKey) return false
+      operationsRequestSequence.current += 1
       setActiveJob({
         kind: 'apply',
         jobId: queued.jobId,
@@ -424,6 +431,13 @@ export function useSetupSwitch(
     } catch (nextError) {
       if (contextKeyRef.current !== contextKey) return false
       if (adoptOperationConflict(nextError)) return false
+      if (nextError instanceof ControlPlaneApiError && nextError.code === 'planSuperseded') {
+        setPlanWasStale(false)
+        await refreshState()
+        if (contextKeyRef.current !== contextKey) return false
+        setError({ stage: 'apply', code: 'planSuperseded' })
+        return false
+      }
       if (nextError instanceof ControlPlaneApiError && nextError.code === 'planDigestMismatch') {
         setPlanWasStale(true)
         setPlan(null)
@@ -445,6 +459,7 @@ export function useSetupSwitch(
     planJobId,
     preparePlan,
     projectInstanceId,
+    refreshState,
   ])
 
   const rollback = useCallback(async () => {
@@ -456,6 +471,7 @@ export function useSetupSwitch(
         operationId: receipt.operationId,
       })
       if (contextKeyRef.current !== contextKey) return false
+      operationsRequestSequence.current += 1
       setActiveJob({ kind: 'rollback', jobId: queued.jobId, setupRevisionId: null })
       setJobStatus({
         jobId: queued.jobId,
@@ -487,6 +503,7 @@ export function useSetupSwitch(
     try {
       await client.cancelJob(trackedJob.jobId)
       if (contextKeyRef.current !== contextKey) return false
+      operationsRequestSequence.current += 1
       setOperationConflict(null)
       setJobStatus((current) =>
         current?.jobId === trackedJob.jobId ? { ...current, cancelRequested: true } : current,

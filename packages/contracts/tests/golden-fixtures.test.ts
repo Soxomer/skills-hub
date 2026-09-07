@@ -52,6 +52,17 @@ describe('protocol v1 golden fixtures', () => {
     expect(validate(fixture)).toBe(false)
   })
 
+  it('preserves ownership-only plan actions', () => {
+    const fixture = loadFixture('result-plan.json') as ResultEnvelope
+    if (fixture.result.kind !== 'planResult') throw new Error('expected plan fixture')
+
+    expect(fixture.result.payload.plan.actions[1]).toMatchObject({
+      change: 'unchanged',
+      metadataOnly: true,
+    })
+    expect(validate(fixture), JSON.stringify(validate.errors)).toBe(true)
+  })
+
   it('rejects unsupported protocol versions', () => {
     const fixture = loadFixture('capabilities.json') as Record<string, unknown>
     fixture.protocolVersion = '2.0'

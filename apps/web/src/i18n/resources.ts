@@ -300,6 +300,7 @@ export const resources = {
           planNotFound: 'The reviewed plan no longer exists.',
           planNotReady: 'The plan has not finished yet.',
           planDigestMismatch: 'The checkout changed after review. Prepare a fresh plan.',
+          planSuperseded: 'A newer reviewed plan is available. Review that plan before applying.',
           planHasConflicts: 'Resolve the listed conflicts before applying.',
           approvalExpired:
             'The runner did not start the apply in time. Prepare a fresh plan and try again.',

@@ -361,15 +361,7 @@ impl JobExecutor for LocalJobExecutor {
                                     should_cancel,
                                 ) {
                                     Ok((applied, plan)) => {
-                                        let actions_applied = plan
-                                            .actions
-                                            .iter()
-                                            .filter(|action| {
-                                                action.change != Some(PlanChangeKind::Unchanged)
-                                                    || action.metadata_only == Some(true)
-                                            })
-                                            .count()
-                                            as u64;
+                                        let actions_applied = actionable_plan_count(&plan);
                                         RunnerResult::ApplyReceipt(ApplyReceipt {
                                             project_id: project.project_id.clone(),
                                             operation_id: Identifier::new(applied.operation_id)
@@ -644,6 +636,15 @@ fn canonical_plan(
     })
 }
 
+fn actionable_plan_count(plan: &CanonicalPlan) -> u64 {
+    plan.actions
+        .iter()
+        .filter(|action| {
+            action.change != Some(PlanChangeKind::Unchanged) || action.metadata_only == Some(true)
+        })
+        .count() as u64
+}
+
 fn operation_error(message: &str) -> RunnerResult {
     RunnerResult::Error(ErrorResult {
         code: ProtocolErrorCode::OperationFailed,
@@ -809,9 +810,70 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+    use crate::setup_service::{ApplyAction, Project};
 
     fn identifier(value: &str) -> Identifier {
         Identifier::new(value).unwrap()
+    }
+
+    #[test]
+    fn ownership_only_actions_round_trip_and_count_as_applied() {
+        let root = tempdir().unwrap();
+        let project_path = root.path().join("project");
+        let digest = Digest::new(format!("sha256:{}", "a".repeat(64))).unwrap();
+        let revision = PortableSetupRevision {
+            setup_id: identifier("setup_01"),
+            setup_revision_id: identifier("revision_01"),
+            revision_number: 1,
+            items: vec![PortableSetupRevisionItem {
+                artifact_id: ArtifactId::new("artifact_01").unwrap(),
+                artifact_kind: DiscoveryKind::Skill,
+                portable_source: None,
+                content_digest: digest.clone(),
+                tool_id: identifier("codex"),
+                target_name: identifier("shared-skill"),
+            }],
+        };
+        let local = ApplyPlan {
+            project: Project {
+                id: "project_01".to_owned(),
+                path: project_path.to_string_lossy().into_owned(),
+                default_setup: None,
+                assigned_setup: None,
+                applied_setup: None,
+                created_at: 0,
+                updated_at: 0,
+            },
+            setup: None,
+            actions: vec![ApplyAction {
+                kind: ApplyActionKind::UpdateRecords,
+                skill_id: format!(
+                    "remote-artifact-{}",
+                    digest.as_str().strip_prefix("sha256:").unwrap()
+                ),
+                skill_name: "shared-skill".to_owned(),
+                tools: vec!["codex".to_owned()],
+                target_path: project_path
+                    .join(".agents")
+                    .join("skills")
+                    .join("shared-skill")
+                    .to_string_lossy()
+                    .into_owned(),
+                detail: "update tool ownership records".to_owned(),
+            }],
+            conflicts: vec![],
+            has_changes: true,
+        };
+
+        let plan = canonical_plan(&local, &revision, root.path()).unwrap();
+
+        assert_eq!(plan.actions[0].change, Some(PlanChangeKind::Unchanged));
+        assert_eq!(plan.actions[0].metadata_only, Some(true));
+        assert_eq!(actionable_plan_count(&plan), 1);
+        assert_eq!(
+            serde_json::to_value(&plan).unwrap()["actions"][0]["metadataOnly"],
+            true
+        );
     }
 
     #[test]

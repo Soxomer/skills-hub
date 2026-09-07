@@ -541,6 +541,27 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
       )
       const row = found.rows[0]
       if (!row || !row.state) return { outcome: 'planMissing' }
+      const existing = await client.query<ExistingApplyRow>(
+        `SELECT pa.id AS approval_id, pa.consumed_by_job_id AS job_id,
+                rd.id AS device_id
+         FROM plan_approvals pa
+         JOIN project_instances pi
+           ON pi.organization_id = pa.organization_id AND pi.id = pa.project_instance_id
+         JOIN runner_devices rd
+           ON rd.organization_id = pi.organization_id AND rd.id = pi.device_id
+         WHERE pa.organization_id = $1 AND pa.source_plan_job_id = $2
+           AND pa.plan_digest = $3`,
+        [input.actor.organizationId, input.planJobId, input.planDigest],
+      )
+      const existingRow = existing.rows[0]
+      if (existingRow?.job_id) {
+        return {
+          outcome: 'existing',
+          jobId: existingRow.job_id,
+          approvalId: existingRow.approval_id,
+          deviceId: existingRow.device_id,
+        }
+      }
       const latestPlanAttempt = await client.query<QueryResultRow & { id: string }>(
         `SELECT id FROM runner_jobs
          WHERE organization_id = $1 AND project_instance_id = $2 AND job_kind = 'planSetup'
@@ -548,7 +569,7 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
          LIMIT 1`,
         [input.actor.organizationId, input.projectInstanceId],
       )
-      if (latestPlanAttempt.rows[0]?.id !== input.planJobId) return { outcome: 'planMismatch' }
+      if (latestPlanAttempt.rows[0]?.id !== input.planJobId) return { outcome: 'planSuperseded' }
       if (row.state !== 'succeeded' || !row.result_json) return { outcome: 'planNotReady' }
       const result = objectValue(row.result_json)
       const payload = objectValue(row.payload)
@@ -573,27 +594,6 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
       const availability = runnerAvailability(row, 'applyPlan', input.runnerFreshAfter)
       if (availability === 'offline') return { outcome: 'runnerOffline' }
       if (availability === 'capabilityUnavailable') return { outcome: 'capabilityUnavailable' }
-
-      const existing = await client.query<ExistingApplyRow>(
-        `SELECT pa.id AS approval_id, pa.consumed_by_job_id AS job_id,
-                rd.id AS device_id
-         FROM plan_approvals pa
-         JOIN project_instances pi
-           ON pi.organization_id = pa.organization_id AND pi.id = pa.project_instance_id
-         JOIN runner_devices rd
-           ON rd.organization_id = pi.organization_id AND rd.id = pi.device_id
-         WHERE pa.organization_id = $1 AND pa.source_plan_job_id = $2`,
-        [input.actor.organizationId, input.planJobId],
-      )
-      const existingRow = existing.rows[0]
-      if (existingRow?.job_id) {
-        return {
-          outcome: 'existing',
-          jobId: existingRow.job_id,
-          approvalId: existingRow.approval_id,
-          deviceId: existingRow.device_id,
-        }
-      }
 
       await expirePendingSetupOperations(
         client,

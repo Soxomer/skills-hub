@@ -471,6 +471,26 @@ describe('Setup switching', () => {
         { kind: 'applyPlan', state: 'succeeded' },
       ],
     })
+    await pool.query(
+      `INSERT INTO runner_jobs
+       (id, organization_id, device_id, project_instance_id, protocol_version,
+        idempotency_key, job_kind, payload, setup_revision_id, state, issued_at, expires_at)
+       VALUES ('job_newer_plan', 'org_01', 'device_01', 'instance_01', '1.0',
+        'newer-plan', 'planSetup', $1::jsonb, 'revision_default', 'pending', $2, $3)`,
+      [
+        JSON.stringify({ projectId: 'project_01', revision: { setupRevisionId: 'revision_default' } }),
+        '2026-09-02T10:01:00.000Z',
+        '2026-09-02T10:06:00.000Z',
+      ],
+    )
+    const delayedRetry = await app.inject({
+      method: 'POST',
+      url: '/api/v1/project-instances/instance_01/apply',
+      headers: actorHeaders,
+      payload: { planJobId, planDigest },
+    })
+    expect(delayedRetry.statusCode).toBe(200)
+    expect(delayedRetry.json<{ jobId: string }>().jobId).toBe(applyJobId)
     await app.close()
     await pool.end()
   })
@@ -802,7 +822,7 @@ describe('Setup switching', () => {
       },
     })
     expect(applySuperseded.statusCode).toBe(409)
-    expect(applySuperseded.json()).toMatchObject({ code: 'planDigestMismatch' })
+    expect(applySuperseded.json()).toMatchObject({ code: 'planSuperseded' })
     await app.close()
     await pool.end()
   })

@@ -41,6 +41,7 @@ export type ApplyQueueOutcome =
   | { outcome: 'planMissing' }
   | { outcome: 'planNotReady' }
   | { outcome: 'planMismatch' }
+  | { outcome: 'planSuperseded' }
   | { outcome: 'planHasConflicts' }
   | { outcome: 'runnerOffline' }
   | { outcome: 'capabilityUnavailable' }
@@ -101,6 +102,7 @@ export type SwitchingErrorCode =
   | 'planNotFound'
   | 'planNotReady'
   | 'planDigestMismatch'
+  | 'planSuperseded'
   | 'planHasConflicts'
   | 'receiptNotFound'
   | 'rollbackUnavailable'
@@ -259,6 +261,9 @@ export class SwitchingService {
     }
     if (outcome.outcome === 'planMismatch') {
       throw new SwitchingError(409, 'planDigestMismatch', 'reviewed plan digest changed')
+    }
+    if (outcome.outcome === 'planSuperseded') {
+      throw new SwitchingError(409, 'planSuperseded', 'a newer reviewed plan is available')
     }
     if (outcome.outcome === 'planHasConflicts') {
       throw new SwitchingError(409, 'planHasConflicts', 'resolve plan conflicts before applying')
