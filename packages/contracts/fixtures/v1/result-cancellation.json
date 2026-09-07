@@ -1,0 +1,19 @@
+{
+  "protocolVersion": "1.0",
+  "jobId": "job_apply_01",
+  "idempotencyKey": "apply_project_01_revision_02",
+  "organizationId": "org_01",
+  "deviceId": "device_01",
+  "projectInstanceId": "project_instance_01",
+  "result": {
+    "kind": "cancellationReceipt",
+    "payload": {
+      "projectId": "project_01",
+      "operationId": "operation_01",
+      "outcome": "cancelledAndRestored",
+      "recoverability": "notNeeded",
+      "actionsApplied": 1,
+      "completedAt": "2026-09-05T10:00:04.000Z"
+    }
+  }
+}

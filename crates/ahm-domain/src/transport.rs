@@ -63,6 +63,18 @@ pub struct SubmitRunnerResultRequest {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunnerJobControlRequest {
+    pub lease_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunnerJobControlResponse {
+    pub cancel_requested: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AcknowledgeRunnerJobRequest {
     pub lease_id: String,
     pub request_digest: Digest,

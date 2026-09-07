@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 
 // Schema versioning: bump when making changes and add a migration step.
-const SCHEMA_VERSION: i32 = 10;
+const SCHEMA_VERSION: i32 = 11;
 
 // Minimal schema for MVP: skills, skill_targets, settings, discovered_skills(optional).
 const SCHEMA_V1: &str = r#"
@@ -154,6 +154,7 @@ impl SkillStore {
                 migrate_setups_to_v8(conn, false)?;
                 migrate_default_setup_to_v9(conn)?;
                 migrate_project_defaults_to_v10(conn)?;
+                migrate_filesystem_recovery_to_v11(conn)?;
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             } else if user_version < SCHEMA_VERSION {
                 // Incremental migrations
@@ -180,6 +181,9 @@ impl SkillStore {
                 }
                 if user_version < 10 {
                     migrate_project_defaults_to_v10(conn)?;
+                }
+                if user_version < 11 {
+                    migrate_filesystem_recovery_to_v11(conn)?;
                 }
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             } else if user_version > SCHEMA_VERSION {
@@ -911,6 +915,23 @@ fn migrate_project_defaults_to_v10(conn: &Connection) -> Result<()> {
          CREATE UNIQUE INDEX idx_setups_default_project
          ON setups(default_project_id)
          WHERE kind = 'default' AND default_project_id IS NOT NULL;",
+    )?;
+    Ok(())
+}
+
+fn migrate_filesystem_recovery_to_v11(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS filesystem_recovery_journal (
+           operation_id TEXT PRIMARY KEY,
+           project_id TEXT NOT NULL UNIQUE,
+           operation_kind TEXT NOT NULL CHECK (operation_kind IN ('apply', 'rollback')),
+           recovery_plan_json TEXT NOT NULL,
+           actions_completed INTEGER NOT NULL DEFAULT 0 CHECK (actions_completed >= 0),
+           status TEXT NOT NULL CHECK (status IN ('prepared', 'mutating', 'restoring', 'needsAttention')),
+           created_at INTEGER NOT NULL,
+           updated_at INTEGER NOT NULL,
+           FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+         );",
     )?;
     Ok(())
 }

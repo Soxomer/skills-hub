@@ -6,6 +6,7 @@ pub mod content_hash;
 pub mod execution;
 pub mod job_dispatcher;
 pub mod onboarding;
+mod project_lock;
 pub mod setup_service;
 pub mod skill_store;
 pub mod state;

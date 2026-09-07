@@ -16,6 +16,7 @@ import type { Pool, PoolClient, QueryResultRow } from 'pg'
 import type {
   JobCompletion,
   JobAcknowledgement,
+  JobControlCheck,
   ProjectInstanceRoute,
   RunnerAuthentication,
   RunnerDeviceRegistration,
@@ -80,6 +81,12 @@ interface JobRow extends QueryResultRow {
   acknowledged_at: Date | null
 }
 
+interface JobControlRow extends QueryResultRow {
+  lease_id: string | null
+  cancel_requested_at: Date | null
+  state: RunnerJobStatusResponse['state']
+}
+
 function iso(value: Date | string): string {
   return typeof value === 'string' ? new Date(value).toISOString() : value.toISOString()
 }
@@ -135,6 +142,9 @@ function resultMatchesJob(job: JobEnvelope, result: ResultEnvelope): boolean {
   }
   if (result.result.kind === 'error') return true
   if (result.result.payload.projectId !== job.job.payload.projectId) return false
+  if (result.result.kind === 'cancellationReceipt') {
+    return job.job.kind === 'applyPlan' || job.job.kind === 'rollbackOperation'
+  }
   if (job.job.kind === 'scanProject') return result.result.kind === 'scanResult'
   if (job.job.kind === 'planSetup') {
     return (
@@ -567,7 +577,7 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
       )
       await client.query(
         `UPDATE runner_jobs SET state = 'expired'
-         WHERE device_id = $1 AND state IN ('pending', 'leased', 'acknowledged')
+         WHERE device_id = $1 AND state IN ('pending', 'leased')
            AND expires_at <= $2`,
         [runner.deviceId, now],
       )
@@ -584,9 +594,10 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
       const selected = await client.query<JobRow>(
         `SELECT * FROM runner_jobs
          WHERE organization_id = $1 AND device_id = $2
-           AND (state = 'pending' OR
-             (state IN ('leased', 'acknowledged') AND lease_expires_at <= $3))
-           AND expires_at > $3 AND job_kind = ANY($4::text[])
+           AND ((state IN ('pending', 'leased') AND expires_at > $3
+                 AND (state = 'pending' OR lease_expires_at <= $3))
+                OR (state = 'acknowledged' AND lease_expires_at <= $3))
+           AND job_kind = ANY($4::text[])
          ORDER BY issued_at
          LIMIT 1
          FOR UPDATE SKIP LOCKED`,
@@ -669,7 +680,8 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
       const envelope = envelopeFromRow(job)
       if (!resultMatchesJob(envelope, result)) return { outcome: 'conflict' }
       const terminalState =
-        result.result.kind === 'error' && result.result.payload.code === 'jobCancelled'
+        result.result.kind === 'cancellationReceipt' ||
+        (result.result.kind === 'error' && result.result.payload.code === 'jobCancelled')
           ? 'cancelled'
           : result.result.kind === 'error'
             ? 'failed'
@@ -685,6 +697,40 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
       }
       return { outcome: 'accepted' }
     })
+  }
+
+  async jobControl(
+    runner: RunnerAuthentication,
+    jobId: string,
+    leaseId: string,
+    now: string,
+    leaseExpiresAt: string,
+  ): Promise<JobControlCheck> {
+    await this.pool.query(
+      `UPDATE runner_devices SET last_seen_at = $1
+       WHERE organization_id = $2 AND id = $3 AND status = 'active'`,
+      [now, runner.organizationId, runner.deviceId],
+    )
+    const result = await this.pool.query<JobControlRow>(
+      `UPDATE runner_jobs SET lease_expires_at = $1
+       WHERE organization_id = $2 AND device_id = $3 AND id = $4 AND lease_id = $5
+         AND state IN ('leased', 'acknowledged')
+       RETURNING lease_id, cancel_requested_at, state`,
+      [leaseExpiresAt, runner.organizationId, runner.deviceId, jobId, leaseId],
+    )
+    const job = result.rows[0]
+    if (!job) {
+      const exists = await this.pool.query(
+        `SELECT 1 FROM runner_jobs
+         WHERE organization_id = $1 AND device_id = $2 AND id = $3`,
+        [runner.organizationId, runner.deviceId, jobId],
+      )
+      return { outcome: exists.rows[0] ? 'conflict' : 'unknown' }
+    }
+    return {
+      outcome: 'available',
+      cancelRequested: job.cancel_requested_at !== null,
+    }
   }
 
   async jobStatus(

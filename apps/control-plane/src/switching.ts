@@ -6,6 +6,7 @@ import {
   type ApplyReviewedPlanResponse,
   type JobEnvelope,
   type PortableSetupRevision,
+  type ProjectActiveOperation,
   type ProjectInstanceOperationsResponse,
   type ProjectSetupStateResponse,
   type QueuedRunnerJobResponse,
@@ -31,6 +32,10 @@ export interface SetupRevisionContext {
   revision: PortableSetupRevision
 }
 
+export type PlanQueueOutcome =
+  | { outcome: 'queued'; jobId: string; deviceId: string }
+  | { outcome: 'operationInProgress'; activeOperation: ProjectActiveOperation }
+
 export type ApplyQueueOutcome =
   | { outcome: 'queued' | 'existing'; jobId: string; approvalId: string; deviceId: string }
   | { outcome: 'planMissing' }
@@ -39,6 +44,7 @@ export type ApplyQueueOutcome =
   | { outcome: 'planHasConflicts' }
   | { outcome: 'runnerOffline' }
   | { outcome: 'capabilityUnavailable' }
+  | { outcome: 'operationInProgress'; activeOperation: ProjectActiveOperation }
 
 export type RollbackQueueOutcome =
   | { outcome: 'queued' | 'existing'; jobId: string; deviceId: string }
@@ -46,6 +52,7 @@ export type RollbackQueueOutcome =
   | { outcome: 'notRecoverable' }
   | { outcome: 'runnerOffline' }
   | { outcome: 'capabilityUnavailable' }
+  | { outcome: 'operationInProgress'; activeOperation: ProjectActiveOperation }
 
 export interface SwitchingRepository {
   projectSetupState(
@@ -61,7 +68,7 @@ export interface SwitchingRepository {
     projectInstanceId: string,
     setupRevisionId: string,
   ): Promise<SetupRevisionContext | null>
-  enqueueJob(job: JobEnvelope): Promise<void>
+  enqueuePlan(job: JobEnvelope): Promise<PlanQueueOutcome>
   approveAndEnqueueApply(input: {
     actor: RequestActor
     projectInstanceId: string
@@ -97,12 +104,18 @@ export type SwitchingErrorCode =
   | 'planHasConflicts'
   | 'receiptNotFound'
   | 'rollbackUnavailable'
+  | 'projectOperationInProgress'
+
+export interface SwitchingErrorDetails {
+  activeOperation: ProjectActiveOperation
+}
 
 export class SwitchingError extends Error {
   constructor(
     readonly statusCode: number,
     readonly code: SwitchingErrorCode,
     message: string,
+    readonly details?: SwitchingErrorDetails,
   ) {
     super(message)
     this.name = 'SwitchingError'
@@ -208,9 +221,17 @@ export class SwitchingService {
         payload: { projectId: context.route.projectId, revision: context.revision },
       },
     }
-    await this.repository.enqueueJob(job)
-    this.transport.notifyJob(context.route.deviceId)
-    return { jobId }
+    const outcome = await this.repository.enqueuePlan(job)
+    if (outcome.outcome === 'operationInProgress') {
+      throw new SwitchingError(
+        409,
+        'projectOperationInProgress',
+        'another Setup operation is already in progress for this project checkout',
+        { activeOperation: outcome.activeOperation },
+      )
+    }
+    this.transport.notifyJob(outcome.deviceId)
+    return { jobId: outcome.jobId }
   }
 
   async applyReviewedPlan(
@@ -252,6 +273,14 @@ export class SwitchingService {
         'local runner does not support applyPlan',
       )
     }
+    if (outcome.outcome === 'operationInProgress') {
+      throw new SwitchingError(
+        409,
+        'projectOperationInProgress',
+        'another Setup operation is already in progress for this project checkout',
+        { activeOperation: outcome.activeOperation },
+      )
+    }
     this.transport.notifyJob(outcome.deviceId)
     return { jobId: outcome.jobId, approvalId: outcome.approvalId }
   }
@@ -285,6 +314,14 @@ export class SwitchingService {
         409,
         'runnerCapabilityUnavailable',
         'local runner does not support rollbackOperation',
+      )
+    }
+    if (outcome.outcome === 'operationInProgress') {
+      throw new SwitchingError(
+        409,
+        'projectOperationInProgress',
+        'another Setup operation is already in progress for this project checkout',
+        { activeOperation: outcome.activeOperation },
       )
     }
     this.transport.notifyJob(outcome.deviceId)

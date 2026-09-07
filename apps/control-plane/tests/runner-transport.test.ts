@@ -226,7 +226,18 @@ describe('runner transport', () => {
       headers: authorization,
       payload: { capabilities },
     })
-    expect(second.json<{ leaseId: string }>().leaseId).not.toBe(firstLease)
+    const secondLease = second.json<{ leaseId: string; job: { jobId: string } }>()
+    expect(secondLease.leaseId).not.toBe(firstLease)
+    await acknowledge(app, authorization, secondLease.job.jobId, secondLease.leaseId)
+    advance(5 * 60_000)
+    const resumed = await app.inject({
+      method: 'POST',
+      url: '/runner/v1/jobs/claim',
+      headers: authorization,
+      payload: { capabilities },
+    })
+    expect(resumed.statusCode).toBe(200)
+    expect(resumed.json<{ leaseId: string }>().leaseId).not.toBe(secondLease.leaseId)
 
     const revoked = await app.inject({
       method: 'POST',
@@ -293,11 +304,35 @@ describe('runner transport', () => {
     })
     const lease = firstClaim.json<{ leaseId: string; job: Record<string, string> }>()
     await acknowledge(app, authorization, jobId, lease.leaseId)
+
+    const runningControl = await app.inject({
+      method: 'POST',
+      url: `/runner/v1/jobs/${jobId}/control`,
+      headers: authorization,
+      payload: { leaseId: lease.leaseId },
+    })
+    expect(runningControl.json()).toEqual({ cancelRequested: false })
+
+    const wrongLease = await app.inject({
+      method: 'POST',
+      url: `/runner/v1/jobs/${jobId}/control`,
+      headers: authorization,
+      payload: { leaseId: 'wrong-lease' },
+    })
+    expect(wrongLease.statusCode).toBe(409)
+
     await app.inject({
       method: 'POST',
       url: `/api/v1/jobs/${jobId}/cancel`,
       headers: actorHeaders,
     })
+    const cancelledControl = await app.inject({
+      method: 'POST',
+      url: `/runner/v1/jobs/${jobId}/control`,
+      headers: authorization,
+      payload: { leaseId: lease.leaseId },
+    })
+    expect(cancelledControl.json()).toEqual({ cancelRequested: true })
     const cancelledClaim = await app.inject({
       method: 'POST',
       url: '/runner/v1/jobs/claim',

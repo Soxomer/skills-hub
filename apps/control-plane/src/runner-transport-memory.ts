@@ -12,6 +12,7 @@ import type {
 import type {
   JobCompletion,
   JobAcknowledgement,
+  JobControlCheck,
   ProjectInstanceRoute,
   RunnerAuthentication,
   RunnerDeviceRegistration,
@@ -249,7 +250,7 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
     for (const job of candidates) {
       if (
         job.envelope.expiresAt <= now &&
-        ['pending', 'leased', 'acknowledged'].includes(job.state)
+        (job.state === 'pending' || job.state === 'leased')
       ) {
         job.state = 'expired'
         continue
@@ -336,15 +337,53 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
     ) {
       return { outcome: 'conflict' }
     }
+    if (
+      result.result.kind === 'cancellationReceipt' &&
+      job.envelope.job.kind !== 'applyPlan' &&
+      job.envelope.job.kind !== 'rollbackOperation'
+    ) {
+      return { outcome: 'conflict' }
+    }
     job.result = result
     job.resultDigest = resultDigest
     job.state =
-      result.result.kind === 'error' && result.result.payload.code === 'jobCancelled'
+      result.result.kind === 'cancellationReceipt' ||
+      (result.result.kind === 'error' && result.result.payload.code === 'jobCancelled')
         ? 'cancelled'
         : result.result.kind === 'error'
           ? 'failed'
           : 'succeeded'
     return { outcome: 'accepted' }
+  }
+
+  async jobControl(
+    runner: RunnerAuthentication,
+    jobId: string,
+    leaseId: string,
+    now: string,
+    leaseExpiresAt: string,
+  ): Promise<JobControlCheck> {
+    const job = this.jobs.get(jobId)
+    if (
+      !job ||
+      job.envelope.organizationId !== runner.organizationId ||
+      job.envelope.deviceId !== runner.deviceId
+    ) {
+      return { outcome: 'unknown' }
+    }
+    if (
+      job.leaseId !== leaseId ||
+      (job.state !== 'leased' && job.state !== 'acknowledged')
+    ) {
+      return { outcome: 'conflict' }
+    }
+    const device = this.devices.get(runner.deviceId)
+    if (device) device.lastSeenAt = now
+    job.leaseExpiresAt = leaseExpiresAt
+    return {
+      outcome: 'available',
+      cancelRequested: job.cancelRequestedAt !== null,
+    }
   }
 
   async jobStatus(

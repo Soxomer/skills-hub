@@ -16,6 +16,8 @@ import {
   type RunnerEnrollmentStatus,
   type RunnerResultAcknowledgement,
   type RunnerJobAcknowledgement,
+  type RunnerJobControlRequest,
+  type RunnerJobControlResponse,
   type RunnerJobStatusResponse,
   type RunnerStatusResponse,
   type SubmitRunnerResultRequest,
@@ -66,6 +68,10 @@ export interface JobCompletion {
 export interface JobAcknowledgement {
   outcome: 'accepted' | 'duplicate' | 'conflict' | 'unknown'
 }
+
+export type JobControlCheck =
+  | { outcome: 'available'; cancelRequested: boolean }
+  | { outcome: 'conflict' | 'unknown' }
 
 export interface RunnerTransportRepository {
   createEnrollment(record: RunnerEnrollmentRecord): Promise<void>
@@ -123,6 +129,13 @@ export interface RunnerTransportRepository {
     resultDigest: string,
     now: string,
   ): Promise<JobCompletion>
+  jobControl(
+    runner: RunnerAuthentication,
+    jobId: string,
+    leaseId: string,
+    now: string,
+    leaseExpiresAt: string,
+  ): Promise<JobControlCheck>
   jobStatus(organizationId: string, jobId: string): Promise<RunnerJobStatusResponse | null>
   requestCancellation(organizationId: string, jobId: string, now: string): Promise<boolean>
   revokeRunner(organizationId: string, deviceId: string): Promise<boolean>
@@ -284,7 +297,7 @@ export class RunnerTransportService {
   ) {
     this.enrollmentTtlMs = options.enrollmentTtlMs ?? 10 * 60_000
     this.jobTtlMs = options.jobTtlMs ?? 5 * 60_000
-    this.leaseTtlMs = options.leaseTtlMs ?? 60_000
+    this.leaseTtlMs = options.leaseTtlMs ?? 5 * 60_000
     this.now = options.now ?? (() => new Date())
     this.randomId = options.randomId ?? randomUUID
     this.randomSecret =
@@ -512,6 +525,35 @@ export class RunnerTransportService {
       throw new RunnerTransportError(409, 'job already has a different terminal result')
     }
     return { accepted: true, duplicate: completion.outcome === 'duplicate' }
+  }
+
+  async jobControl(
+    credential: string,
+    jobId: string,
+    request: RunnerJobControlRequest,
+  ): Promise<RunnerJobControlResponse> {
+    const runner = await this.authenticate(credential)
+    if (request.leaseId.trim() === '') {
+      throw new RunnerTransportError(400, 'lease id is required')
+    }
+    const now = this.now()
+    const control = await this.repository.jobControl(
+      runner,
+      jobId,
+      request.leaseId,
+      now.toISOString(),
+      new Date(now.getTime() + this.leaseTtlMs).toISOString(),
+    )
+    if (control.outcome === 'unknown') {
+      throw new RunnerTransportError(404, 'runner job not found')
+    }
+    if (control.outcome === 'conflict') {
+      throw new RunnerTransportError(409, 'runner job control does not match its active lease')
+    }
+    if (control.outcome !== 'available') {
+      throw new RunnerTransportError(409, 'runner job control is unavailable')
+    }
+    return { cancelRequested: control.cancelRequested }
   }
 
   async jobStatus(actor: RequestActor, jobId: string): Promise<RunnerJobStatusResponse> {

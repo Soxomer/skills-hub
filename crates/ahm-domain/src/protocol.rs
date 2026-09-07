@@ -360,6 +360,13 @@ pub enum OperationOutcome {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub enum CancellationOutcome {
+    CancelledAndRestored,
+    NeedsAttention,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum Recoverability {
     NotNeeded,
     RollbackAvailable,
@@ -387,6 +394,17 @@ pub struct RollbackReceipt {
     pub restored_setup_revision_id: Option<SetupRevisionId>,
     pub outcome: OperationOutcome,
     pub recoverability: Recoverability,
+    pub completed_at: IsoTimestamp,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CancellationReceipt {
+    pub project_id: ProjectId,
+    pub operation_id: Option<OperationId>,
+    pub outcome: CancellationOutcome,
+    pub recoverability: Recoverability,
+    pub actions_applied: u64,
     pub completed_at: IsoTimestamp,
 }
 
@@ -423,6 +441,7 @@ pub enum RunnerResult {
     PlanResult(PlanResult),
     ApplyReceipt(ApplyReceipt),
     RollbackReceipt(RollbackReceipt),
+    CancellationReceipt(CancellationReceipt),
     Error(ErrorResult),
 }
 

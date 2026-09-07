@@ -15,6 +15,7 @@ base64 = "0.22"
 clap = { version = "4.5", features = ["derive", "env"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 dirs = "5.0"
+fs2 = "0.4.3"
 hex = "0.4"
 junction = "1.1"
 log = "0.4"

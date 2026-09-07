@@ -97,7 +97,7 @@ fn migrates_v8_setups_to_default_snapshot_schema() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     let migrated: (String, String, Option<String>) = conn
         .query_row(
             "SELECT rs.target_name, s.kind, s.initial_revision_id
@@ -113,6 +113,10 @@ fn migrates_v8_setups_to_default_snapshot_schema() {
         .prepare("SELECT default_project_id FROM setups")
         .is_ok();
     assert!(has_default_project_id);
+    let has_recovery_journal = conn
+        .prepare("SELECT operation_id FROM filesystem_recovery_journal")
+        .is_ok();
+    assert!(has_recovery_journal);
     conn.execute(
         "INSERT INTO setup_revision_skills
          (revision_id, skill_id, tool, created_at, target_name)

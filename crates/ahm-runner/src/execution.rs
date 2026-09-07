@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::setup_service::{ApplyPlan, ApplyResult, DefaultSetupPreview, SetupService};
+use crate::setup_service::{
+    ApplyPlan, ApplyResult, DefaultSetupPreview, RecoveredOperation, SetupService,
+};
 
 pub struct RunnerExecutionService {
     local_admin: SetupService,
@@ -35,7 +37,35 @@ impl RunnerExecutionService {
         self.local_admin.sync(project, setup_selector)
     }
 
+    pub(crate) fn apply_checked_cancellable<T>(
+        &self,
+        project: &Path,
+        setup_selector: Option<&str>,
+        validate: impl FnOnce(&ApplyPlan) -> Result<T>,
+        should_cancel: &mut dyn FnMut() -> Result<bool>,
+    ) -> Result<(ApplyResult, T)> {
+        self.local_admin
+            .sync_checked_cancellable(project, setup_selector, validate, should_cancel)
+    }
+
     pub fn rollback(&self, project: &Path) -> Result<ApplyResult> {
         self.local_admin.rollback(project)
+    }
+
+    pub(crate) fn rollback_checked(
+        &self,
+        project: &Path,
+        operation_id: &str,
+        should_cancel: &mut dyn FnMut() -> Result<bool>,
+    ) -> Result<ApplyResult> {
+        self.local_admin
+            .rollback_checked(project, Some(operation_id), should_cancel)
+    }
+
+    pub(crate) fn recover_incomplete_operation(
+        &self,
+        project: &Path,
+    ) -> Result<Option<RecoveredOperation>> {
+        self.local_admin.recover_incomplete_operation(project)
     }
 }

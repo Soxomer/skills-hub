@@ -16,11 +16,15 @@ const thirdMigrationPath = fileURLToPath(
 const fourthMigrationPath = fileURLToPath(
   new URL('../migrations/0004_runner_delivery.sql', import.meta.url),
 )
+const fifthMigrationPath = fileURLToPath(
+  new URL('../migrations/0005_project_operation_singleflight.sql', import.meta.url),
+)
 const migrations = [
   firstMigrationPath,
   secondMigrationPath,
   thirdMigrationPath,
   fourthMigrationPath,
+  fifthMigrationPath,
 ].map((path) => readFileSync(path, 'utf8'))
 
 function createMigratedDatabase() {
@@ -74,8 +78,47 @@ describe('control-plane migration', () => {
         database.public.one<{ version: number }>(
           'SELECT MAX(version) AS version FROM control_plane_schema_migrations',
         ).version,
-      ).toBe(4)
+      ).toBe(5)
     }
+  })
+
+  it('enforces one active Setup operation per project instance', () => {
+    const database = createMigratedDatabase()
+    database.public.none(`
+      INSERT INTO organizations (id, name, created_at)
+      VALUES ('org_01', 'Example', '2026-09-05T00:00:00Z');
+      INSERT INTO projects (id, organization_id, name, created_at, updated_at)
+      VALUES ('project_01', 'org_01', 'Project', '2026-09-05T00:00:00Z', '2026-09-05T00:00:00Z');
+      INSERT INTO runner_devices
+        (id, organization_id, label, credential_hash, status, enrolled_at)
+      VALUES ('device_01', 'org_01', 'Runner', 'secret', 'active', '2026-09-05T00:00:00Z');
+      INSERT INTO project_instances
+        (id, organization_id, project_id, device_id, registered_at)
+      VALUES ('instance_01', 'org_01', 'project_01', 'device_01', '2026-09-05T00:00:00Z');
+      INSERT INTO runner_jobs
+        (id, organization_id, device_id, project_instance_id, protocol_version,
+         idempotency_key, job_kind, payload, state, issued_at, expires_at)
+      VALUES
+        ('plan_01', 'org_01', 'device_01', 'instance_01', '1.0', 'plan-01',
+         'planSetup', '{}', 'pending', '2026-09-05T00:00:00Z', '2026-09-05T00:05:00Z');
+      INSERT INTO runner_jobs
+        (id, organization_id, device_id, project_instance_id, protocol_version,
+         idempotency_key, job_kind, payload, state, issued_at, expires_at)
+      VALUES
+        ('scan_01', 'org_01', 'device_01', 'instance_01', '1.0', 'scan-01',
+         'scanProject', '{}', 'pending', '2026-09-05T00:00:00Z', '2026-09-05T00:05:00Z');
+    `)
+
+    expect(() =>
+      database.public.none(`
+        INSERT INTO runner_jobs
+          (id, organization_id, device_id, project_instance_id, protocol_version,
+           idempotency_key, job_kind, payload, state, issued_at, expires_at)
+        VALUES
+          ('apply_01', 'org_01', 'device_01', 'instance_01', '1.0', 'apply-01',
+           'applyPlan', '{}', 'pending', '2026-09-05T00:00:01Z', '2026-09-05T00:00:31Z');
+      `),
+    ).toThrow()
   })
 
   it('persists a portable Setup assignment without a checkout location', () => {

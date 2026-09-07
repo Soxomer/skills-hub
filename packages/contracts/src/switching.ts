@@ -1,5 +1,6 @@
 import type {
   CanonicalPlan,
+  CancellationOutcome,
   OperationId,
   OperationOutcome,
   ProtocolErrorCode,
@@ -26,13 +27,31 @@ export interface ProjectSetupStateResponse {
 
 export type ProjectMaterializationHealth = 'unknown' | 'current' | 'drifted' | 'attention'
 
+export type ProjectOperationState =
+  | 'pending'
+  | 'leased'
+  | 'acknowledged'
+  | 'succeeded'
+  | 'failed'
+  | 'expired'
+  | 'cancelled'
+
+export interface ProjectActiveOperation {
+  jobId: string
+  kind: 'planSetup' | 'applyPlan' | 'rollbackOperation'
+  state: Extract<ProjectOperationState, 'pending' | 'leased' | 'acknowledged'>
+  setupRevisionId: SetupRevisionId | null
+  cancelRequested: boolean
+  issuedAt: string
+}
+
 export interface ProjectOperationSummary {
   jobId: string
   kind: 'applyPlan' | 'rollbackOperation'
-  state: 'pending' | 'leased' | 'acknowledged' | 'succeeded' | 'failed' | 'expired' | 'cancelled'
+  state: ProjectOperationState
   setupRevisionId: SetupRevisionId | null
   operationId: OperationId | null
-  outcome: OperationOutcome | null
+  outcome: OperationOutcome | CancellationOutcome | null
   recoverability: Recoverability | null
   errorCode: ProtocolErrorCode | null
   retryable: boolean | null
@@ -45,6 +64,7 @@ export interface ProjectInstanceOperationsResponse {
   assignedSetupRevisionId: SetupRevisionId | null
   materializedSetupRevisionId: SetupRevisionId | null
   health: ProjectMaterializationHealth
+  activeOperation: ProjectActiveOperation | null
   operations: ProjectOperationSummary[]
 }
 

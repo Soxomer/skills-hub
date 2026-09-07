@@ -160,6 +160,7 @@ export interface PlanResult {
 }
 
 export type OperationOutcome = 'applied' | 'rolledBack' | 'noChange'
+export type CancellationOutcome = 'cancelledAndRestored' | 'needsAttention'
 export type Recoverability = 'notNeeded' | 'rollbackAvailable' | 'manualIntervention'
 
 export interface ApplyReceipt {
@@ -184,6 +185,18 @@ export interface RollbackReceipt {
     restoredSetupRevisionId: SetupRevisionId | null
     outcome: OperationOutcome
     recoverability: Recoverability
+    completedAt: IsoTimestamp
+  }
+}
+
+export interface CancellationReceipt {
+  kind: 'cancellationReceipt'
+  payload: {
+    projectId: ProjectId
+    operationId: OperationId | null
+    outcome: CancellationOutcome
+    recoverability: Recoverability
+    actionsApplied: number
     completedAt: IsoTimestamp
   }
 }
@@ -217,6 +230,7 @@ export type RunnerResult =
   | PlanResult
   | ApplyReceipt
   | RollbackReceipt
+  | CancellationReceipt
   | ErrorResult
 
 export interface ResultEnvelope {

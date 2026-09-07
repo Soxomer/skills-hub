@@ -41,6 +41,7 @@ async function harness() {
     '0002_runner_transport.sql',
     '0003_default_capture.sql',
     '0004_runner_delivery.sql',
+    '0005_project_operation_singleflight.sql',
   ]) {
     const path = fileURLToPath(new URL(`../migrations/${migrationName}`, import.meta.url))
     database.public.none(readFileSync(path, 'utf8'))
@@ -182,6 +183,72 @@ async function submit(
 }
 
 describe('Setup switching', () => {
+  it('admits one active Setup operation per project checkout', async () => {
+    const { app, pool } = await harness()
+    const admitted = await app.inject({
+      method: 'POST',
+      url: '/api/v1/project-instances/instance_01/plan',
+      headers: actorHeaders,
+      payload: { setupRevisionId: 'revision_team' },
+    })
+    expect(admitted.statusCode).toBe(200)
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/api/v1/project-instances/instance_01/plan',
+      headers: actorHeaders,
+      payload: { setupRevisionId: 'revision_default' },
+    })
+    expect(rejected.statusCode).toBe(409)
+    expect(rejected.json()).toMatchObject({
+      code: 'projectOperationInProgress',
+      activeOperation: {
+        jobId: admitted.json<{ jobId: string }>().jobId,
+        kind: 'planSetup',
+        state: 'pending',
+        cancelRequested: false,
+      },
+    })
+
+    const activeJobId = admitted.json<{ jobId: string }>().jobId
+    const operations = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(operations.json()).toMatchObject({
+      activeOperation: {
+        jobId: activeJobId,
+        kind: 'planSetup',
+        state: 'pending',
+        setupRevisionId: expect.stringMatching(/^revision_(default|team)$/),
+        cancelRequested: false,
+      },
+    })
+
+    const cancelled = await app.inject({
+      method: 'POST',
+      url: `/api/v1/jobs/${activeJobId}/cancel`,
+      headers: actorHeaders,
+    })
+    expect(cancelled.statusCode).toBe(204)
+    const afterCancellation = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(afterCancellation.json()).toMatchObject({ activeOperation: null })
+
+    const replacement = await app.inject({
+      method: 'POST',
+      url: '/api/v1/project-instances/instance_01/plan',
+      headers: actorHeaders,
+      payload: { setupRevisionId: 'revision_team' },
+    })
+    expect(replacement.statusCode).toBe(200)
+    await app.close()
+    await pool.end()
+  })
+
   it('binds approval to the reviewed digest, persists the receipt, and restores assignment', async () => {
     const { app, pool, transport } = await harness()
     const state = await app.inject({
@@ -385,6 +452,155 @@ describe('Setup switching', () => {
         { kind: 'applyPlan', state: 'succeeded' },
       ],
     })
+    await app.close()
+    await pool.end()
+  })
+
+  it('records a cancelled-and-restored apply without changing the assignment', async () => {
+    const { app, pool, transport } = await harness()
+    const jobId = 'job_cancelled_apply'
+    await pool.query(
+      `INSERT INTO runner_jobs
+       (id, organization_id, device_id, project_instance_id, protocol_version,
+        idempotency_key, job_kind, payload, state, issued_at, expires_at)
+       VALUES ($1, 'org_01', 'device_01', 'instance_01', '1.0', 'cancelled-apply',
+        'applyPlan', $2::jsonb, 'pending', $3, $4)`,
+      [
+        jobId,
+        JSON.stringify({
+          projectId: 'project_01',
+          revision: {
+            setupId: 'setup_team',
+            setupRevisionId: 'revision_team',
+            revisionNumber: 1,
+            items: [],
+          },
+          approval: {
+            approvalId: 'approval_cancelled',
+            organizationId: 'org_01',
+            projectInstanceId: 'instance_01',
+            setupRevisionId: 'revision_team',
+            planDigest: `sha256:${'d'.repeat(64)}`,
+            approvedBy: 'user_01',
+            approvedAt: now,
+            expiresAt: '2026-09-02T10:00:30.000Z',
+          },
+        }),
+        now,
+        '2026-09-02T10:00:30.000Z',
+      ],
+    )
+    const lease = await claim(pool, jobId)
+    await acknowledge(transport, jobId, lease.leaseId)
+    const cancelled = await app.inject({
+      method: 'POST',
+      url: `/api/v1/jobs/${jobId}/cancel`,
+      headers: actorHeaders,
+    })
+    expect(cancelled.statusCode).toBe(204)
+    await expect(
+      transport.jobControl(credential, jobId, { leaseId: lease.leaseId }),
+    ).resolves.toEqual({ cancelRequested: true })
+
+    await submit(transport, lease.leaseId, {
+      protocolVersion: '1.0',
+      jobId,
+      idempotencyKey: lease.job.idempotencyKey,
+      organizationId: 'org_01',
+      deviceId: 'device_01',
+      projectInstanceId: 'instance_01',
+      result: {
+        kind: 'cancellationReceipt',
+        payload: {
+          projectId: 'project_01',
+          operationId: 'operation_cancelled',
+          outcome: 'cancelledAndRestored',
+          recoverability: 'notNeeded',
+          actionsApplied: 1,
+          completedAt: now,
+        },
+      },
+    })
+
+    const status = await app.inject({
+      method: 'GET',
+      url: `/api/v1/jobs/${jobId}`,
+      headers: actorHeaders,
+    })
+    expect(status.json()).toMatchObject({ state: 'cancelled', cancelRequested: true })
+    const assignment = await pool.query<{ setup_revision_id: string }>(
+      `SELECT setup_revision_id FROM project_assignments WHERE project_id = 'project_01'`,
+    )
+    expect(assignment.rows[0]?.setup_revision_id).toBe('revision_default')
+    const history = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(history.json()).toMatchObject({
+      activeOperation: null,
+      operations: [
+        {
+          jobId,
+          state: 'cancelled',
+          operationId: 'operation_cancelled',
+          outcome: 'cancelledAndRestored',
+          recoverability: 'notNeeded',
+        },
+      ],
+    })
+
+    const completedFirstJobId = 'job_completed_before_cancel_observed'
+    await pool.query(
+      `INSERT INTO runner_jobs
+       (id, organization_id, device_id, project_instance_id, protocol_version,
+        idempotency_key, job_kind, payload, state, issued_at, expires_at)
+       SELECT $1, organization_id, device_id, project_instance_id, protocol_version,
+              'completed-before-cancel-observed', job_kind, payload, 'pending', issued_at, expires_at
+       FROM runner_jobs WHERE id = $2`,
+      [completedFirstJobId, jobId],
+    )
+    const completedFirstLease = await claim(pool, completedFirstJobId)
+    await acknowledge(transport, completedFirstJobId, completedFirstLease.leaseId)
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/jobs/${completedFirstJobId}/cancel`,
+      headers: actorHeaders,
+    })
+    await submit(transport, completedFirstLease.leaseId, {
+      protocolVersion: '1.0',
+      jobId: completedFirstJobId,
+      idempotencyKey: completedFirstLease.job.idempotencyKey,
+      organizationId: 'org_01',
+      deviceId: 'device_01',
+      projectInstanceId: 'instance_01',
+      result: {
+        kind: 'applyReceipt',
+        payload: {
+          projectId: 'project_01',
+          operationId: 'operation_completed_first',
+          setupRevisionId: 'revision_team',
+          planDigest: `sha256:${'d'.repeat(64)}`,
+          outcome: 'applied',
+          recoverability: 'rollbackAvailable',
+          actionsApplied: 1,
+          completedAt: now,
+        },
+      },
+    })
+    const completedFirstStatus = await app.inject({
+      method: 'GET',
+      url: `/api/v1/jobs/${completedFirstJobId}`,
+      headers: actorHeaders,
+    })
+    expect(completedFirstStatus.json()).toMatchObject({
+      state: 'succeeded',
+      cancelRequested: true,
+    })
+    const completedFirstAssignment = await pool.query<{ setup_revision_id: string }>(
+      `SELECT setup_revision_id FROM project_assignments WHERE project_id = 'project_01'`,
+    )
+    expect(completedFirstAssignment.rows[0]?.setup_revision_id).toBe('revision_team')
     await app.close()
     await pool.end()
   })

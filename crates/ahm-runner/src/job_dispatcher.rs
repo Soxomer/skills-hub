@@ -1,11 +1,12 @@
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf};
 
 use ahm_domain::{
-    ApplyReceipt, ArtifactBundle, CanonicalPlan, Digest, DiscoveryKind, DiscoveryState,
-    ErrorResult, Identifier, IsoTimestamp, JobEnvelope, LeasedRunnerJob, OperationOutcome,
-    PlanAction, PlanActionKind, PlanDestination, PlanResult, ProjectId, ProjectRelativePath,
-    ProtocolErrorCode, Recoverability, ResultEnvelope, RollbackReceipt, RunnerCapabilities,
-    RunnerJob, RunnerResult, ScanDiscovery, ScanResult, SetupRevisionId, PROTOCOL_VERSION,
+    ApplyReceipt, ArtifactBundle, CancellationOutcome, CancellationReceipt, CanonicalPlan, Digest,
+    DiscoveryKind, DiscoveryState, ErrorResult, Identifier, IsoTimestamp, JobEnvelope,
+    LeasedRunnerJob, OperationOutcome, PlanAction, PlanActionKind, PlanDestination, PlanResult,
+    ProjectId, ProjectRelativePath, ProtocolErrorCode, Recoverability, ResultEnvelope,
+    RollbackReceipt, RunnerCapabilities, RunnerJob, RunnerResult, ScanDiscovery, ScanResult,
+    SetupRevisionId, PROTOCOL_VERSION,
 };
 use anyhow::Context;
 use sha2::{Digest as ShaDigest, Sha256};
@@ -13,7 +14,10 @@ use sha2::{Digest as ShaDigest, Sha256};
 use crate::{
     artifact_cache::ArtifactCache,
     execution::RunnerExecutionService,
-    setup_service::{ApplyActionKind, ApplyPlan, DefaultSetupCandidate, DefaultSetupCandidateKind},
+    setup_service::{
+        ApplyActionKind, ApplyPlan, DefaultSetupCandidate, DefaultSetupCandidateKind,
+        OperationInterruption, RecoveredOperation,
+    },
     state::{ProjectInstanceRecord, RunnerIdentityRecord},
     tool_adapters::default_tool_adapters,
 };
@@ -26,6 +30,7 @@ pub trait JobExecutor {
         project: Option<&ProjectInstanceRecord>,
         lease: &LeasedRunnerJob,
         now: &IsoTimestamp,
+        should_cancel: &mut dyn FnMut() -> anyhow::Result<bool>,
     ) -> ResultEnvelope;
     fn has_artifact(&self, _digest: &Digest) -> anyhow::Result<bool> {
         Ok(false)
@@ -43,6 +48,29 @@ pub struct LocalJobExecutor {
     home: PathBuf,
     artifact_cache: ArtifactCache,
 }
+
+#[derive(Debug)]
+struct ApplyValidationError {
+    code: ProtocolErrorCode,
+    message: String,
+}
+
+impl ApplyValidationError {
+    fn new(code: ProtocolErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for ApplyValidationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ApplyValidationError {}
 
 impl LocalJobExecutor {
     pub fn new(runner: RunnerExecutionService, home: PathBuf) -> Self {
@@ -115,6 +143,82 @@ impl LocalJobExecutor {
         let plan = self.runner.plan(&project.local_path, Some(&selector))?;
         canonical_plan(&plan, revision, self.artifact_cache.root())
     }
+
+    fn cancellation_before_execution(
+        &self,
+        project: Option<&ProjectInstanceRecord>,
+        job: &JobEnvelope,
+        now: &IsoTimestamp,
+    ) -> RunnerResult {
+        let Some(project) = project else {
+            return protocol_error(ProtocolErrorCode::JobCancelled, "job was cancelled", false);
+        };
+        if !matches!(
+            &job.job,
+            RunnerJob::ApplyPlan(_) | RunnerJob::RollbackOperation(_)
+        ) {
+            return protocol_error(ProtocolErrorCode::JobCancelled, "job was cancelled", false);
+        }
+        match self
+            .runner
+            .recover_incomplete_operation(&project.local_path)
+        {
+            Ok(recovered) => cancellation_receipt(
+                &project.project_id,
+                recovered.as_ref(),
+                fallback_cancelled_operation_id(job),
+                CancellationOutcome::CancelledAndRestored,
+                Recoverability::NotNeeded,
+                now,
+            ),
+            Err(error) => {
+                log::error!(
+                    "cancelled operation recovery {} failed: {error:#}",
+                    job.job_id.as_str()
+                );
+                let operation = error
+                    .downcast_ref::<OperationInterruption>()
+                    .map(interrupted_operation);
+                cancellation_receipt(
+                    &project.project_id,
+                    operation.as_ref(),
+                    fallback_cancelled_operation_id(job),
+                    CancellationOutcome::NeedsAttention,
+                    Recoverability::ManualIntervention,
+                    now,
+                )
+            }
+        }
+    }
+
+    fn recovery_before_mutation(
+        &self,
+        project: Option<&ProjectInstanceRecord>,
+        job: &JobEnvelope,
+    ) -> Option<RunnerResult> {
+        let project = project?;
+        if !matches!(
+            &job.job,
+            RunnerJob::ApplyPlan(_) | RunnerJob::RollbackOperation(_)
+        ) {
+            return None;
+        }
+        match self
+            .runner
+            .recover_incomplete_operation(&project.local_path)
+        {
+            Ok(_) => None,
+            Err(error) => {
+                log::error!(
+                    "unfinished operation recovery {} failed: {error:#}",
+                    job.job_id.as_str()
+                );
+                Some(operation_error(
+                    "unfinished local operation could not be restored; manual recovery is required",
+                ))
+            }
+        }
+    }
 }
 
 impl JobExecutor for LocalJobExecutor {
@@ -128,10 +232,26 @@ impl JobExecutor for LocalJobExecutor {
         project: Option<&ProjectInstanceRecord>,
         lease: &LeasedRunnerJob,
         now: &IsoTimestamp,
+        should_cancel: &mut dyn FnMut() -> anyhow::Result<bool>,
     ) -> ResultEnvelope {
         let job = &lease.job;
-        let result = if lease.cancel_requested {
-            protocol_error(ProtocolErrorCode::JobCancelled, "job was cancelled", false)
+        let initial_control = if lease.cancel_requested {
+            Ok(true)
+        } else {
+            should_cancel()
+        };
+        let result = if let Err(error) = &initial_control {
+            log::warn!(
+                "could not read cancellation state for {}: {error:#}",
+                job.job_id.as_str()
+            );
+            protocol_error(
+                ProtocolErrorCode::OperationFailed,
+                "could not confirm operation control state",
+                true,
+            )
+        } else if matches!(initial_control, Ok(true)) {
+            self.cancellation_before_execution(project, job, now)
         } else if job.organization_id != identity.organization_id {
             protocol_error(
                 ProtocolErrorCode::InvalidOrganization,
@@ -144,6 +264,8 @@ impl JobExecutor for LocalJobExecutor {
                 "job device does not match this runner",
                 false,
             )
+        } else if let Some(recovery_error) = self.recovery_before_mutation(project, job) {
+            recovery_error
         } else if is_expired(&job.expires_at, now) {
             protocol_error(ProtocolErrorCode::ExpiredJob, "job has expired", false)
         } else if let Some(project) = project {
@@ -183,62 +305,104 @@ impl JobExecutor for LocalJobExecutor {
                         }
                     }
                     RunnerJob::ApplyPlan(apply) if apply.project_id == project.project_id => {
-                        match self.stage_and_plan(project, &apply.revision) {
-                            Ok(plan) => {
+                        let staged = self
+                            .runner
+                            .local_admin()
+                            .stage_portable_revision(&apply.revision, self.artifact_cache.root());
+                        match staged {
+                            Err(error) => protocol_error(
+                                ProtocolErrorCode::OperationFailed,
+                                format!("could not prepare approved Setup: {error:#}"),
+                                false,
+                            ),
+                            Ok(selector) => {
                                 let approval = &apply.approval;
-                                if approval.organization_id != job.organization_id
-                                    || approval.project_instance_id != job.project_instance_id
-                                    || approval.setup_revision_id
-                                        != apply.revision.setup_revision_id
-                                    || approval.plan_digest != plan.plan_digest
-                                {
-                                    protocol_error(
-                                        ProtocolErrorCode::PlanDigestMismatch,
-                                        "approved plan no longer matches the local filesystem",
-                                        false,
-                                    )
-                                } else if is_expired(&approval.expires_at, now) {
-                                    protocol_error(
-                                        ProtocolErrorCode::ApprovalExpired,
-                                        "plan approval expired with its apply job",
-                                        false,
-                                    )
-                                } else if !plan.conflicts.is_empty() {
-                                    protocol_error(
-                                        ProtocolErrorCode::Conflict,
-                                        "approved plan contains conflicts",
-                                        false,
-                                    )
-                                } else {
-                                    let selector =
-                                        format!("remote:{}", apply.revision.setup_id.as_str());
-                                    match self.runner.apply(&project.local_path, Some(&selector)) {
-                                        Ok(applied) => {
-                                            let actions_applied = plan.actions.len() as u64;
-                                            RunnerResult::ApplyReceipt(ApplyReceipt {
-                                                project_id: project.project_id.clone(),
-                                                operation_id: Identifier::new(applied.operation_id)
-                                                    .expect("UUID operation identifier is valid"),
-                                                setup_revision_id: apply
-                                                    .revision
-                                                    .setup_revision_id
-                                                    .clone(),
-                                                plan_digest: plan.plan_digest,
-                                                outcome: if actions_applied == 0 {
-                                                    OperationOutcome::NoChange
-                                                } else {
-                                                    OperationOutcome::Applied
-                                                },
-                                                recoverability: if actions_applied == 0 {
-                                                    Recoverability::NotNeeded
-                                                } else {
-                                                    Recoverability::RollbackAvailable
-                                                },
-                                                actions_applied,
-                                                completed_at: now.clone(),
-                                            })
+                                match self.runner.apply_checked_cancellable(
+                                    &project.local_path,
+                                    Some(&selector),
+                                    |local_plan| {
+                                        let plan = canonical_plan(
+                                            local_plan,
+                                            &apply.revision,
+                                            self.artifact_cache.root(),
+                                        )?;
+                                        if approval.organization_id != job.organization_id
+                                            || approval.project_instance_id
+                                                != job.project_instance_id
+                                            || approval.setup_revision_id
+                                                != apply.revision.setup_revision_id
+                                            || approval.plan_digest != plan.plan_digest
+                                        {
+                                            return Err(anyhow::Error::new(
+                                                ApplyValidationError::new(
+                                                    ProtocolErrorCode::PlanDigestMismatch,
+                                                    "approved plan no longer matches the local filesystem",
+                                                ),
+                                            ));
                                         }
-                                        Err(error) => {
+                                        if is_expired(&approval.expires_at, now) {
+                                            return Err(anyhow::Error::new(
+                                                ApplyValidationError::new(
+                                                    ProtocolErrorCode::ApprovalExpired,
+                                                    "plan approval expired with its apply job",
+                                                ),
+                                            ));
+                                        }
+                                        if !plan.conflicts.is_empty() {
+                                            return Err(anyhow::Error::new(
+                                                ApplyValidationError::new(
+                                                    ProtocolErrorCode::Conflict,
+                                                    "approved plan contains conflicts",
+                                                ),
+                                            ));
+                                        }
+                                        Ok(plan)
+                                    },
+                                    should_cancel,
+                                ) {
+                                    Ok((applied, plan)) => {
+                                        let actions_applied = plan.actions.len() as u64;
+                                        RunnerResult::ApplyReceipt(ApplyReceipt {
+                                            project_id: project.project_id.clone(),
+                                            operation_id: Identifier::new(applied.operation_id)
+                                                .expect("UUID operation identifier is valid"),
+                                            setup_revision_id: apply
+                                                .revision
+                                                .setup_revision_id
+                                                .clone(),
+                                            plan_digest: plan.plan_digest,
+                                            outcome: if actions_applied == 0 {
+                                                OperationOutcome::NoChange
+                                            } else {
+                                                OperationOutcome::Applied
+                                            },
+                                            recoverability: if actions_applied == 0 {
+                                                Recoverability::NotNeeded
+                                            } else {
+                                                Recoverability::RollbackAvailable
+                                            },
+                                            actions_applied,
+                                            completed_at: now.clone(),
+                                        })
+                                    }
+                                    Err(error) => {
+                                        if let Some(validation) =
+                                            error.downcast_ref::<ApplyValidationError>()
+                                        {
+                                            protocol_error(
+                                                validation.code,
+                                                validation.message.clone(),
+                                                false,
+                                            )
+                                        } else if let Some(interruption) =
+                                            error.downcast_ref::<OperationInterruption>()
+                                        {
+                                            operation_interruption_result(
+                                                &project.project_id,
+                                                interruption,
+                                                now,
+                                            )
+                                        } else {
                                             log::error!(
                                                 "remote apply {} failed: {error:#}",
                                                 job.job_id.as_str()
@@ -250,21 +414,16 @@ impl JobExecutor for LocalJobExecutor {
                                     }
                                 }
                             }
-                            Err(error) => protocol_error(
-                                ProtocolErrorCode::OperationFailed,
-                                format!("could not prepare approved Setup: {error:#}"),
-                                false,
-                            ),
                         }
                     }
                     RunnerJob::RollbackOperation(rollback)
                         if rollback.project_id == project.project_id =>
                     {
-                        match self
-                            .runner
-                            .local_admin()
-                            .rollback_operation(&project.local_path, rollback.operation_id.as_str())
-                        {
+                        match self.runner.rollback_checked(
+                            &project.local_path,
+                            rollback.operation_id.as_str(),
+                            should_cancel,
+                        ) {
                             Ok(rolled_back) => {
                                 let restored_setup_revision_id = rolled_back
                                     .plan
@@ -282,11 +441,21 @@ impl JobExecutor for LocalJobExecutor {
                                 })
                             }
                             Err(error) => {
-                                log::error!(
-                                    "remote rollback {} failed: {error:#}",
-                                    job.job_id.as_str()
-                                );
-                                operation_error("rollback failed; local recovery is required")
+                                if let Some(interruption) =
+                                    error.downcast_ref::<OperationInterruption>()
+                                {
+                                    operation_interruption_result(
+                                        &project.project_id,
+                                        interruption,
+                                        now,
+                                    )
+                                } else {
+                                    log::error!(
+                                        "remote rollback {} failed: {error:#}",
+                                        job.job_id.as_str()
+                                    );
+                                    operation_error("rollback failed; local recovery is required")
+                                }
                             }
                         }
                     }
@@ -468,6 +637,79 @@ fn operation_error(message: &str) -> RunnerResult {
     })
 }
 
+fn operation_interruption_result(
+    project_id: &ProjectId,
+    interruption: &OperationInterruption,
+    now: &IsoTimestamp,
+) -> RunnerResult {
+    match interruption {
+        OperationInterruption::CancelledAndRestored(operation) => cancellation_receipt(
+            project_id,
+            Some(operation),
+            None,
+            CancellationOutcome::CancelledAndRestored,
+            Recoverability::NotNeeded,
+            now,
+        ),
+        OperationInterruption::NeedsAttention {
+            operation,
+            cancelled: true,
+            ..
+        } => cancellation_receipt(
+            project_id,
+            Some(operation),
+            None,
+            CancellationOutcome::NeedsAttention,
+            Recoverability::ManualIntervention,
+            now,
+        ),
+        OperationInterruption::FailedAndRestored { .. } => RunnerResult::Error(ErrorResult {
+            code: ProtocolErrorCode::OperationFailed,
+            message: "operation failed; local filesystem state was restored".to_owned(),
+            retryable: true,
+            recoverability: Recoverability::NotNeeded,
+        }),
+        OperationInterruption::NeedsAttention { .. } => {
+            operation_error("operation failed; local filesystem recovery needs attention")
+        }
+    }
+}
+
+fn interrupted_operation(interruption: &OperationInterruption) -> RecoveredOperation {
+    match interruption {
+        OperationInterruption::CancelledAndRestored(operation)
+        | OperationInterruption::FailedAndRestored { operation, .. }
+        | OperationInterruption::NeedsAttention { operation, .. } => operation.clone(),
+    }
+}
+
+fn fallback_cancelled_operation_id(job: &JobEnvelope) -> Option<&ahm_domain::OperationId> {
+    match &job.job {
+        RunnerJob::RollbackOperation(rollback) => Some(&rollback.operation_id),
+        _ => None,
+    }
+}
+
+fn cancellation_receipt(
+    project_id: &ProjectId,
+    operation: Option<&RecoveredOperation>,
+    fallback_operation_id: Option<&ahm_domain::OperationId>,
+    outcome: CancellationOutcome,
+    recoverability: Recoverability,
+    now: &IsoTimestamp,
+) -> RunnerResult {
+    RunnerResult::CancellationReceipt(CancellationReceipt {
+        project_id: project_id.clone(),
+        operation_id: operation
+            .and_then(|operation| Identifier::new(operation.operation_id.clone()).ok())
+            .or_else(|| fallback_operation_id.cloned()),
+        outcome,
+        recoverability,
+        actions_applied: operation.map_or(0, |operation| operation.actions_completed),
+        completed_at: now.clone(),
+    })
+}
+
 fn candidate_to_discovery(candidate: &DefaultSetupCandidate) -> Option<ScanDiscovery> {
     let content_digest = candidate
         .fingerprint
@@ -541,6 +783,8 @@ pub fn protocol_error(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use ahm_domain::{
         ApplyPlanJob, ArtifactId, Identifier, JobEnvelope, LeasedRunnerJob, PlanApproval,
         PlanSetupJob, PortableSetupRevision, PortableSetupRevisionItem, RollbackOperationJob,
@@ -606,6 +850,7 @@ mod tests {
             Some(&instance),
             &lease,
             &IsoTimestamp::new("2026-09-01T10:01:00Z").unwrap(),
+            &mut || Ok(false),
         );
         let RunnerResult::ScanResult(scan) = result.result else {
             panic!("expected scan result")
@@ -693,6 +938,7 @@ mod tests {
                 }),
             ),
             &now,
+            &mut || Ok(false),
         );
         let RunnerResult::PlanResult(plan_result) = plan_result.result else {
             panic!("expected plan result")
@@ -720,6 +966,7 @@ mod tests {
                 }),
             ),
             &now,
+            &mut || Ok(false),
         );
         let RunnerResult::ApplyReceipt(receipt) = apply_result.result else {
             panic!("expected apply receipt")
@@ -741,11 +988,55 @@ mod tests {
                 }),
             ),
             &now,
+            &mut || Ok(false),
         );
         assert!(matches!(
             rollback_result.result,
             RunnerResult::RollbackReceipt(_)
         ));
+        assert!(!project_path
+            .join(".agents")
+            .join("skills")
+            .join("remote-skill")
+            .exists());
+
+        let checks = Cell::new(0_u32);
+        let mut cancel_after_apply = || {
+            let next = checks.get() + 1;
+            checks.set(next);
+            Ok(next >= 4)
+        };
+        let cancelled = executor.execute(
+            &identity,
+            Some(&project),
+            &envelope(
+                "job_cancelled_apply",
+                RunnerJob::ApplyPlan(ApplyPlanJob {
+                    project_id: identifier("project_01"),
+                    revision: revision.clone(),
+                    approval: PlanApproval {
+                        approval_id: identifier("approval_02"),
+                        organization_id: identifier("org_01"),
+                        project_instance_id: identifier("instance_01"),
+                        setup_revision_id: identifier("revision_01"),
+                        plan_digest,
+                        approved_by: identifier("user_01"),
+                        approved_at: IsoTimestamp::new("2026-09-02T10:00:30Z").unwrap(),
+                        expires_at: IsoTimestamp::new("2026-09-02T10:05:00Z").unwrap(),
+                    },
+                }),
+            ),
+            &now,
+            &mut cancel_after_apply,
+        );
+        let RunnerResult::CancellationReceipt(receipt) = cancelled.result else {
+            panic!("expected cancellation receipt")
+        };
+        assert_eq!(
+            receipt.outcome,
+            ahm_domain::CancellationOutcome::CancelledAndRestored
+        );
+        assert_eq!(receipt.actions_applied, 1);
         assert!(!project_path
             .join(".agents")
             .join("skills")

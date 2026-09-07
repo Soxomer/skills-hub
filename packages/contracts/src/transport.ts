@@ -94,6 +94,14 @@ export interface SubmitRunnerResultRequest {
   result: ResultEnvelope
 }
 
+export interface RunnerJobControlRequest {
+  leaseId: string
+}
+
+export interface RunnerJobControlResponse {
+  cancelRequested: boolean
+}
+
 export interface AcknowledgeRunnerJobRequest {
   leaseId: string
   requestDigest: string

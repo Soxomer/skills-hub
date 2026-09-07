@@ -57,7 +57,11 @@ export function createControlPlaneApp(
       return
     }
     if (error instanceof SwitchingError) {
-      void reply.code(error.statusCode).send({ code: error.code, error: error.message })
+      void reply.code(error.statusCode).send({
+        code: error.code,
+        error: error.message,
+        ...error.details,
+      })
       return
     }
     if (error instanceof Error && 'validation' in error && error.validation) {
@@ -212,6 +216,13 @@ export function createControlPlaneApp(
       request.params.jobId,
       request.body,
     ),
+  )
+
+  app.post<{
+    Params: { jobId: string }
+    Body: Parameters<RunnerTransportService['jobControl']>[2]
+  }>('/runner/v1/jobs/:jobId/control', async (request) =>
+    transport.jobControl(runnerCredential(request), request.params.jobId, request.body),
   )
 
   app.post<{

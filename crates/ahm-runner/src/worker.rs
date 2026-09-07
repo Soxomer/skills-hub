@@ -1,7 +1,7 @@
 use ahm_domain::{
     AcknowledgeRunnerJobRequest, ClaimRunnerJobRequest, Digest, DiscoveryState, IsoTimestamp,
-    ProtocolErrorCode, ResultEnvelope, RunnerCapabilityReport, RunnerJob, RunnerResult,
-    SubmitRunnerResultRequest, PROTOCOL_VERSION,
+    ProtocolErrorCode, ResultEnvelope, RunnerCapabilityReport, RunnerJob, RunnerJobControlRequest,
+    RunnerResult, SubmitRunnerResultRequest, PROTOCOL_VERSION,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::{SecondsFormat, Utc};
@@ -110,9 +110,40 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
                 Ok(WorkerOutcome::Replayed)
             }
             JournalStartOutcome::Execute => {
-                let result = if self.prepare_required_artifacts(&identity, &lease)? {
-                    self.executor
-                        .execute(&identity, project.as_ref(), &lease, &now)
+                let transport = &self.transport;
+                let mut effective_lease = lease.clone();
+                if !effective_lease.cancel_requested {
+                    effective_lease.cancel_requested = transport
+                        .job_control(
+                            &identity,
+                            effective_lease.job.job_id.as_str(),
+                            &RunnerJobControlRequest {
+                                lease_id: effective_lease.lease_id.clone(),
+                            },
+                        )?
+                        .cancel_requested;
+                }
+                let result = if effective_lease.cancel_requested
+                    || self.prepare_required_artifacts(&identity, &effective_lease)?
+                {
+                    let mut should_cancel = || {
+                        transport
+                            .job_control(
+                                &identity,
+                                effective_lease.job.job_id.as_str(),
+                                &RunnerJobControlRequest {
+                                    lease_id: effective_lease.lease_id.clone(),
+                                },
+                            )
+                            .map(|control| control.cancel_requested)
+                    };
+                    self.executor.execute(
+                        &identity,
+                        project.as_ref(),
+                        &effective_lease,
+                        &now,
+                        &mut should_cancel,
+                    )
                 } else {
                     ResultEnvelope {
                         protocol_version: PROTOCOL_VERSION,
@@ -279,6 +310,8 @@ mod tests {
         jobs: RefCell<VecDeque<LeasedRunnerJob>>,
         submissions: RefCell<Vec<SubmitRunnerResultRequest>>,
         fail_submissions: RefCell<bool>,
+        cancel_requested: RefCell<bool>,
+        control_checks: RefCell<u32>,
     }
 
     impl RunnerTransport for FakeTransport {
@@ -314,6 +347,18 @@ mod tests {
             Ok(ahm_domain::RunnerJobAcknowledgement {
                 accepted: true,
                 duplicate: false,
+            })
+        }
+
+        fn job_control(
+            &self,
+            _identity: &RunnerIdentityRecord,
+            _job_id: &str,
+            _request: &ahm_domain::RunnerJobControlRequest,
+        ) -> Result<ahm_domain::RunnerJobControlResponse> {
+            *self.control_checks.borrow_mut() += 1;
+            Ok(ahm_domain::RunnerJobControlResponse {
+                cancel_requested: *self.cancel_requested.borrow(),
             })
         }
 
@@ -371,8 +416,17 @@ mod tests {
             _project: Option<&ProjectInstanceRecord>,
             lease: &LeasedRunnerJob,
             _now: &IsoTimestamp,
+            should_cancel: &mut dyn FnMut() -> Result<bool>,
         ) -> ResultEnvelope {
             *self.executions.borrow_mut() += 1;
+            let result = if lease.cancel_requested || should_cancel().unwrap() {
+                protocol_error(ProtocolErrorCode::JobCancelled, "job was cancelled", false)
+            } else {
+                RunnerResult::ScanResult(ahm_domain::ScanResult {
+                    project_id: Identifier::new("project_01").unwrap(),
+                    discoveries: vec![],
+                })
+            };
             ResultEnvelope {
                 protocol_version: PROTOCOL_VERSION,
                 job_id: lease.job.job_id.clone(),
@@ -380,10 +434,7 @@ mod tests {
                 organization_id: lease.job.organization_id.clone(),
                 device_id: lease.job.device_id.clone(),
                 project_instance_id: lease.job.project_instance_id.clone(),
-                result: RunnerResult::ScanResult(ahm_domain::ScanResult {
-                    project_id: Identifier::new("project_01").unwrap(),
-                    discoveries: vec![],
-                }),
+                result,
             }
         }
     }
@@ -443,6 +494,8 @@ mod tests {
                 jobs: RefCell::new(jobs),
                 submissions: RefCell::new(Vec::new()),
                 fail_submissions: RefCell::new(offline),
+                cancel_requested: RefCell::new(false),
+                control_checks: RefCell::new(0),
             },
             FakeExecutor {
                 executions: RefCell::new(0),
@@ -478,5 +531,19 @@ mod tests {
         assert_eq!(*worker.executor.executions.borrow(), 1);
         assert_eq!(worker.state.undelivered_outbox_count().unwrap(), 0);
         assert_eq!(worker.transport.submissions.borrow().len(), 1);
+    }
+
+    #[test]
+    fn execution_reads_cancellation_after_acknowledgement() {
+        let mut worker = worker(VecDeque::from([lease("lease_01")]), false);
+        *worker.transport.cancel_requested.borrow_mut() = true;
+
+        assert_eq!(worker.run_once().unwrap(), WorkerOutcome::Processed);
+        assert_eq!(*worker.transport.control_checks.borrow(), 1);
+        let submissions = worker.transport.submissions.borrow();
+        assert!(matches!(
+            submissions[0].result.result,
+            RunnerResult::Error(ref error) if error.code == ProtocolErrorCode::JobCancelled
+        ));
     }
 }

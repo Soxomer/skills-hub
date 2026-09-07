@@ -408,6 +408,39 @@
         }
       }
     },
+    "cancellationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "payload"],
+      "properties": {
+        "kind": { "const": "cancellationReceipt" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "projectId",
+            "operationId",
+            "outcome",
+            "recoverability",
+            "actionsApplied",
+            "completedAt"
+          ],
+          "properties": {
+            "projectId": { "$ref": "#/$defs/identifier" },
+            "operationId": {
+              "oneOf": [
+                { "$ref": "#/$defs/identifier" },
+                { "type": "null" }
+              ]
+            },
+            "outcome": { "enum": ["cancelledAndRestored", "needsAttention"] },
+            "recoverability": { "$ref": "#/$defs/recoverability" },
+            "actionsApplied": { "type": "integer", "minimum": 0 },
+            "completedAt": { "$ref": "#/$defs/timestamp" }
+          }
+        }
+      }
+    },
     "errorResult": {
       "type": "object",
       "additionalProperties": false,
@@ -448,6 +481,7 @@
         { "$ref": "#/$defs/planResult" },
         { "$ref": "#/$defs/applyReceipt" },
         { "$ref": "#/$defs/rollbackReceipt" },
+        { "$ref": "#/$defs/cancellationReceipt" },
         { "$ref": "#/$defs/errorResult" }
       ]
     },

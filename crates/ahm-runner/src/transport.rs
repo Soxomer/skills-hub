@@ -3,7 +3,8 @@ use std::time::Duration;
 use ahm_domain::{
     AcknowledgeRunnerJobRequest, ArtifactBundle, ClaimRunnerJobRequest, Digest,
     EnrollRunnerRequest, EnrollRunnerResponse, LeasedRunnerJob, RegisterProjectInstanceRequest,
-    RunnerJobAcknowledgement, RunnerResultAcknowledgement, SubmitRunnerResultRequest,
+    RunnerJobAcknowledgement, RunnerJobControlRequest, RunnerJobControlResponse,
+    RunnerResultAcknowledgement, SubmitRunnerResultRequest,
 };
 use anyhow::{bail, Context, Result};
 use reqwest::{blocking::Client, StatusCode, Url};
@@ -34,6 +35,12 @@ pub trait RunnerTransport {
         job_id: &str,
         request: &AcknowledgeRunnerJobRequest,
     ) -> Result<RunnerJobAcknowledgement>;
+    fn job_control(
+        &self,
+        identity: &RunnerIdentityRecord,
+        job_id: &str,
+        request: &RunnerJobControlRequest,
+    ) -> Result<RunnerJobControlResponse>;
     fn store_artifact(
         &self,
         identity: &RunnerIdentityRecord,
@@ -150,6 +157,22 @@ impl RunnerTransport for HttpRunnerTransport {
             .send()
             .context("contact control plane")?;
         parse_json_response(response, "acknowledge runner job")
+    }
+
+    fn job_control(
+        &self,
+        identity: &RunnerIdentityRecord,
+        job_id: &str,
+        request: &RunnerJobControlRequest,
+    ) -> Result<RunnerJobControlResponse> {
+        let response = self
+            .client
+            .post(self.endpoint(&format!("runner/v1/jobs/{job_id}/control"))?)
+            .bearer_auth(&identity.credential_secret)
+            .json(request)
+            .send()
+            .context("contact control plane")?;
+        parse_json_response(response, "read runner job control")
     }
 
     fn store_artifact(
@@ -280,5 +303,36 @@ mod tests {
         assert_eq!(response.organization_id.as_str(), "org_01");
         assert_eq!(response.device_id.as_str(), "device_01");
         assert_eq!(response.credential, "secret");
+    }
+
+    #[test]
+    fn job_control_is_scoped_to_the_current_lease() {
+        let mut server = mockito::Server::new();
+        let request = RunnerJobControlRequest {
+            lease_id: "lease_01".to_owned(),
+        };
+        let endpoint = server
+            .mock("POST", "/runner/v1/jobs/job_01/control")
+            .match_header("authorization", "Bearer secret")
+            .match_body(Matcher::Json(serde_json::to_value(&request).unwrap()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"cancelRequested":true}"#)
+            .create();
+        let identity = RunnerIdentityRecord {
+            server_url: server.url(),
+            organization_id: Identifier::new("org_01").unwrap(),
+            device_id: Identifier::new("device_01").unwrap(),
+            credential_secret: "secret".to_owned(),
+            enrolled_at: ahm_domain::IsoTimestamp::new("2026-09-05T10:00:00Z").unwrap(),
+        };
+
+        let response = HttpRunnerTransport::new(&server.url())
+            .unwrap()
+            .job_control(&identity, "job_01", &request)
+            .unwrap();
+
+        endpoint.assert();
+        assert!(response.cancel_requested);
     }
 }

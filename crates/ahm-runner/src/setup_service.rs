@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
 use ahm_domain::PortableSetupRevision;
@@ -10,6 +11,7 @@ use uuid::Uuid;
 use super::central_repo::{ensure_central_repo, resolve_central_repo_path_for_home};
 use super::content_hash::hash_dir;
 use super::onboarding::{build_onboarding_plan_for_home, OnboardingVariant};
+use super::project_lock::ProjectOperationLock;
 use super::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 use super::sync_engine::{
     copy_dir_recursive, remove_path_any, sync_dir_with_mode_with_overwrite, SyncMode, SyncOutcome,
@@ -203,9 +205,79 @@ struct Reconciliation {
 #[derive(Clone, Debug)]
 struct Execution {
     modes: HashMap<String, SyncMode>,
-    added_paths: Vec<PathBuf>,
-    removed_groups: Vec<CurrentGroup>,
+    actions_completed: u64,
 }
+
+#[derive(Debug)]
+struct FileExecutionFailure {
+    error: anyhow::Error,
+    cancelled: bool,
+    actions_completed: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct FilesystemRecoveryPlan {
+    steps: Vec<FilesystemRecoveryStep>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct FilesystemRecoveryStep {
+    target_path: String,
+    previous: Option<FilesystemRecoverySource>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct FilesystemRecoverySource {
+    central_path: String,
+    mode: SyncMode,
+}
+
+#[derive(Clone, Debug)]
+struct FilesystemRecoveryJournal {
+    operation_id: String,
+    recovery_plan: FilesystemRecoveryPlan,
+    actions_completed: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RecoveredOperation {
+    pub operation_id: String,
+    pub actions_completed: u64,
+}
+
+#[derive(Debug)]
+pub(crate) enum OperationInterruption {
+    CancelledAndRestored(RecoveredOperation),
+    FailedAndRestored {
+        operation: RecoveredOperation,
+        message: String,
+    },
+    NeedsAttention {
+        operation: RecoveredOperation,
+        message: String,
+        cancelled: bool,
+    },
+}
+
+impl fmt::Display for OperationInterruption {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CancelledAndRestored(_) => formatter
+                .write_str("operation was cancelled and its filesystem changes were restored"),
+            Self::FailedAndRestored { message, .. } => {
+                write!(
+                    formatter,
+                    "operation failed and its filesystem changes were restored: {message}"
+                )
+            }
+            Self::NeedsAttention { message, .. } => {
+                write!(formatter, "filesystem recovery needs attention: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for OperationInterruption {}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct TargetSnapshot {
@@ -476,6 +548,7 @@ impl SetupService {
         excluded_selection_keys: &[String],
     ) -> Result<DefaultSetupCaptureResult> {
         let project = self.resolve_project(project_path)?;
+        let _operation_lock = ProjectOperationLock::try_acquire(Path::new(&project.path))?;
         let preview = self.preview_default_setup(home, project_path)?;
         if let Some(existing) = preview.existing_default {
             anyhow::bail!(
@@ -1008,7 +1081,10 @@ impl SetupService {
     }
 
     pub fn assign_setup(&self, project_path: &Path, setup_selector: &str) -> Result<Project> {
-        let project = self.resolve_project(project_path)?;
+        let mut project = self.resolve_project(project_path)?;
+        let _operation_lock = ProjectOperationLock::try_acquire(Path::new(&project.path))?;
+        self.recover_incomplete_operation_locked(&project)?;
+        project = self.project_by_id(&project.id)?;
         let setup = self.resolve_setup(setup_selector)?;
         self.store.with_conn(|conn| {
             conn.execute(
@@ -1022,7 +1098,10 @@ impl SetupService {
     }
 
     pub fn assign_default_setup(&self, project_path: &Path) -> Result<Project> {
-        let project = self.resolve_project(project_path)?;
+        let mut project = self.resolve_project(project_path)?;
+        let _operation_lock = ProjectOperationLock::try_acquire(Path::new(&project.path))?;
+        self.recover_incomplete_operation_locked(&project)?;
+        project = self.project_by_id(&project.id)?;
         let setup = project
             .default_setup
             .context("project has no captured Default Setup")?;
@@ -1038,7 +1117,10 @@ impl SetupService {
     }
 
     pub fn status(&self, project_path: &Path) -> Result<ProjectStatus> {
-        let project = self.resolve_project(project_path)?;
+        let mut project = self.resolve_project(project_path)?;
+        let _operation_lock = ProjectOperationLock::try_acquire(Path::new(&project.path))?;
+        self.recover_incomplete_operation_locked(&project)?;
+        project = self.project_by_id(&project.id)?;
         let pending_plan = project
             .assigned_setup
             .clone()
@@ -1054,7 +1136,10 @@ impl SetupService {
     }
 
     pub fn plan(&self, project_path: &Path, setup_selector: Option<&str>) -> Result<ApplyPlan> {
-        let project = self.resolve_project(project_path)?;
+        let mut project = self.resolve_project(project_path)?;
+        let _operation_lock = ProjectOperationLock::try_acquire(Path::new(&project.path))?;
+        self.recover_incomplete_operation_locked(&project)?;
+        project = self.project_by_id(&project.id)?;
         let setup = match setup_selector {
             Some(selector) => self.resolve_setup(selector)?,
             None => project
@@ -1066,7 +1151,31 @@ impl SetupService {
     }
 
     pub fn sync(&self, project_path: &Path, setup_selector: Option<&str>) -> Result<ApplyResult> {
-        let project = self.resolve_project(project_path)?;
+        self.sync_checked(project_path, setup_selector, |_| Ok(()))
+            .map(|(result, ())| result)
+    }
+
+    pub(crate) fn sync_checked<T>(
+        &self,
+        project_path: &Path,
+        setup_selector: Option<&str>,
+        validate: impl FnOnce(&ApplyPlan) -> Result<T>,
+    ) -> Result<(ApplyResult, T)> {
+        let mut never_cancel = || Ok(false);
+        self.sync_checked_cancellable(project_path, setup_selector, validate, &mut never_cancel)
+    }
+
+    pub(crate) fn sync_checked_cancellable<T>(
+        &self,
+        project_path: &Path,
+        setup_selector: Option<&str>,
+        validate: impl FnOnce(&ApplyPlan) -> Result<T>,
+        should_cancel: &mut dyn FnMut() -> Result<bool>,
+    ) -> Result<(ApplyResult, T)> {
+        let mut project = self.resolve_project(project_path)?;
+        let _operation_lock = ProjectOperationLock::try_acquire(Path::new(&project.path))?;
+        self.recover_incomplete_operation_locked(&project)?;
+        project = self.project_by_id(&project.id)?;
         let setup = match setup_selector {
             Some(selector) => self.resolve_setup(selector)?,
             None => project
@@ -1075,6 +1184,7 @@ impl SetupService {
                 .context("project has no assigned setup")?,
         };
         let reconciliation = self.reconciliation_for_setup(project.clone(), setup.clone())?;
+        let validated = validate(&reconciliation.plan)?;
         ensure_no_conflicts(&reconciliation.plan)?;
 
         let operation_id = Uuid::new_v4().to_string();
@@ -1084,7 +1194,43 @@ impl SetupService {
             .map(TargetSnapshot::from)
             .collect::<Vec<_>>();
         let snapshots_json = serde_json::to_string(&snapshots)?;
-        let execution = self.execute_files(&reconciliation)?;
+        self.begin_filesystem_operation(
+            &operation_id,
+            &project.id,
+            "apply",
+            &recovery_plan(&reconciliation),
+        )?;
+        let execution = match self.execute_files(&reconciliation, &operation_id, should_cancel) {
+            Ok(execution) => execution,
+            Err(failure) => {
+                return Err(anyhow::Error::new(
+                    self.resolve_operation_failure(&operation_id, failure),
+                ));
+            }
+        };
+        match should_cancel() {
+            Ok(false) => {}
+            Ok(true) => {
+                return Err(anyhow::Error::new(self.resolve_operation_failure(
+                    &operation_id,
+                    FileExecutionFailure {
+                        error: anyhow::anyhow!("cancellation requested before commit"),
+                        cancelled: true,
+                        actions_completed: execution.actions_completed,
+                    },
+                )));
+            }
+            Err(error) => {
+                return Err(anyhow::Error::new(self.resolve_operation_failure(
+                    &operation_id,
+                    FileExecutionFailure {
+                        error,
+                        cancelled: false,
+                        actions_completed: execution.actions_completed,
+                    },
+                )));
+            }
+        }
         let db_result = self.store.with_conn(|conn| {
             let tx = conn.unchecked_transaction()?;
             replace_project_targets(
@@ -1121,28 +1267,52 @@ impl SetupService {
                  WHERE id = ?3",
                 params![setup.revision_id, now_ms(), project.id],
             )?;
+            tx.execute(
+                "DELETE FROM filesystem_recovery_journal WHERE operation_id = ?1",
+                params![operation_id],
+            )?;
             tx.commit()?;
             Ok(())
         });
         if let Err(err) = db_result {
-            let restore = self.undo_files(&execution);
-            return match restore {
-                Ok(()) => Err(err.context("save applied setup state")),
-                Err(restore_err) => Err(err.context(format!(
-                    "save applied setup state; filesystem restore also failed: {restore_err:#}"
-                ))),
-            };
+            return Err(anyhow::Error::new(self.resolve_operation_failure(
+                &operation_id,
+                FileExecutionFailure {
+                    error: err.context("save applied setup state"),
+                    cancelled: false,
+                    actions_completed: execution.actions_completed,
+                },
+            )));
         }
 
-        Ok(ApplyResult {
-            plan: reconciliation.plan,
-            operation_id,
-        })
+        Ok((
+            ApplyResult {
+                plan: reconciliation.plan,
+                operation_id,
+            },
+            validated,
+        ))
     }
 
     pub fn rollback(&self, project_path: &Path) -> Result<ApplyResult> {
-        let project = self.resolve_project(project_path)?;
+        let mut never_cancel = || Ok(false);
+        self.rollback_checked(project_path, None, &mut never_cancel)
+    }
+
+    pub(crate) fn rollback_checked(
+        &self,
+        project_path: &Path,
+        expected_operation_id: Option<&str>,
+        should_cancel: &mut dyn FnMut() -> Result<bool>,
+    ) -> Result<ApplyResult> {
+        let mut project = self.resolve_project(project_path)?;
+        let _operation_lock = ProjectOperationLock::try_acquire(Path::new(&project.path))?;
+        self.recover_incomplete_operation_locked(&project)?;
+        project = self.project_by_id(&project.id)?;
         let operation = self.latest_operation(&project.id)?;
+        if expected_operation_id.is_some_and(|expected| operation.id != expected) {
+            anyhow::bail!("requested operation is not the latest recoverable operation");
+        }
         let desired_records = operation
             .previous_targets
             .iter()
@@ -1159,7 +1329,45 @@ impl SetupService {
             desired_records.clone(),
         )?;
         ensure_no_conflicts(&reconciliation.plan)?;
-        let execution = self.execute_files(&reconciliation)?;
+        let recovery_operation_id = Uuid::new_v4().to_string();
+        self.begin_filesystem_operation(
+            &recovery_operation_id,
+            &project.id,
+            "rollback",
+            &recovery_plan(&reconciliation),
+        )?;
+        let execution =
+            match self.execute_files(&reconciliation, &recovery_operation_id, should_cancel) {
+                Ok(execution) => execution,
+                Err(failure) => {
+                    return Err(anyhow::Error::new(
+                        self.resolve_operation_failure(&recovery_operation_id, failure),
+                    ));
+                }
+            };
+        match should_cancel() {
+            Ok(false) => {}
+            Ok(true) => {
+                return Err(anyhow::Error::new(self.resolve_operation_failure(
+                    &recovery_operation_id,
+                    FileExecutionFailure {
+                        error: anyhow::anyhow!("cancellation requested before commit"),
+                        cancelled: true,
+                        actions_completed: execution.actions_completed,
+                    },
+                )));
+            }
+            Err(error) => {
+                return Err(anyhow::Error::new(self.resolve_operation_failure(
+                    &recovery_operation_id,
+                    FileExecutionFailure {
+                        error,
+                        cancelled: false,
+                        actions_completed: execution.actions_completed,
+                    },
+                )));
+            }
+        }
         let db_result = self.store.with_conn(|conn| {
             let tx = conn.unchecked_transaction()?;
             tx.execute(
@@ -1186,17 +1394,22 @@ impl SetupService {
                 "UPDATE apply_operations SET rolled_back_at = ?1 WHERE id = ?2",
                 params![now_ms(), operation.id],
             )?;
+            tx.execute(
+                "DELETE FROM filesystem_recovery_journal WHERE operation_id = ?1",
+                params![recovery_operation_id],
+            )?;
             tx.commit()?;
             Ok(())
         });
         if let Err(err) = db_result {
-            let restore = self.undo_files(&execution);
-            return match restore {
-                Ok(()) => Err(err.context("save rollback state")),
-                Err(restore_err) => Err(err.context(format!(
-                    "save rollback state; filesystem restore also failed: {restore_err:#}"
-                ))),
-            };
+            return Err(anyhow::Error::new(self.resolve_operation_failure(
+                &recovery_operation_id,
+                FileExecutionFailure {
+                    error: err.context("save rollback state"),
+                    cancelled: false,
+                    actions_completed: execution.actions_completed,
+                },
+            )));
         }
 
         Ok(ApplyResult {
@@ -1210,12 +1423,8 @@ impl SetupService {
         project_path: &Path,
         expected_operation_id: &str,
     ) -> Result<ApplyResult> {
-        let project = self.resolve_project(project_path)?;
-        let operation = self.latest_operation(&project.id)?;
-        if operation.id != expected_operation_id {
-            anyhow::bail!("requested operation is not the latest recoverable operation");
-        }
-        self.rollback(project_path)
+        let mut never_cancel = || Ok(false);
+        self.rollback_checked(project_path, Some(expected_operation_id), &mut never_cancel)
     }
 
     fn resolve_setup(&self, selector: &str) -> Result<SetupSummary> {
@@ -1690,32 +1899,297 @@ impl SetupService {
         })
     }
 
-    fn execute_files(&self, reconciliation: &Reconciliation) -> Result<Execution> {
+    pub(crate) fn recover_incomplete_operation(
+        &self,
+        project_path: &Path,
+    ) -> Result<Option<RecoveredOperation>> {
+        let project = self.resolve_project(project_path)?;
+        let _operation_lock = ProjectOperationLock::try_acquire(Path::new(&project.path))?;
+        self.recover_incomplete_operation_locked(&project)
+    }
+
+    fn recover_incomplete_operation_locked(
+        &self,
+        project: &Project,
+    ) -> Result<Option<RecoveredOperation>> {
+        let Some(journal) = self.filesystem_journal_for_project(&project.id)? else {
+            return Ok(None);
+        };
+        self.restore_filesystem_journal(&journal)
+            .map(Some)
+            .map_err(|error| {
+                anyhow::Error::new(OperationInterruption::NeedsAttention {
+                    operation: RecoveredOperation {
+                        operation_id: journal.operation_id,
+                        actions_completed: journal.actions_completed,
+                    },
+                    message: format!("{error:#}"),
+                    cancelled: false,
+                })
+            })
+    }
+
+    fn begin_filesystem_operation(
+        &self,
+        operation_id: &str,
+        project_id: &str,
+        operation_kind: &str,
+        recovery_plan: &FilesystemRecoveryPlan,
+    ) -> Result<()> {
+        let now = now_ms();
+        let recovery_plan_json =
+            serde_json::to_string(recovery_plan).context("encode filesystem recovery plan")?;
+        self.store.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO filesystem_recovery_journal
+                   (operation_id, project_id, operation_kind, recovery_plan_json,
+                    actions_completed, status, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 0, 'prepared', ?5, ?5)",
+                params![
+                    operation_id,
+                    project_id,
+                    operation_kind,
+                    recovery_plan_json,
+                    now
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn mark_filesystem_mutating(&self, operation_id: &str) -> Result<()> {
+        self.store.with_conn(|conn| {
+            conn.execute(
+                "UPDATE filesystem_recovery_journal
+                 SET status = 'mutating', updated_at = ?1 WHERE operation_id = ?2",
+                params![now_ms(), operation_id],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn checkpoint_filesystem_action(
+        &self,
+        operation_id: &str,
+        actions_completed: u64,
+    ) -> Result<()> {
+        self.store.with_conn(|conn| {
+            conn.execute(
+                "UPDATE filesystem_recovery_journal
+                 SET actions_completed = ?1, updated_at = ?2 WHERE operation_id = ?3",
+                params![actions_completed, now_ms(), operation_id],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn filesystem_journal_for_project(
+        &self,
+        project_id: &str,
+    ) -> Result<Option<FilesystemRecoveryJournal>> {
+        self.store.with_conn(|conn| {
+            conn.query_row(
+                "SELECT operation_id, recovery_plan_json, actions_completed
+                 FROM filesystem_recovery_journal WHERE project_id = ?1",
+                params![project_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, u64>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+            .map(|(operation_id, recovery_plan_json, actions_completed)| {
+                Ok(FilesystemRecoveryJournal {
+                    operation_id,
+                    recovery_plan: serde_json::from_str(&recovery_plan_json)
+                        .context("decode filesystem recovery plan")?,
+                    actions_completed,
+                })
+            })
+            .transpose()
+        })
+    }
+
+    fn filesystem_journal_by_operation(
+        &self,
+        operation_id: &str,
+    ) -> Result<Option<FilesystemRecoveryJournal>> {
+        self.store.with_conn(|conn| {
+            conn.query_row(
+                "SELECT operation_id, recovery_plan_json, actions_completed
+                 FROM filesystem_recovery_journal WHERE operation_id = ?1",
+                params![operation_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, u64>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+            .map(|(operation_id, recovery_plan_json, actions_completed)| {
+                Ok(FilesystemRecoveryJournal {
+                    operation_id,
+                    recovery_plan: serde_json::from_str(&recovery_plan_json)
+                        .context("decode filesystem recovery plan")?,
+                    actions_completed,
+                })
+            })
+            .transpose()
+        })
+    }
+
+    fn restore_filesystem_journal(
+        &self,
+        journal: &FilesystemRecoveryJournal,
+    ) -> Result<RecoveredOperation> {
+        self.store.with_conn(|conn| {
+            conn.execute(
+                "UPDATE filesystem_recovery_journal
+                 SET status = 'restoring', updated_at = ?1 WHERE operation_id = ?2",
+                params![now_ms(), journal.operation_id],
+            )?;
+            Ok(())
+        })?;
+        let mut failures = Vec::new();
+        for step in journal.recovery_plan.steps.iter().rev() {
+            let target = Path::new(&step.target_path);
+            if let Err(error) = remove_path_any(target) {
+                failures.push(format!("remove {}: {error:#}", target.display()));
+                continue;
+            }
+            if let Some(previous) = &step.previous {
+                if let Err(error) = sync_dir_with_mode_with_overwrite(
+                    previous.mode,
+                    Path::new(&previous.central_path),
+                    target,
+                    false,
+                ) {
+                    failures.push(format!("restore {}: {error:#}", target.display()));
+                }
+            }
+        }
+        if !failures.is_empty() {
+            let message = failures.join("; ");
+            self.store.with_conn(|conn| {
+                conn.execute(
+                    "UPDATE filesystem_recovery_journal
+                     SET status = 'needsAttention', updated_at = ?1 WHERE operation_id = ?2",
+                    params![now_ms(), journal.operation_id],
+                )?;
+                Ok(())
+            })?;
+            anyhow::bail!(message);
+        }
+        self.store.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM filesystem_recovery_journal WHERE operation_id = ?1",
+                params![journal.operation_id],
+            )?;
+            Ok(())
+        })?;
+        Ok(RecoveredOperation {
+            operation_id: journal.operation_id.clone(),
+            actions_completed: journal.actions_completed,
+        })
+    }
+
+    fn resolve_operation_failure(
+        &self,
+        operation_id: &str,
+        failure: FileExecutionFailure,
+    ) -> OperationInterruption {
+        let message = format!("{:#}", failure.error);
+        let fallback = RecoveredOperation {
+            operation_id: operation_id.to_owned(),
+            actions_completed: failure.actions_completed,
+        };
+        let journal = match self.filesystem_journal_by_operation(operation_id) {
+            Ok(Some(journal)) => journal,
+            Ok(None) => {
+                return OperationInterruption::NeedsAttention {
+                    operation: fallback,
+                    message: format!("{message}; recovery journal is missing"),
+                    cancelled: failure.cancelled,
+                };
+            }
+            Err(error) => {
+                return OperationInterruption::NeedsAttention {
+                    operation: fallback,
+                    message: format!("{message}; could not read recovery journal: {error:#}"),
+                    cancelled: failure.cancelled,
+                };
+            }
+        };
+        match self.restore_filesystem_journal(&journal) {
+            Ok(operation) if failure.cancelled => {
+                OperationInterruption::CancelledAndRestored(operation)
+            }
+            Ok(operation) => OperationInterruption::FailedAndRestored { operation, message },
+            Err(error) => OperationInterruption::NeedsAttention {
+                operation: fallback,
+                message: format!("{message}; restore failed: {error:#}"),
+                cancelled: failure.cancelled,
+            },
+        }
+    }
+
+    fn execute_files(
+        &self,
+        reconciliation: &Reconciliation,
+        operation_id: &str,
+        should_cancel: &mut dyn FnMut() -> Result<bool>,
+    ) -> std::result::Result<Execution, FileExecutionFailure> {
         let mut execution = Execution {
             modes: HashMap::new(),
-            added_paths: Vec::new(),
-            removed_groups: Vec::new(),
+            actions_completed: 0,
         };
-        let result = (|| -> Result<()> {
+        if let Err(error) = self.mark_filesystem_mutating(operation_id) {
+            return Err(FileExecutionFailure {
+                error,
+                cancelled: false,
+                actions_completed: 0,
+            });
+        }
+        let result = (|| -> std::result::Result<(), (anyhow::Error, bool)> {
             for operation in &reconciliation.operations {
+                cancellation_checkpoint(should_cancel)?;
                 match operation {
                     PhysicalOperation::Remove(current) | PhysicalOperation::Replace(current, _) => {
                         if current.exists {
-                            remove_path_any(&current.target_path)?;
-                            execution.removed_groups.push(current.clone());
+                            remove_path_any(&current.target_path)
+                                .map_err(|error| (error, false))?;
+                            if matches!(operation, PhysicalOperation::Remove(_)) {
+                                execution.actions_completed += 1;
+                                self.checkpoint_filesystem_action(
+                                    operation_id,
+                                    execution.actions_completed,
+                                )
+                                .map_err(|error| (error, false))?;
+                            }
                         }
                     }
                     PhysicalOperation::Add(_) | PhysicalOperation::Keep(_, _) => {}
                 }
             }
             for operation in &reconciliation.operations {
+                cancellation_checkpoint(should_cancel)?;
                 match operation {
                     PhysicalOperation::Add(desired) | PhysicalOperation::Replace(_, desired) => {
-                        let outcome = sync_desired(desired)?;
+                        let outcome = sync_desired(desired).map_err(|error| (error, false))?;
                         execution
                             .modes
                             .insert(path_key(&desired.target_path), outcome.mode_used);
-                        execution.added_paths.push(desired.target_path.clone());
+                        execution.actions_completed += 1;
+                        self.checkpoint_filesystem_action(
+                            operation_id,
+                            execution.actions_completed,
+                        )
+                        .map_err(|error| (error, false))?;
                     }
                     PhysicalOperation::Keep(current, desired) => {
                         execution
@@ -1727,43 +2201,14 @@ impl SetupService {
             }
             Ok(())
         })();
-        if let Err(err) = result {
-            let restore = self.undo_files(&execution);
-            return match restore {
-                Ok(()) => Err(err),
-                Err(restore_err) => {
-                    Err(err.context(format!("filesystem restore also failed: {restore_err:#}")))
-                }
-            };
+        if let Err((error, cancelled)) = result {
+            return Err(FileExecutionFailure {
+                error,
+                cancelled,
+                actions_completed: execution.actions_completed,
+            });
         }
         Ok(execution)
-    }
-
-    fn undo_files(&self, execution: &Execution) -> Result<()> {
-        let mut failures = Vec::new();
-        for path in execution.added_paths.iter().rev() {
-            if let Err(err) = remove_path_any(path) {
-                failures.push(format!("remove {}: {err:#}", path.display()));
-            }
-        }
-        for group in execution.removed_groups.iter().rev() {
-            let Some(skill) = &group.skill else {
-                continue;
-            };
-            if let Err(err) = sync_dir_with_mode_with_overwrite(
-                group.actual_mode,
-                Path::new(&skill.central_path),
-                &group.target_path,
-                false,
-            ) {
-                failures.push(format!("restore {}: {err:#}", group.target_path.display()));
-            }
-        }
-        if failures.is_empty() {
-            Ok(())
-        } else {
-            anyhow::bail!(failures.join("; "))
-        }
     }
 
     fn latest_operation(&self, project_id: &str) -> Result<ApplyOperation> {
@@ -1796,6 +2241,49 @@ impl SetupService {
                     .context("read previous target snapshot")?,
             })
         })
+    }
+}
+
+fn recovery_plan(reconciliation: &Reconciliation) -> FilesystemRecoveryPlan {
+    let steps = reconciliation
+        .operations
+        .iter()
+        .filter_map(|operation| match operation {
+            PhysicalOperation::Add(desired) => Some(FilesystemRecoveryStep {
+                target_path: desired.target_path.to_string_lossy().to_string(),
+                previous: None,
+            }),
+            PhysicalOperation::Remove(current) if current.exists => Some(FilesystemRecoveryStep {
+                target_path: current.target_path.to_string_lossy().to_string(),
+                previous: recovery_source(current),
+            }),
+            PhysicalOperation::Replace(current, desired) => Some(FilesystemRecoveryStep {
+                target_path: desired.target_path.to_string_lossy().to_string(),
+                previous: current.exists.then(|| recovery_source(current)).flatten(),
+            }),
+            PhysicalOperation::Remove(_) | PhysicalOperation::Keep(_, _) => None,
+        })
+        .collect();
+    FilesystemRecoveryPlan { steps }
+}
+
+fn recovery_source(current: &CurrentGroup) -> Option<FilesystemRecoverySource> {
+    current
+        .skill
+        .as_ref()
+        .map(|skill| FilesystemRecoverySource {
+            central_path: skill.central_path.clone(),
+            mode: current.actual_mode,
+        })
+}
+
+fn cancellation_checkpoint(
+    should_cancel: &mut dyn FnMut() -> Result<bool>,
+) -> std::result::Result<(), (anyhow::Error, bool)> {
+    match should_cancel() {
+        Ok(false) => Ok(()),
+        Ok(true) => Err((anyhow::anyhow!("cancellation requested"), true)),
+        Err(error) => Err((error.context("read operation cancellation state"), false)),
     }
 }
 
@@ -2173,4 +2661,129 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use std::cell::Cell;
+
+    use tempfile::TempDir;
+
+    use super::*;
+
+    fn fixture() -> (TempDir, SkillStore, SetupService, PathBuf, SetupSummary) {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SkillStore::new(temp.path().join("skills_hub.db"));
+        store.ensure_schema().unwrap();
+        let service = SetupService::from_store(store.clone()).unwrap();
+        let central_path = temp.path().join("library").join("alpha");
+        std::fs::create_dir_all(&central_path).unwrap();
+        std::fs::write(central_path.join("SKILL.md"), "# Alpha").unwrap();
+        store
+            .upsert_skill(&SkillRecord {
+                id: "skill-alpha".to_owned(),
+                name: "alpha".to_owned(),
+                description: None,
+                source_type: "local".to_owned(),
+                source_ref: None,
+                source_subpath: None,
+                source_revision: None,
+                central_path: central_path.to_string_lossy().to_string(),
+                content_hash: None,
+                created_at: 1,
+                updated_at: 1,
+                last_sync_at: None,
+                last_seen_at: 1,
+                enabled: true,
+                status: "ok".to_owned(),
+            })
+            .unwrap();
+        let setup = service.create_setup("alpha setup").unwrap();
+        let setup = service
+            .add_setup_skill(&setup.setup.id, "skill-alpha", &["codex".to_owned()])
+            .unwrap()
+            .setup;
+        let project_path = temp.path().join("project");
+        std::fs::create_dir_all(&project_path).unwrap();
+        service.add_project(&project_path).unwrap();
+        service.assign_setup(&project_path, &setup.id).unwrap();
+        (temp, store, service, project_path, setup)
+    }
+
+    fn journal_count(store: &SkillStore) -> u64 {
+        store
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM filesystem_recovery_journal",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(Into::into)
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn cancellation_after_mutation_restores_the_previous_filesystem() {
+        let (_temp, store, service, project_path, _setup) = fixture();
+        let checks = Cell::new(0_u32);
+        let mut should_cancel = || {
+            let next = checks.get() + 1;
+            checks.set(next);
+            Ok(next >= 3)
+        };
+
+        let error = service
+            .sync_checked_cancellable(&project_path, None, |_| Ok(()), &mut should_cancel)
+            .unwrap_err();
+        let interruption = error.downcast_ref::<OperationInterruption>().unwrap();
+        assert!(matches!(
+            interruption,
+            OperationInterruption::CancelledAndRestored(RecoveredOperation {
+                actions_completed: 1,
+                ..
+            })
+        ));
+        assert!(!project_path.join(".agents/skills/alpha").exists());
+        assert_eq!(journal_count(&store), 0);
+        assert!(service
+            .status(&project_path)
+            .unwrap()
+            .project
+            .applied_setup
+            .is_none());
+    }
+
+    #[test]
+    fn a_restart_recovers_files_changed_before_the_database_commit() {
+        let (_temp, store, service, project_path, setup) = fixture();
+        let project = service.resolve_project(&project_path).unwrap();
+        let reconciliation = service
+            .reconciliation_for_setup(project.clone(), setup)
+            .unwrap();
+        let operation_id = Uuid::new_v4().to_string();
+        service
+            .begin_filesystem_operation(
+                &operation_id,
+                &project.id,
+                "apply",
+                &recovery_plan(&reconciliation),
+            )
+            .unwrap();
+        service
+            .execute_files(&reconciliation, &operation_id, &mut || Ok(false))
+            .unwrap();
+        assert!(project_path.join(".agents/skills/alpha").exists());
+        assert_eq!(journal_count(&store), 1);
+
+        let reopened = SetupService::from_store(store.clone()).unwrap();
+        let plan = reopened.plan(&project_path, None).unwrap();
+
+        assert!(!project_path.join(".agents/skills/alpha").exists());
+        assert!(plan
+            .actions
+            .iter()
+            .any(|action| action.kind == ApplyActionKind::Add));
+        assert_eq!(journal_count(&store), 0);
+    }
 }

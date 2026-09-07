@@ -2,6 +2,7 @@ import {
   PROTOCOL_VERSION,
   type JobEnvelope,
   type PortableSetupRevision,
+  type ProjectActiveOperation,
   type ProjectInstanceOperationsResponse,
   type ProjectOperationSummary,
   type ProjectSetupStateResponse,
@@ -12,6 +13,7 @@ import type { Pool, PoolClient, QueryResultRow } from 'pg'
 
 import type {
   ApplyQueueOutcome,
+  PlanQueueOutcome,
   RollbackQueueOutcome,
   SetupRevisionContext,
   SwitchingRepository,
@@ -72,6 +74,15 @@ interface OperationRow extends QueryResultRow {
   completed_at: Date | string | null
 }
 
+interface ActiveOperationRow extends QueryResultRow {
+  id: string
+  job_kind: ProjectActiveOperation['kind']
+  state: ProjectActiveOperation['state']
+  payload: JobEnvelope['job']['payload'] | string
+  cancel_requested_at: Date | string | null
+  issued_at: Date | string
+}
+
 function iso(value: Date | string): string {
   return typeof value === 'string' ? new Date(value).toISOString() : value.toISOString()
 }
@@ -94,6 +105,54 @@ function routeFromRow(row: RouteRow): SetupRevisionContext['route'] {
 
 function artifactReference(row: RevisionItemRow): Record<string, unknown> {
   return objectValue(row.artifact_reference)
+}
+
+function activeOperationFromRow(row: ActiveOperationRow): ProjectActiveOperation {
+  const payload = objectValue(row.payload)
+  return {
+    jobId: row.id,
+    kind: row.job_kind,
+    state: row.state,
+    setupRevisionId:
+      'revision' in payload ? payload.revision.setupRevisionId : null,
+    cancelRequested: row.cancel_requested_at !== null,
+    issuedAt: iso(row.issued_at),
+  }
+}
+
+async function expirePendingSetupOperations(
+  client: Pick<Pool, 'query'>,
+  organizationId: string,
+  projectInstanceId: string,
+  now: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE runner_jobs
+     SET state = 'expired', completed_at = $1
+     WHERE organization_id = $2 AND project_instance_id = $3
+       AND job_kind IN ('planSetup', 'applyPlan', 'rollbackOperation')
+       AND state = 'pending'
+       AND expires_at <= $1`,
+    [now, organizationId, projectInstanceId],
+  )
+}
+
+async function activeSetupOperation(
+  client: Pick<Pool, 'query'>,
+  organizationId: string,
+  projectInstanceId: string,
+): Promise<ProjectActiveOperation | null> {
+  const active = await client.query<ActiveOperationRow>(
+    `SELECT id, job_kind, state, payload, cancel_requested_at, issued_at
+     FROM runner_jobs
+     WHERE organization_id = $1 AND project_instance_id = $2
+       AND job_kind IN ('planSetup', 'applyPlan', 'rollbackOperation')
+       AND state IN ('pending', 'leased', 'acknowledged')
+     ORDER BY issued_at, id
+     LIMIT 1`,
+    [organizationId, projectInstanceId],
+  )
+  return active.rows[0] ? activeOperationFromRow(active.rows[0]) : null
 }
 
 async function transaction<T>(pool: Pool, operation: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -219,7 +278,7 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
     )
     if (!instance.rows[0]) return null
 
-    const [operationRows, latestPlanRows] = await Promise.all([
+    const [operationRows, latestPlanRows, activeOperationRows] = await Promise.all([
       this.pool.query<OperationRow>(
         `SELECT id, job_kind, state, payload, result_json, issued_at, completed_at
          FROM runner_jobs
@@ -238,14 +297,27 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
          LIMIT 1`,
         [organizationId, projectInstanceId],
       ),
+      this.pool.query<ActiveOperationRow>(
+        `SELECT id, job_kind, state, payload, cancel_requested_at, issued_at
+         FROM runner_jobs
+         WHERE organization_id = $1 AND project_instance_id = $2
+           AND job_kind IN ('planSetup', 'applyPlan', 'rollbackOperation')
+           AND state IN ('pending', 'leased', 'acknowledged')
+         ORDER BY issued_at, id
+         LIMIT 1`,
+        [organizationId, projectInstanceId],
+      ),
     ])
 
     const operations = operationRows.rows.map((row): ProjectOperationSummary => {
       const payload = objectValue(row.payload)
       const result = row.result_json ? objectValue(row.result_json).result : null
-      const receipt = result?.kind === 'applyReceipt' || result?.kind === 'rollbackReceipt'
-        ? result.payload
-        : null
+      const receipt =
+        result?.kind === 'applyReceipt' ||
+        result?.kind === 'rollbackReceipt' ||
+        result?.kind === 'cancellationReceipt'
+          ? result.payload
+          : null
       const error = result?.kind === 'error' ? result.payload : null
       const setupRevisionId = row.job_kind === 'applyPlan' && 'revision' in payload
         ? payload.revision.setupRevisionId
@@ -281,8 +353,8 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
     const assignedSetupRevisionId = instance.rows[0].assigned_setup_revision_id
     const materializedSetupRevisionId = latestCompleted?.setupRevisionId ?? null
     const requiresAttention =
-      latestOperation?.state === 'failed' &&
-      latestOperation.recoverability === 'manualIntervention'
+      latestOperation?.recoverability === 'manualIntervention' &&
+      (latestOperation.state === 'failed' || latestOperation.state === 'cancelled')
     const hasDrift =
       latestPlanResult?.kind === 'planResult' && latestPlanResult.payload.plan.conflicts.length > 0
     const health = requiresAttention
@@ -300,6 +372,9 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
       assignedSetupRevisionId,
       materializedSetupRevisionId,
       health,
+      activeOperation: activeOperationRows.rows[0]
+        ? activeOperationFromRow(activeOperationRows.rows[0])
+        : null,
       operations,
     }
   }
@@ -351,8 +426,29 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
     return { route: routeFromRow(row), revision }
   }
 
-  async enqueueJob(job: JobEnvelope): Promise<void> {
-    await insertJob(this.pool, job)
+  async enqueuePlan(job: JobEnvelope): Promise<PlanQueueOutcome> {
+    return transaction(this.pool, async (client) => {
+      await client.query(
+        `SELECT id FROM project_instances
+         WHERE organization_id = $1 AND id = $2
+         FOR UPDATE`,
+        [job.organizationId, job.projectInstanceId],
+      )
+      await expirePendingSetupOperations(
+        client,
+        job.organizationId,
+        job.projectInstanceId,
+        job.issuedAt,
+      )
+      const activeOperation = await activeSetupOperation(
+        client,
+        job.organizationId,
+        job.projectInstanceId,
+      )
+      if (activeOperation) return { outcome: 'operationInProgress', activeOperation }
+      await insertJob(client, job)
+      return { outcome: 'queued', jobId: job.jobId, deviceId: job.deviceId }
+    })
   }
 
   async approveAndEnqueueApply(input: {
@@ -429,6 +525,19 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
           deviceId: existingRow.device_id,
         }
       }
+
+      await expirePendingSetupOperations(
+        client,
+        input.actor.organizationId,
+        input.projectInstanceId,
+        input.issuedAt,
+      )
+      const activeOperation = await activeSetupOperation(
+        client,
+        input.actor.organizationId,
+        input.projectInstanceId,
+      )
+      if (activeOperation) return { outcome: 'operationInProgress', activeOperation }
 
       const approval = {
         approvalId: input.approvalId,
@@ -524,6 +633,18 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
       if (existing.rows[0]) {
         return { outcome: 'existing', jobId: existing.rows[0].id, deviceId: row.device_id }
       }
+      await expirePendingSetupOperations(
+        client,
+        input.actor.organizationId,
+        input.projectInstanceId,
+        input.issuedAt,
+      )
+      const activeOperation = await activeSetupOperation(
+        client,
+        input.actor.organizationId,
+        input.projectInstanceId,
+      )
+      if (activeOperation) return { outcome: 'operationInProgress', activeOperation }
       const job: JobEnvelope = {
         protocolVersion: PROTOCOL_VERSION,
         jobId: input.jobId,

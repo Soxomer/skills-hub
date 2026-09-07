@@ -475,10 +475,28 @@ impl RunnerStateStore {
             .map(|result| match &result.result {
                 ahm_domain::RunnerResult::ApplyReceipt(receipt) => receipt.recoverability,
                 ahm_domain::RunnerResult::RollbackReceipt(receipt) => receipt.recoverability,
+                ahm_domain::RunnerResult::CancellationReceipt(receipt) => receipt.recoverability,
                 ahm_domain::RunnerResult::Error(error) => error.recoverability,
                 _ => Recoverability::NotNeeded,
             })
             .unwrap_or(Recoverability::NotNeeded);
+        let journal_status =
+            result
+                .as_ref()
+                .map_or(
+                    if failed { "failed" } else { "succeeded" },
+                    |result| match &result.result {
+                        ahm_domain::RunnerResult::CancellationReceipt(receipt)
+                            if receipt.outcome
+                                == ahm_domain::CancellationOutcome::CancelledAndRestored =>
+                        {
+                            "rolledBack"
+                        }
+                        ahm_domain::RunnerResult::CancellationReceipt(_) => "failed",
+                        _ if failed => "failed",
+                        _ => "succeeded",
+                    },
+                );
         let transaction = self.connection.transaction()?;
         transaction.execute(
             "UPDATE operation_journal
@@ -486,7 +504,7 @@ impl RunnerStateStore {
                  plan_digest = ?5, recoverability = ?6
              WHERE job_id = ?7",
             params![
-                if failed { "failed" } else { "succeeded" },
+                journal_status,
                 result_json,
                 result_digest,
                 completed_at.as_str(),
