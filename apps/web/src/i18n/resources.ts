@@ -253,6 +253,14 @@ export const resources = {
           restored: 'The checkout and assignment now use {{revision}}.',
           cleared: 'The checkout returned to its unassigned state.',
         },
+        cancellation: {
+          title: 'Operation cancelled',
+          cancelledAndRestored: 'The setup operation was cancelled and recovery was applied.',
+          needsAttention:
+            'The setup operation was cancelled before completion. Review state and prepare again.',
+          pendingId: 'operation id pending',
+          returnToSetup: 'Review setup',
+        },
         errors: {
           revisions: 'Setup revisions and operation history could not be loaded.',
           plan: 'The plan could not be prepared.',

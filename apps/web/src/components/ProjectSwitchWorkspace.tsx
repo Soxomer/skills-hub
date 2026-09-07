@@ -24,7 +24,6 @@ import { useTranslation } from 'react-i18next'
 
 import type { ControlPlaneClient } from '../api'
 import { CommandBlock } from './CommandBlock'
-import { jobInFlight } from '../switch-state'
 import { useSetupSwitch } from '../useSetupSwitch'
 
 interface ProjectSwitchWorkspaceProps {
@@ -32,6 +31,24 @@ interface ProjectSwitchWorkspaceProps {
   projectId: string
   projectInstanceId: string
   runnerOnline: boolean
+}
+
+const inFlightJobStates = ['pending', 'leased', 'acknowledged'] as const
+
+function activeKindFromOperation(
+  kind: ProjectInstanceOperationsResponse['activeOperation'],
+): 'plan' | 'apply' | 'rollback' | null {
+  if (!kind) return null
+  const map = {
+    planSetup: 'plan',
+    applyPlan: 'apply',
+    rollbackOperation: 'rollback',
+  } as const
+  return map[kind.kind]
+}
+
+function isInFlightJobState(state: string | null): state is (typeof inFlightJobStates)[number] {
+  return state !== null && inFlightJobStates.includes(state as (typeof inFlightJobStates)[number])
 }
 
 export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
@@ -42,7 +59,17 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
 }: ProjectSwitchWorkspaceProps) {
   const { t } = useTranslation()
   const workflow = useSetupSwitch(client, projectId, projectInstanceId)
-  const isWorking = workflow.submitting || jobInFlight(workflow.jobStatus)
+  const trackedActiveKind =
+    workflow.activeJob?.kind ?? activeKindFromOperation(workflow.operations?.activeOperation)
+  const trackedState =
+    workflow.jobStatus &&
+    workflow.jobStatus.jobId === (workflow.activeJob?.jobId ?? workflow.operations?.activeOperation?.jobId)
+      ? workflow.jobStatus.state
+      : workflow.operations?.activeOperation?.state ?? null
+  const operationInProgress = Boolean(
+    trackedActiveKind && isInFlightJobState(trackedState),
+  )
+  const isWorking = workflow.submitting || operationInProgress
   const terminalFailure =
     workflow.jobStatus &&
     ['failed', 'expired', 'cancelled'].includes(workflow.jobStatus.state)
@@ -144,27 +171,50 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
                 disabled={!runnerOnline || workflow.submitting}
                 onClick={() => void workflow.rollback()}
               >
-                {isWorking && workflow.activeJob?.kind === 'rollback' ? (
+                {isWorking && trackedActiveKind === 'rollback' ? (
                   <LoaderCircle className="spin" aria-hidden="true" size={15} />
                 ) : (
                   <RotateCcw aria-hidden="true" size={15} />
                 )}
-                {isWorking && workflow.activeJob?.kind === 'rollback'
+                {isWorking && trackedActiveKind === 'rollback'
                   ? t('switchFlow.rollback.starting')
                   : t('switchFlow.rollback.action')}
               </button>
             )}
           </div>
-          {workflow.activeJob?.kind === 'rollback' && jobInFlight(workflow.jobStatus) && (
+          {trackedActiveKind === 'rollback' && isInFlightJobState(trackedState) && (
             <div className="switch-progress" aria-live="polite">
               <LoaderCircle className="spin" aria-hidden="true" size={20} />
               <div>
                 <strong>{t('switchFlow.progress.rollback')}</strong>
-                <p>{t(`switchFlow.job.${workflow.jobStatus?.state ?? 'pending'}`)}</p>
+                <p>{t(`switchFlow.job.${trackedState ?? 'pending'}`)}</p>
               </div>
             </div>
           )}
         </>
+      ) : workflow.cancellation ? (
+        <div className="operation-result operation-result--warning" role="status">
+          <ShieldAlert aria-hidden="true" size={24} />
+          <div>
+            <strong>{t('switchFlow.cancellation.title')}</strong>
+            <p>
+              {workflow.cancellation.outcome === 'cancelledAndRestored'
+                ? t('switchFlow.cancellation.cancelledAndRestored')
+                : t('switchFlow.cancellation.needsAttention')}
+            </p>
+            <code>{workflow.cancellation.operationId ?? t('switchFlow.cancellation.pendingId')}</code>
+          </div>
+          <p className="operation-result-details">
+            {t('switchFlow.receipt.summary', { count: workflow.cancellation.actionsApplied })}
+          </p>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={workflow.recoverFromCancellation}
+          >
+            {t('switchFlow.cancellation.returnToSetup')}
+          </button>
+        </div>
       ) : (
         <>
           <SetupPicker
@@ -207,24 +257,24 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
                 disabled={!runnerOnline || !workflow.selectedRevisionId || isWorking}
                 onClick={() => void workflow.preparePlan()}
               >
-                {isWorking && workflow.activeJob?.kind === 'plan' ? (
+                {isWorking && trackedActiveKind === 'plan' ? (
                   <LoaderCircle className="spin" aria-hidden="true" size={16} />
                 ) : (
                   <Download aria-hidden="true" size={16} />
                 )}
-                {isWorking && workflow.activeJob?.kind === 'plan'
+                {isWorking && trackedActiveKind === 'plan'
                   ? t('switchFlow.preparing')
                   : t('switchFlow.prepare')}
               </button>
             </div>
           </div>
 
-          {workflow.activeJob && jobInFlight(workflow.jobStatus) && (
+          {trackedActiveKind && isInFlightJobState(trackedState) && (
             <div className="switch-progress" aria-live="polite">
               <LoaderCircle className="spin" aria-hidden="true" size={20} />
               <div>
-                <strong>{t(`switchFlow.progress.${workflow.activeJob.kind}`)}</strong>
-                <p>{t(`switchFlow.job.${workflow.jobStatus?.state ?? 'pending'}`)}</p>
+                <strong>{t(`switchFlow.progress.${trackedActiveKind}`)}</strong>
+                <p>{t(`switchFlow.job.${trackedState ?? 'pending'}`)}</p>
               </div>
             </div>
           )}
@@ -253,12 +303,12 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
                 disabled={!runnerOnline || isWorking}
                 onClick={() => void workflow.applyPlan()}
               >
-                {isWorking && workflow.activeJob?.kind === 'apply' ? (
+                {isWorking && trackedActiveKind === 'apply' ? (
                   <LoaderCircle className="spin" aria-hidden="true" size={16} />
                 ) : (
                   <FileCheck2 aria-hidden="true" size={16} />
                 )}
-                {isWorking && workflow.activeJob?.kind === 'apply'
+                {isWorking && trackedActiveKind === 'apply'
                   ? t('switchFlow.approval.applying')
                   : t('switchFlow.approval.action')}
               </button>
