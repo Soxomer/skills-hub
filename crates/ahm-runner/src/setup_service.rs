@@ -1748,10 +1748,33 @@ impl SetupService {
                     operations.push(PhysicalOperation::Keep(current, desired.clone()));
                 }
             } else if std::fs::symlink_metadata(&desired.target_path).is_ok() {
-                conflicts.push(format!(
-                    "unmanaged target already exists and will not be replaced: {}",
-                    desired.target_path.display()
-                ));
+                match detect_owned_mode(
+                    Path::new(&desired.skill.central_path),
+                    &desired.target_path,
+                    desired.sync_mode,
+                ) {
+                    Ok(actual_mode) if sync_mode_satisfies(actual_mode, desired.sync_mode) => {
+                        actions.push(action_for_desired(
+                            ApplyActionKind::Keep,
+                            desired,
+                            "adopt the identical local target",
+                        ));
+                        operations.push(PhysicalOperation::Keep(
+                            CurrentGroup {
+                                records: Vec::new(),
+                                skill: Some(desired.skill.clone()),
+                                target_path: desired.target_path.clone(),
+                                exists: true,
+                                actual_mode,
+                            },
+                            desired.clone(),
+                        ));
+                    }
+                    Ok(_) | Err(_) => conflicts.push(format!(
+                        "unmanaged target already exists and will not be replaced: {}",
+                        desired.target_path.display()
+                    )),
+                }
             } else {
                 actions.push(action_for_desired(
                     ApplyActionKind::Add,

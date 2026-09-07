@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { ControlPlaneClient } from './api'
 
 const STORAGE_KEY = 'ahm.runner-enrollment'
+const RUNNER_KEY = 'ahm.runner-device'
 const POLL_INTERVAL_MS = 2_000
 
 interface PersistedEnrollment {
@@ -47,31 +48,63 @@ function persistEnrollment(enrollment: CreateRunnerEnrollmentResponse): void {
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(value))
 }
 
+function readPersistedRunner(): RunnerEnrollmentStatus | null {
+  try {
+    const deviceId = localStorage.getItem(RUNNER_KEY)
+    if (!deviceId) return null
+    return {
+      enrollmentId: `restored-${deviceId}`,
+      state: 'claimed',
+      deviceId,
+      expiresAt: '',
+    }
+  } catch {
+    return null
+  }
+}
+
+function persistRunner(deviceId: string): void {
+  try {
+    localStorage.setItem(RUNNER_KEY, deviceId)
+  } catch {
+    // Runner selection persistence is a convenience; the connection remains usable in this tab.
+  }
+}
+
 export function useRunnerConnection(client: ControlPlaneClient) {
   const [enrollment, setEnrollment] = useState<CreateRunnerEnrollmentResponse | null>(
     readPersistedEnrollment,
   )
-  const [status, setStatus] = useState<RunnerEnrollmentStatus | null>(null)
+  const [status, setStatus] = useState<RunnerEnrollmentStatus | null>(readPersistedRunner)
   const [runner, setRunner] = useState<RunnerStatusResponse | null>(null)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<RunnerConnectionError | null>(null)
+  const restoredDeviceId = status?.state === 'claimed' ? status.deviceId : null
 
   const refresh = useCallback(async () => {
-    if (!enrollment) return
+    if (!enrollment && !restoredDeviceId) return
     try {
-      const nextStatus = await client.runnerEnrollment(enrollment.enrollmentId)
+      const nextStatus = enrollment
+        ? await client.runnerEnrollment(enrollment.enrollmentId)
+        : {
+            enrollmentId: `restored-${restoredDeviceId}`,
+            state: 'claimed' as const,
+            deviceId: restoredDeviceId,
+            expiresAt: '',
+          }
       setStatus(nextStatus)
-      if (nextStatus.state === 'claimed' && nextStatus.deviceId) {
+      if (nextStatus?.state === 'claimed' && nextStatus.deviceId) {
+        persistRunner(nextStatus.deviceId)
         setRunner(await client.runner(nextStatus.deviceId))
       }
       setError(null)
     } catch {
       setError('refresh')
     }
-  }, [client, enrollment])
+  }, [client, enrollment, restoredDeviceId])
 
   useEffect(() => {
-    if (!enrollment) return
+    if (!enrollment && !restoredDeviceId) return
     let disposed = false
     const poll = async () => {
       if (disposed) return
@@ -83,7 +116,7 @@ export function useRunnerConnection(client: ControlPlaneClient) {
       disposed = true
       window.clearInterval(interval)
     }
-  }, [enrollment, refresh])
+  }, [enrollment, refresh, restoredDeviceId])
 
   const createEnrollment = useCallback(async () => {
     setCreating(true)
@@ -108,6 +141,7 @@ export function useRunnerConnection(client: ControlPlaneClient) {
 
   const reset = useCallback(() => {
     sessionStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(RUNNER_KEY)
     setEnrollment(null)
     setStatus(null)
     setRunner(null)

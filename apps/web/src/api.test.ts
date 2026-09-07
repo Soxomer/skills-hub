@@ -31,7 +31,9 @@ describe('ControlPlaneClient', () => {
       'https://hub.example.test/api/v1/runner-enrollments',
       expect.objectContaining({
         method: 'POST',
+        body: '{}',
         headers: expect.objectContaining({
+          'content-type': 'application/json',
           'x-ahm-organization-id': 'org_01',
           'x-ahm-user-id': 'user_01',
         }),
@@ -143,7 +145,11 @@ describe('ControlPlaneClient', () => {
     await expect(client(request).cancelJob('job with spaces')).resolves.toBeUndefined()
     expect(request).toHaveBeenCalledWith(
       'https://hub.example.test/api/v1/jobs/job%20with%20spaces/cancel',
-      expect.objectContaining({ method: 'POST' }),
+      expect.objectContaining({
+        method: 'POST',
+        body: '{}',
+        headers: expect.objectContaining({ 'content-type': 'application/json' }),
+      }),
     )
   })
 

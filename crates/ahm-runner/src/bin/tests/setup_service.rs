@@ -2,6 +2,8 @@ use std::path::Path;
 
 use ahm_runner::setup_service::{ApplyActionKind, DefaultSetupCandidateKind, SetupService};
 use ahm_runner::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
+use ahm_runner::sync_engine::SyncMode;
+use ahm_runner::tool_adapters::{save_tool_config, CustomToolConfig, ToolConfig};
 use tempfile::TempDir;
 
 fn managed_skill(store: &SkillStore, root: &Path, id: &str, name: &str) -> SkillRecord {
@@ -173,6 +175,94 @@ fn unmanaged_collision_is_reported_and_preserved() {
         std::fs::read_to_string(collision.join("SKILL.md")).unwrap(),
         "unmanaged collision"
     );
+}
+
+#[test]
+fn identical_unmanaged_target_is_adopted_without_overwriting_it() {
+    let (temp, store, service) = setup();
+    let skill = managed_skill(&store, &temp.path().join("library"), "skill-alpha", "alpha");
+    let setup = service.create_setup("adopt-identical").unwrap();
+    service
+        .add_setup_skill(&setup.setup.id, &skill.id, &["codex".to_string()])
+        .unwrap();
+
+    let project_root = registered_project(&temp, &service, "project");
+    let existing = project_root.join(".agents/skills/alpha");
+    std::fs::create_dir_all(&existing).unwrap();
+    std::fs::copy(
+        Path::new(&skill.central_path).join("SKILL.md"),
+        existing.join("SKILL.md"),
+    )
+    .unwrap();
+    service
+        .assign_setup(&project_root, &setup.setup.id)
+        .unwrap();
+
+    let plan = service.plan(&project_root, None).unwrap();
+    assert!(plan.conflicts.is_empty());
+    assert_eq!(plan.actions.len(), 1);
+    assert_eq!(plan.actions[0].kind, ApplyActionKind::Keep);
+    assert_eq!(plan.actions[0].detail, "adopt the identical local target");
+
+    service.sync(&project_root, None).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(existing.join("SKILL.md")).unwrap(),
+        std::fs::read_to_string(Path::new(&skill.central_path).join("SKILL.md")).unwrap()
+    );
+    let status = service.status(&project_root).unwrap();
+    assert_eq!(status.project.assigned_setup.unwrap().id, setup.setup.id);
+    assert_eq!(status.project.applied_setup.unwrap().id, setup.setup.id);
+}
+
+#[test]
+fn identical_unmanaged_copy_is_not_adopted_when_a_symlink_is_required() {
+    let (temp, store, service) = setup();
+    let skill = managed_skill(&store, &temp.path().join("library"), "skill-alpha", "alpha");
+    save_tool_config(
+        &store,
+        ToolConfig {
+            disabled_builtin_tools: Vec::new(),
+            custom_tools: vec![CustomToolConfig {
+                key: "link_tool".to_string(),
+                label: "Link tool".to_string(),
+                avatar: None,
+                skills_dir: temp
+                    .path()
+                    .join("global-link-tool")
+                    .to_string_lossy()
+                    .to_string(),
+                project_skills_dir: Some(".link-tool/skills".to_string()),
+                sync_mode: SyncMode::Symlink,
+                enabled: true,
+            }],
+        },
+    )
+    .unwrap();
+    let setup = service.create_setup("require-symlink").unwrap();
+    service
+        .add_setup_skill(&setup.setup.id, &skill.id, &["link_tool".to_string()])
+        .unwrap();
+
+    let project_root = registered_project(&temp, &service, "project");
+    let existing = project_root.join(".link-tool/skills/alpha");
+    std::fs::create_dir_all(&existing).unwrap();
+    std::fs::copy(
+        Path::new(&skill.central_path).join("SKILL.md"),
+        existing.join("SKILL.md"),
+    )
+    .unwrap();
+    service
+        .assign_setup(&project_root, &setup.setup.id)
+        .unwrap();
+
+    let plan = service.plan(&project_root, None).unwrap();
+    assert_eq!(plan.conflicts.len(), 1);
+    assert!(plan.actions.is_empty());
+    assert!(service.sync(&project_root, None).is_err());
+    assert!(!std::fs::symlink_metadata(&existing)
+        .unwrap()
+        .file_type()
+        .is_symlink());
 }
 
 #[test]

@@ -59,7 +59,7 @@ export class ControlPlaneClient {
   }
 
   createRunnerEnrollment(): Promise<CreateRunnerEnrollmentResponse> {
-    return this.send('/api/v1/runner-enrollments', { method: 'POST' })
+    return this.send('/api/v1/runner-enrollments', this.jsonRequest('POST', {}))
   }
 
   runnerEnrollment(enrollmentId: string): Promise<RunnerEnrollmentStatus> {
@@ -90,7 +90,10 @@ export class ControlPlaneClient {
   }
 
   cancelJob(jobId: string): Promise<void> {
-    return this.send(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' })
+    return this.send(
+      `/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`,
+      this.jsonRequest('POST', {}),
+    )
   }
 
   captureDefault(

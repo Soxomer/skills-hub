@@ -242,9 +242,10 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
          LEFT JOIN setup_revision_items sri
            ON sri.organization_id = sr.organization_id AND sri.setup_revision_id = sr.id
          WHERE s.organization_id = $1
+           AND (s.kind = 'custom' OR s.default_project_id = $2)
          GROUP BY s.id, sr.id, s.name, s.kind, sr.revision_number, sr.created_at
          ORDER BY LOWER(s.name), sr.revision_number DESC`,
-        [organizationId],
+        [organizationId, projectId],
       ),
       this.pool.query<QueryResultRow & { id: string }>(
         `SELECT sr.id

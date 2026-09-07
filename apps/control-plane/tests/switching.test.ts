@@ -184,6 +184,40 @@ async function submit(
 }
 
 describe('Setup switching', () => {
+  it('does not expose another project’s Default Setup as a selectable revision', async () => {
+    const { app, pool } = await harness()
+    await pool.query(
+      `INSERT INTO projects (id, organization_id, name, created_at, updated_at)
+       VALUES ('project_02', 'org_01', 'Other project', $1, $1);
+       INSERT INTO setups
+         (id, organization_id, name, kind, default_project_id, created_by, created_at, updated_at)
+       VALUES ('setup_other_default', 'org_01', 'Other Default', 'default', 'project_02', 'user_01', $1, $1);
+       INSERT INTO setup_revisions
+         (id, organization_id, setup_id, revision_number, created_by, created_at)
+       VALUES ('revision_other_default', 'org_01', 'setup_other_default', 1, 'user_01', $1);`,
+      [now],
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/projects/project_01/setup-revisions',
+      headers: actorHeaders,
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json<{ revisions: Array<{ setupRevisionId: string }> }>().revisions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ setupRevisionId: 'revision_default' }),
+        expect.objectContaining({ setupRevisionId: 'revision_team' }),
+      ]),
+    )
+    expect(response.json<{ revisions: Array<{ setupRevisionId: string }> }>().revisions).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ setupRevisionId: 'revision_other_default' })]),
+    )
+    await app.close()
+    await pool.end()
+  })
+
   it('admits one active Setup operation per project checkout', async () => {
     const { app, pool } = await harness()
     const admitted = await app.inject({
