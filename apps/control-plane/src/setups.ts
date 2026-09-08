@@ -25,13 +25,22 @@ export type CreateSetupOutcome =
   | { outcome: 'created'; revision: CreatedSetupRevision }
   | { outcome: 'nameTaken' }
   | { outcome: 'itemUnavailable' }
+  | { outcome: 'accessDenied' }
+  | { outcome: 'mutationForbidden' }
+
+export type ReadSetupComposerOutcome =
+  | { outcome: 'available'; items: SetupComposerItem[] }
+  | { outcome: 'accessDenied' }
 
 export interface SetupRepository {
   membershipRole(
     organizationId: string,
     userId: string,
   ): Promise<'owner' | 'admin' | 'member' | 'viewer' | null>
-  listComposerItems(organizationId: string): Promise<SetupComposerItem[]>
+  readComposer(
+    organizationId: string,
+    userId: string,
+  ): Promise<ReadSetupComposerOutcome>
   createSetup(record: CreateSetupRecord): Promise<CreateSetupOutcome>
 }
 
@@ -110,16 +119,16 @@ export class SetupService {
   }
 
   async composer(actor: RequestActor): Promise<SetupComposerResponse> {
-    if (!(await this.repository.membershipRole(actor.organizationId, actor.userId))) {
+    const outcome = await this.repository.readComposer(actor.organizationId, actor.userId)
+    if (outcome.outcome === 'accessDenied') {
       throw new SetupServiceError(
         403,
         'setupAccessDenied',
         'Organization membership is required to view Setup capabilities',
       )
     }
-    const available = await this.repository.listComposerItems(actor.organizationId)
     const items = new Map<string, SetupComposerItem>()
-    for (const item of available) {
+    for (const item of outcome.items) {
       const key = composerIdentity(item)
       if (!items.has(key)) items.set(key, item)
     }
@@ -207,6 +216,20 @@ export class SetupService {
         409,
         'setupItemUnavailable',
         'A selected item is stale or no longer available; reload the composer',
+      )
+    }
+    if (outcome.outcome === 'accessDenied') {
+      throw new SetupServiceError(
+        403,
+        'setupAccessDenied',
+        'Organization membership is required to create a Setup',
+      )
+    }
+    if (outcome.outcome === 'mutationForbidden') {
+      throw new SetupServiceError(
+        403,
+        'setupMutationForbidden',
+        'Viewers cannot create Setups',
       )
     }
     return outcome.revision

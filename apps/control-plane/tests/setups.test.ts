@@ -12,6 +12,7 @@ import { InMemoryRunnerTransportRepository } from '../src/runner-transport-memor
 import { RunnerTransportService } from '../src/runner-transport.js'
 import { InMemorySetupRepository } from '../src/setups-memory.js'
 import { PostgresSetupRepository } from '../src/setups-pg.js'
+import type { CreateSetupRecord } from '../src/setups.js'
 import { SetupService } from '../src/setups.js'
 import { PostgresSwitchingRepository } from '../src/switching-pg.js'
 import { SwitchingService } from '../src/switching.js'
@@ -53,6 +54,22 @@ function selection(overrides: Partial<ReturnType<typeof baseItem>> = {}) {
     contentDigest: item.contentDigest,
     toolId: item.toolId,
     targetName: item.targetName,
+  }
+}
+
+function createRecord(
+  createdBy: string,
+  suffix: string,
+): CreateSetupRecord {
+  return {
+    organizationId: actor.organizationId,
+    createdBy,
+    createdAt: '2026-09-08T12:00:00.000Z',
+    setupId: `setup_${suffix}`,
+    setupRevisionId: `revision_${suffix}`,
+    auditEventId: `audit_${suffix}`,
+    name: `${suffix} setup`,
+    items: [selection()],
   }
 }
 
@@ -225,21 +242,31 @@ describe('Setup creation API', () => {
       (await pool.query(`SELECT id FROM audit_events WHERE event_kind = 'setupRevisionCreated'`))
         .rowCount,
     ).toBe(0)
+    expect(
+      (
+        await pool.query(
+          `SELECT normalized_name FROM setup_name_claims
+           WHERE organization_id = 'org_01' AND normalized_name = 'stale setup'`,
+        )
+      ).rowCount,
+    ).toBe(0)
     await app.close()
     await pool.end()
   })
 
   it('enforces case-insensitive name uniqueness without orphan revisions', async () => {
     const { app, pool } = await postgresHarness()
-    const requests = ['Shared tools', 'shared TOOLS'].map((name) =>
-      app.inject({
-        method: 'POST',
-        url: '/api/v1/setups',
-        headers: actorHeaders,
-        payload: { name, items: [selection()] },
-      }),
-    )
-    const results = await Promise.all(requests)
+    const results = []
+    for (const name of ['Shared tools', 'shared TOOLS']) {
+      results.push(
+        await app.inject({
+          method: 'POST',
+          url: '/api/v1/setups',
+          headers: actorHeaders,
+          payload: { name, items: [selection()] },
+        }),
+      )
+    }
     expect(results.map((result) => result.statusCode).sort()).toEqual([201, 409])
     expect(results.find((result) => result.statusCode === 409)?.json()).toMatchObject({
       code: 'setupNameTaken',
@@ -297,6 +324,49 @@ describe('Setup creation API', () => {
     expect(
       (await pool.query(`SELECT id FROM setups WHERE kind = 'custom'`)).rowCount,
     ).toBe(0)
+    await app.close()
+    await pool.end()
+  })
+
+  it('enforces authorization inside repository transactions', async () => {
+    const { app, pool } = await postgresHarness()
+    await pool.query(`
+      INSERT INTO users (id, display_name, created_at)
+      VALUES ('user_viewer', 'Viewer', '2026-09-08T10:00:00Z');
+      INSERT INTO organization_memberships (organization_id, user_id, role, created_at)
+      VALUES ('org_01', 'user_viewer', 'viewer', '2026-09-08T10:00:00Z');
+    `)
+    const repository = new PostgresSetupRepository(pool)
+    await expect(repository.readComposer('org_01', 'user_outsider')).resolves.toEqual({
+      outcome: 'accessDenied',
+    })
+    await expect(repository.createSetup(createRecord('user_outsider', 'outsider'))).resolves.toEqual(
+      { outcome: 'accessDenied' },
+    )
+    await expect(repository.createSetup(createRecord('user_viewer', 'viewer'))).resolves.toEqual({
+      outcome: 'mutationForbidden',
+    })
+    expect((await pool.query(`SELECT id FROM setups WHERE kind = 'custom'`)).rowCount).toBe(0)
+    await app.close()
+    await pool.end()
+  })
+
+  it('rejects a custom name that collides with an existing Default Setup', async () => {
+    const { app, pool } = await postgresHarness()
+    for (const name of [
+      'Default / Project A / project_a',
+      'DEFAULT / PROJECT A / PROJECT_A',
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/setups',
+        headers: actorHeaders,
+        payload: { name, items: [selection()] },
+      })
+      expect(response.statusCode).toBe(409)
+      expect(response.json()).toMatchObject({ code: 'setupNameTaken' })
+    }
+    expect((await pool.query(`SELECT id FROM setups WHERE kind = 'custom'`)).rowCount).toBe(0)
     await app.close()
     await pool.end()
   })
@@ -359,5 +429,23 @@ describe('Setup service validation and memory persistence', () => {
     await expect(
       service.composer({ organizationId: actor.organizationId, userId: 'user_outsider' }),
     ).rejects.toMatchObject({ statusCode: 403, code: 'setupAccessDenied' })
+  })
+
+  it('allows only one concurrent case-insensitive name claim', async () => {
+    const repository = new InMemorySetupRepository()
+    repository.seedMembership(actor.organizationId, actor.userId, 'owner')
+    repository.seedComposerItems(actor.organizationId, [baseItem()])
+    let sequence = 0
+    const service = new SetupService(repository, { randomId: () => `concurrent_${++sequence}` })
+    const results = await Promise.allSettled(
+      ['Shared tools', 'shared TOOLS'].map((name) =>
+        service.createSetup(actor, { name, items: [selection()] }),
+      ),
+    )
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+    expect(results.find((result) => result.status === 'rejected')).toMatchObject({
+      reason: { statusCode: 409, code: 'setupNameTaken' },
+    })
   })
 })

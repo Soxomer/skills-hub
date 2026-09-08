@@ -216,6 +216,16 @@ export class PostgresProjectRepository implements ProjectRepository {
       const existing = await this.readCapture(client, record.organizationId, record.projectId)
       if (existing) return { outcome: 'existing', capture: existing }
 
+      const setupName = `Default / ${projectRow.name} / ${record.projectId}`
+      const claim = await client.query(
+        `INSERT INTO setup_name_claims (organization_id, normalized_name, claimed_at)
+         VALUES ($1, LOWER($2), $3)
+         ON CONFLICT (organization_id, normalized_name) DO NOTHING
+         RETURNING normalized_name`,
+        [record.organizationId, setupName, record.createdAt],
+      )
+      if (claim.rowCount === 0) return { outcome: 'nameTaken' }
+
       await client.query(
         `INSERT INTO setups
          (id, organization_id, name, kind, default_project_id, created_by, created_at, updated_at)
@@ -223,7 +233,7 @@ export class PostgresProjectRepository implements ProjectRepository {
         [
           record.setupId,
           record.organizationId,
-          `Default / ${projectRow.name} / ${record.projectId}`,
+          setupName,
           record.projectId,
           record.createdBy,
           record.createdAt,

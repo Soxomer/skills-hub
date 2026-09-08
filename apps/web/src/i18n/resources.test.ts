@@ -12,6 +12,9 @@ describe('web translations', () => {
     const composer = resources.en.translation.switchFlow.composer
     expect(composer.itemMeta).toContain('{{kind}}')
     expect(composer.itemMeta).toContain('{{source}} v{{revision}}')
+    expect(composer.sourceLabel).toBe('Source')
+    expect(composer.localSource).toBe('Captured local content')
+    expect(composer.digestLabel).toBe('Digest')
     expect(composer.artifactKind).toEqual({
       skill: 'Standalone skill',
       pluginSkill: 'Plugin skill',

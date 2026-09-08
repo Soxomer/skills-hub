@@ -74,6 +74,7 @@ export const resources = {
           invalidScanResult: 'The runner returned a scan for a different project.',
           discoveryNotEligible: 'Conflicting or unsupported discoveries cannot be captured.',
           projectNotFound: 'This logical project no longer exists.',
+          defaultSetupNameTaken: 'The reserved Default Setup name is already in use.',
           defaultAlreadyCaptured: 'This project already has a different Default revision.',
           recovery:
             'The current project and scan progress are preserved. Resolve the issue and try again.',
@@ -181,6 +182,9 @@ export const resources = {
           empty: 'Capture at least one available skill before creating a reusable Setup.',
           itemsLabel: 'Available capabilities',
           itemMeta: '{{kind}} · {{tool}} · from {{source}} v{{revision}}',
+          sourceLabel: 'Source',
+          localSource: 'Captured local content',
+          digestLabel: 'Digest',
           artifactKind: {
             skill: 'Standalone skill',
             pluginSkill: 'Plugin skill',

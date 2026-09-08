@@ -1,20 +1,17 @@
 BEGIN;
 
-UPDATE setups
-SET name = setups.name || ' [duplicate · ' || setups.id || ']'
-FROM setups AS preferred
-WHERE setups.kind = 'custom'
-  AND preferred.organization_id = setups.organization_id
-  AND preferred.kind = 'custom'
-  AND LOWER(preferred.name) = LOWER(setups.name)
-  AND (
-    preferred.created_at < setups.created_at
-    OR (preferred.created_at = setups.created_at AND preferred.id < setups.id)
-  );
+CREATE TABLE IF NOT EXISTS setup_name_claims (
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  normalized_name TEXT NOT NULL,
+  claimed_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (organization_id, normalized_name)
+);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_setups_custom_name_ci
-ON setups (organization_id, LOWER(name))
-WHERE kind = 'custom';
+INSERT INTO setup_name_claims (organization_id, normalized_name, claimed_at)
+SELECT organization_id, LOWER(name), MIN(created_at)
+FROM setups
+GROUP BY organization_id, LOWER(name)
+ON CONFLICT (organization_id, normalized_name) DO NOTHING;
 
 INSERT INTO control_plane_schema_migrations (version, applied_at)
 VALUES (7, '2026-09-08T00:00:00Z')

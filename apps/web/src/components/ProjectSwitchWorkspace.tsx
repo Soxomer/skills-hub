@@ -560,11 +560,16 @@ function SetupComposer({
                       revision: item.sourceRevisionNumber,
                     })}
                   </small>
-                  <code title={item.contentDigest}>
-                    {item.contentDigest.length > 28
-                      ? `${item.contentDigest.slice(0, 28)}…`
-                      : item.contentDigest}
-                  </code>
+                  <span className="setup-composer-reference">
+                    <small>{t('switchFlow.composer.sourceLabel')}</small>
+                    <code title={item.portableSource ?? undefined}>
+                      {item.portableSource ?? t('switchFlow.composer.localSource')}
+                    </code>
+                  </span>
+                  <span className="setup-composer-reference">
+                    <small>{t('switchFlow.composer.digestLabel')}</small>
+                    <code title={item.contentDigest}>{item.contentDigest}</code>
+                  </span>
                 </span>
               </label>
             )

@@ -64,6 +64,7 @@ describe('control-plane migration', () => {
       'runner_devices',
       'runner_enrollments',
       'runner_jobs',
+      'setup_name_claims',
       'setup_revision_items',
       'setup_revisions',
       'setups',
@@ -90,8 +91,9 @@ describe('control-plane migration', () => {
     }
   })
 
-  it('enforces case-insensitive custom Setup names in PostgreSQL', () => {
-    const database = createMigratedDatabase()
+  it('seeds a case-insensitive custom Setup name claim', () => {
+    const database = newDb({ autoCreateForeignKeyIndices: true })
+    for (const migration of migrations.slice(0, 6)) database.public.none(migration)
     database.public.none(`
       INSERT INTO organizations (id, name, created_at)
       VALUES ('org_01', 'Example', '2026-09-08T00:00:00Z');
@@ -104,18 +106,15 @@ describe('control-plane migration', () => {
          '2026-09-08T00:00:00Z', '2026-09-08T00:00:00Z');
     `)
 
-    expect(() =>
-      database.public.none(`
-        INSERT INTO setups
-          (id, organization_id, name, kind, created_by, created_at, updated_at)
-        VALUES
-          ('setup_02', 'org_01', 'shared TOOLS', 'custom', 'user_01',
-           '2026-09-08T00:00:00Z', '2026-09-08T00:00:00Z');
-      `),
-    ).toThrow()
+    database.public.none(migrations[6]!)
+    expect(
+      database.public.many<{ organization_id: string; normalized_name: string }>(
+        `SELECT organization_id, normalized_name FROM setup_name_claims`,
+      ),
+    ).toEqual([{ organization_id: 'org_01', normalized_name: 'shared tools' }])
   })
 
-  it('reconciles legacy case-colliding Setup names without changing identities', () => {
+  it('claims legacy case-colliding names without changing names or identities', () => {
     const database = newDb({ autoCreateForeignKeyIndices: true })
     for (const migration of migrations.slice(0, 6)) database.public.none(migration)
     database.public.none(`
@@ -144,9 +143,8 @@ describe('control-plane migration', () => {
     )
     expect(setups).toEqual([
       { id: 'setup_a', name: 'Shared Tools' },
-      { id: 'setup_b', name: 'shared tools [duplicate · setup_b]' },
+      { id: 'setup_b', name: 'shared tools' },
     ])
-    expect(new Set(setups.map((setup) => setup.name.toLocaleLowerCase('en'))).size).toBe(2)
     expect(
       database.public.many<{ id: string; setup_id: string }>(
         `SELECT id, setup_id FROM setup_revisions ORDER BY id`,
@@ -155,13 +153,15 @@ describe('control-plane migration', () => {
       { id: 'revision_a', setup_id: 'setup_a' },
       { id: 'revision_b', setup_id: 'setup_b' },
     ])
+    expect(
+      database.public.many<{ normalized_name: string }>(
+        `SELECT normalized_name FROM setup_name_claims`,
+      ),
+    ).toEqual([{ normalized_name: 'shared tools' }])
     expect(() =>
       database.public.none(`
-        INSERT INTO setups
-          (id, organization_id, name, kind, created_by, created_at, updated_at)
-        VALUES
-          ('setup_c', 'org_01', 'SHARED TOOLS', 'custom', 'user_01',
-           '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z');
+        INSERT INTO setup_name_claims (organization_id, normalized_name, claimed_at)
+        VALUES ('org_01', LOWER('SHARED TOOLS'), '2026-09-08T00:00:01Z');
       `),
     ).toThrow()
   })

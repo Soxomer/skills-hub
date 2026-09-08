@@ -3,6 +3,7 @@ import type { SetupComposerItem } from '@ahm/contracts'
 import type {
   CreateSetupOutcome,
   CreateSetupRecord,
+  ReadSetupComposerOutcome,
   SetupRepository,
 } from './setups.js'
 
@@ -42,11 +43,23 @@ export class InMemorySetupRepository implements SetupRepository {
     return this.memberships.get(`${organizationId}:${userId}`) ?? null
   }
 
-  async listComposerItems(organizationId: string): Promise<SetupComposerItem[]> {
-    return structuredClone(this.items.get(organizationId) ?? [])
+  async readComposer(
+    organizationId: string,
+    userId: string,
+  ): Promise<ReadSetupComposerOutcome> {
+    if (!this.memberships.has(`${organizationId}:${userId}`)) {
+      return { outcome: 'accessDenied' }
+    }
+    return {
+      outcome: 'available',
+      items: structuredClone(this.items.get(organizationId) ?? []),
+    }
   }
 
   async createSetup(record: CreateSetupRecord): Promise<CreateSetupOutcome> {
+    const role = this.memberships.get(`${record.organizationId}:${record.createdBy}`)
+    if (!role) return { outcome: 'accessDenied' }
+    if (role === 'viewer') return { outcome: 'mutationForbidden' }
     const names = this.names.get(record.organizationId) ?? new Set<string>()
     const normalizedName = record.name.toLocaleLowerCase('en')
     if (names.has(normalizedName)) return { outcome: 'nameTaken' }

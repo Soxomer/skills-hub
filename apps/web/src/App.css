@@ -1055,12 +1055,24 @@ select:focus-visible {
 }
 
 .setup-composer-item code {
+  min-width: 0;
   overflow: hidden;
   color: var(--text-secondary);
   font-family: var(--mono);
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.setup-composer-reference {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.setup-composer-reference small {
+  flex: 0 0 auto;
 }
 
 .setup-composer-error {
