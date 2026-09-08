@@ -9,7 +9,7 @@ import {
   RotateCcw,
   ShieldCheck,
 } from 'lucide-react'
-import { memo, useMemo } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { createBrowserClient } from './api'
@@ -17,6 +17,7 @@ import './App.css'
 import { CommandBlock } from './components/CommandBlock'
 import { ConnectionBadge } from './components/ConnectionBadge'
 import { ProjectScanWorkspace } from './components/ProjectScanWorkspace'
+import { SetupLibrary } from './components/SetupLibrary'
 import { connectionDisplayState } from './runner-status'
 import { useRunnerConnection } from './useRunnerConnection'
 
@@ -32,6 +33,7 @@ export const App = memo(function App() {
   const { t } = useTranslation()
   const client = useMemo(() => createBrowserClient(), [])
   const connection = useRunnerConnection(client)
+  const [page, setPage] = useState<'projects' | 'setups'>('projects')
   const effectiveStatus =
     connection.status ??
     (connection.enrollment
@@ -55,10 +57,16 @@ export const App = memo(function App() {
             <small>{t('brand.eyebrow')}</small>
           </span>
         </a>
-        <span className="topbar-label">{t('page.controlPlane')}</span>
+        <nav className="primary-nav" aria-label={t('library.navigation')}>
+          {(['projects', 'setups'] as const).map((area) => (
+            <button key={area} type="button" aria-current={page === area ? 'page' : undefined}
+              onClick={() => setPage(area)}>{t(`library.${area}`)}</button>
+          ))}
+        </nav>
       </header>
 
-      <main id="main-content" className="workspace">
+      <main id="main-content" className="workspace" data-page={page}>
+        {page === 'setups' ? <SetupLibrary client={client} onProjects={() => setPage('projects')} /> : <>
         <div className="page-heading">
           <div>
             <p className="eyebrow">{t('brand.eyebrow')}</p>
@@ -202,6 +210,7 @@ export const App = memo(function App() {
             />
           </div>
         )}
+        </>}
       </main>
     </div>
   )

@@ -16,13 +16,13 @@ The schema simplification was subsequently completed in `2796c04`. The failing t
 | [OMA-120](https://linear.app/omar-os/issue/OMA-120) | Backlog: assignment ordering across multiple checkouts. |
 | [OMA-121](https://linear.app/omar-os/issue/OMA-121) | Backlog: explicit, selection-aware artifact publication. |
 | [OMA-122](https://linear.app/omar-os/issue/OMA-122) | Backlog: real PostgreSQL and cross-platform connected recovery verification. |
-| [OMA-123](https://linear.app/omar-os/issue/OMA-123) | Backlog under OMA-35: independent Setups browsing and immutable revision editing. |
+| [OMA-123](https://linear.app/omar-os/issue/OMA-123) | Implemented: independent Setups page, stored-content inspection, history/comparison, clone and immutable selection editing. See `docs/OMA-123-ACCEPTANCE.md`. |
 
 Existing OMA-31, OMA-33, and OMA-34 retain catalog provenance, static preflight, and evaluation work. No duplicate cards were created for those areas or hosted authentication (OMA-114).
 
 Digest identity changed deliberately: recreate disposable POC snapshots/plans with fresh state; see `docs/architecture/ARTIFACT-IDENTITY.md`. No user data is automatically removed. Authorization added here covers runner management; the POC still uses development identity headers and is not ready for shared hosting.
 
-Final implementation verification: `npm run check` passed on Windows, including 111 TypeScript tests, 89 Rust tests, all production builds, lint, boundary/version checks, rustfmt, and Clippy. This includes shared digest fixtures, permanent/transient artifact failure tests, authorization tests, and 12 browser interaction tests. Real PostgreSQL concurrency, connected browser/runner acceptance, and macOS/Linux execution remain explicit OMA-122/OMA-30 follow-ups.
+Reliability-fix verification: `npm run check` passed on Windows, including 111 TypeScript tests, 89 Rust tests, all production builds, lint, boundary/version checks, rustfmt, and Clippy. The later OMA-123 gate passed with 125 TypeScript tests and 89 Rust tests; its opt-in real PostgreSQL publication-concurrency test also passed separately. Broader PostgreSQL recovery/concurrency, connected browser/runner acceptance, and macOS/Linux execution remain explicit OMA-122/OMA-30 follow-ups.
 
 ## Scope and evidence
 

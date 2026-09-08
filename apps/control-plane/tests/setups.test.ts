@@ -15,6 +15,7 @@ import { PostgresSetupRepository } from '../src/setups-pg.js'
 import { SetupService } from '../src/setups.js'
 import { PostgresSwitchingRepository } from '../src/switching-pg.js'
 import { SwitchingService } from '../src/switching.js'
+import { PostgresProjectRepository } from '../src/projects-pg.js'
 
 const actor = { organizationId: 'org_01', userId: 'user_01' }
 const actorHeaders = {
@@ -315,5 +316,100 @@ describe('Setup service validation and memory persistence', () => {
     expect(results.find((result) => result.status === 'rejected')).toMatchObject({
       reason: { statusCode: 409, code: 'setupNameTaken' },
     })
+  })
+})
+
+describe('Setup library and revision publication', () => {
+  it('lists independently of runners and preserves exact project pins after publishing', async () => {
+    const { app, pool } = await postgresHarness()
+    const created = await app.inject({ method: 'POST', url: '/api/v1/setups', headers: actorHeaders,
+      payload: { name: 'Shared', items: [selection()] } })
+    const initial = created.json()
+    await pool.query(`UPDATE project_assignments SET setup_revision_id = $1 WHERE project_id = 'project_a'`, [initial.setupRevisionId])
+    await pool.query(`INSERT INTO project_assignments (organization_id, project_id, setup_revision_id, assigned_by, assigned_at)
+      VALUES ('org_01', 'project_b', $1, 'user_01', '2026-09-08T12:00:00Z')`, [initial.setupRevisionId])
+    const published = await app.inject({ method: 'POST', url: `/api/v1/setups/${initial.setupId}/revisions`, headers: actorHeaders,
+      payload: { expectedRevisionNumber: 1, items: [selection()] } })
+    expect(published.statusCode).toBe(201)
+    expect(published.json()).toMatchObject({ setupId: initial.setupId, revisionNumber: 2 })
+    const detail = await app.inject({ method: 'GET', url: `/api/v1/setups/${initial.setupId}`, headers: actorHeaders })
+    expect(detail.json()).toMatchObject({ initialSetupRevisionId: initial.setupRevisionId, defaultProjectId: null,
+      revisions: [{ revisionNumber: 2 }, { revisionNumber: 1, setupRevisionId: initial.setupRevisionId }],
+      projects: [{ projectId: 'project_a', setupRevisionId: initial.setupRevisionId }, { projectId: 'project_b', setupRevisionId: initial.setupRevisionId }] })
+    const list = await app.inject({ method: 'GET', url: '/api/v1/setups', headers: actorHeaders })
+    expect(list.json().setups).toEqual(expect.arrayContaining([expect.objectContaining({ setupId: initial.setupId,
+      projectCount: 2, latestRevision: expect.objectContaining({ revisionNumber: 2 }) })]))
+    expect(list.json().setups[0].latestRevision).not.toHaveProperty('items')
+    const projects = await new PostgresProjectRepository(pool).listProjects(actor.organizationId)
+    expect(projects.find((project) => project.projectId === 'project_a')?.defaultRevision?.setupRevisionId).toBe('revision_default_a')
+    await app.close()
+    await pool.end()
+  })
+
+  it('publishes Default revisions while retaining the original onboarding snapshot and assignment', async () => {
+    const { app, pool } = await postgresHarness()
+    const published = await app.inject({ method: 'POST', url: '/api/v1/setups/setup_default_a/revisions', headers: actorHeaders,
+      payload: { expectedRevisionNumber: 1, items: [selection()] } })
+    expect(published.statusCode).toBe(201)
+    expect(published.json()).toMatchObject({ kind: 'default', revisionNumber: 2 })
+    const detail = await app.inject({ method: 'GET', url: '/api/v1/setups/setup_default_a', headers: actorHeaders })
+    expect(detail.json()).toMatchObject({ defaultProjectId: 'project_a', initialSetupRevisionId: 'revision_default_a',
+      projects: [{ projectId: 'project_a', setupRevisionId: 'revision_default_a' }] })
+    expect(detail.json().revisions.map((revision: { revisionNumber: number }) => revision.revisionNumber)).toEqual([2, 1])
+    const picker = await app.inject({ method: 'GET', url: '/api/v1/projects/project_a/setup-revisions', headers: actorHeaders })
+    expect(picker.json().revisions.map((revision: { setupRevisionId: string }) => revision.setupRevisionId))
+      .toEqual(expect.arrayContaining(['revision_default_a', published.json().setupRevisionId]))
+    expect((await new PostgresProjectRepository(pool).listProjects(actor.organizationId))[0]?.defaultRevision)
+      .toMatchObject({ setupRevisionId: 'revision_default_a', revisionNumber: 1 })
+    await app.close()
+    await pool.end()
+  })
+
+  it('rejects stale concurrent publishers, invalid selections, and foreign references without partial revisions', async () => {
+    const { app, pool } = await postgresHarness()
+    const url = '/api/v1/setups/setup_default_a/revisions'
+    const outcomes = await Promise.all([1, 2].map(() => app.inject({ method: 'POST', url, headers: actorHeaders,
+      payload: { expectedRevisionNumber: 1, items: [selection()] } })))
+    expect(outcomes.map((response) => response.statusCode).sort()).toEqual([201, 409])
+    expect(outcomes.find((response) => response.statusCode === 409)?.json()).toMatchObject({ code: 'setupRevisionConflict' })
+    for (const [payload, code] of [
+      [{ expectedRevisionNumber: 1, items: [selection()] }, 'setupRevisionConflict'],
+      [{ expectedRevisionNumber: 2, items: [selection({ contentDigest: 'sha256:changed' })] }, 'setupItemUnavailable'],
+      [{ expectedRevisionNumber: 2, items: [selection({ sourceSetupRevisionId: 'foreign-revision' })] }, 'setupItemUnavailable'],
+      [{ expectedRevisionNumber: 2, items: [selection(), selection()] }, 'invalidSetupItems'],
+      [{ expectedRevisionNumber: 2, items: [] }, 'invalidSetupItems'],
+      [{ expectedRevisionNumber: 1.5, items: [selection()] }, 'invalidSetupRevision'],
+    ] as const) {
+      const result = await app.inject({ method: 'POST', url, headers: actorHeaders, payload })
+      expect(result.json()).toMatchObject({ code })
+    }
+    expect((await pool.query(`SELECT id FROM setup_revisions WHERE setup_id = 'setup_default_a'`)).rowCount).toBe(2)
+    expect((await pool.query(`SELECT id FROM audit_events WHERE event_kind = 'setupRevisionCreated'`)).rowCount).toBe(1)
+    await app.close()
+    await pool.end()
+  })
+
+  it('scopes library detail, publication, and artifact inspection to the organization and exact revision', async () => {
+    const { app, pool } = await postgresHarness()
+    const bundle = { contentDigest: 'sha256:pdf', entries: [{ path: 'SKILL.md', kind: 'file', contentBase64: Buffer.from('PDF instructions').toString('base64') }] }
+    await pool.query(`INSERT INTO runner_devices (id, organization_id, label, credential_hash, status, enrolled_at)
+      VALUES ('device', 'org_01', 'Runner', 'hash', 'active', '2026-09-08T12:00:00Z')`)
+    await pool.query(`INSERT INTO artifact_bundles (organization_id, content_digest, bundle, uploaded_by_device_id, created_at)
+      VALUES ('org_01', 'sha256:pdf', $1::jsonb, 'device', '2026-09-08T12:00:00Z')`, [JSON.stringify(bundle)])
+    const artifactUrl = '/api/v1/setups/setup_default_a/revisions/revision_default_a/artifacts/sha256%3Apdf'
+    const content = await app.inject({ method: 'GET', url: artifactUrl, headers: actorHeaders })
+    expect(content.statusCode).toBe(200)
+    expect(content.json()).toEqual(bundle)
+    for (const url of [artifactUrl.replace('revision_default_a', 'missing'), artifactUrl.replace('sha256%3Apdf', 'sha256%3Amissing')]) {
+      expect((await app.inject({ method: 'GET', url, headers: actorHeaders })).statusCode).toBe(404)
+    }
+    const foreign = { ...actorHeaders, 'x-ahm-organization-id': 'other' }
+    expect((await app.inject({ method: 'GET', url: '/api/v1/setups', headers: foreign })).json()).toEqual({ setups: [] })
+    expect((await app.inject({ method: 'GET', url: '/api/v1/setups/setup_default_a', headers: foreign })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: artifactUrl, headers: foreign })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'POST', url: '/api/v1/setups/setup_default_a/revisions', headers: foreign,
+      payload: { expectedRevisionNumber: 1, items: [selection()] } })).statusCode).toBe(404)
+    await app.close()
+    await pool.end()
   })
 })

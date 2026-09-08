@@ -1,4 +1,9 @@
 import type {
+  ArtifactBundle,
+  SetupLibraryResponse,
+  SetupDetail,
+  PublishSetupRevisionRequest,
+  SetupRevisionSummary,
   ApplyReviewedPlanRequest,
   ApplyReviewedPlanResponse,
   CaptureDefaultRevisionRequest,
@@ -111,6 +116,22 @@ export class ControlPlaneClient {
 
   setupComposer(): Promise<SetupComposerResponse> {
     return this.send('/api/v1/setups/composer')
+  }
+
+  setups(): Promise<SetupLibraryResponse> {
+    return this.send('/api/v1/setups')
+  }
+
+  setup(setupId: string): Promise<SetupDetail> {
+    return this.send(`/api/v1/setups/${encodeURIComponent(setupId)}`)
+  }
+
+  publishSetupRevision(setupId: string, request: PublishSetupRevisionRequest): Promise<SetupRevisionSummary> {
+    return this.send(`/api/v1/setups/${encodeURIComponent(setupId)}/revisions`, this.jsonRequest('POST', request))
+  }
+
+  setupArtifact(setupId: string, revisionId: string, digest: string): Promise<ArtifactBundle> {
+    return this.send(`/api/v1/setups/${encodeURIComponent(setupId)}/revisions/${encodeURIComponent(revisionId)}/artifacts/${encodeURIComponent(digest)}`)
   }
 
   createSetup(request: CreateSetupRequest): Promise<CreatedSetupRevision> {

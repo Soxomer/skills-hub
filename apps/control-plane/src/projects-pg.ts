@@ -12,12 +12,12 @@ import type {
 } from './projects.js'
 
 interface ProjectRow extends QueryResultRow {
-  id: string
+  project_id: string
   organization_id: string
   name: string
   repository_identity: string | null
-  created_at: Date | string
-  updated_at: Date | string
+  project_created_at: Date | string
+  project_updated_at: Date | string
   setup_id: string | null
   setup_revision_id: string | null
   revision_number: number | string | null
@@ -74,11 +74,11 @@ function defaultRevision(row: ProjectRow): DefaultRevisionSummary | null {
 function projectFromRow(row: ProjectRow): StoredProject {
   return {
     organizationId: row.organization_id,
-    projectId: row.id,
+    projectId: row.project_id,
     name: row.name,
     repositoryIdentity: row.repository_identity,
-    createdAt: iso(row.created_at),
-    updatedAt: iso(row.updated_at),
+    createdAt: iso(row.project_created_at),
+    updatedAt: iso(row.project_updated_at),
     defaultRevision: defaultRevision(row),
   }
 }
@@ -129,22 +129,17 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 const PROJECT_SELECT = `
-  SELECT p.id, p.organization_id, p.name, p.repository_identity,
-         p.created_at, p.updated_at,
+  SELECT p.id AS project_id, p.organization_id, p.name, p.repository_identity,
+         p.created_at AS project_created_at, p.updated_at AS project_updated_at,
          s.id AS setup_id, sr.id AS setup_revision_id,
          sr.revision_number, sr.source_scan_job_id,
          sr.created_at AS revision_created_at,
-         COUNT(sri.artifact_id) AS item_count
+         0 AS item_count
   FROM projects p
-  LEFT JOIN project_assignments pa
-    ON pa.organization_id = p.organization_id AND pa.project_id = p.id
-  LEFT JOIN setup_revisions sr
-    ON sr.organization_id = pa.organization_id AND sr.id = pa.setup_revision_id
   LEFT JOIN setups s
-    ON s.organization_id = sr.organization_id AND s.id = sr.setup_id
-      AND s.kind = 'default' AND s.default_project_id = p.id
-  LEFT JOIN setup_revision_items sri
-    ON sri.organization_id = sr.organization_id AND sri.setup_revision_id = sr.id`
+    ON s.organization_id = p.organization_id AND s.kind = 'default' AND s.default_project_id = p.id
+  LEFT JOIN setup_revisions sr
+    ON sr.organization_id = s.organization_id AND sr.setup_id = s.id AND sr.revision_number = 1`
 
 export class PostgresProjectRepository implements ProjectRepository {
   constructor(private readonly pool: Pool) {}
@@ -172,16 +167,16 @@ export class PostgresProjectRepository implements ProjectRepository {
   }
 
   async listProjects(organizationId: string): Promise<StoredProject[]> {
-    const result = await this.pool.query<ProjectRow>(
+    const [result, counts] = await Promise.all([this.pool.query<ProjectRow>(
       `${PROJECT_SELECT}
        WHERE p.organization_id = $1
-       GROUP BY p.id, p.organization_id, p.name, p.repository_identity,
-                p.created_at, p.updated_at, s.id, sr.id, sr.revision_number,
-                sr.source_scan_job_id, sr.created_at
        ORDER BY p.created_at, p.id`,
       [organizationId],
-    )
-    return result.rows.map(projectFromRow)
+    ), this.pool.query<{ setup_revision_id: string; item_count: string | number }>(
+      `SELECT setup_revision_id, COUNT(artifact_id) AS item_count FROM setup_revision_items WHERE organization_id = $1 GROUP BY setup_revision_id`, [organizationId],
+    )])
+    const itemCounts = new Map(counts.rows.map((row) => [row.setup_revision_id, Number(row.item_count)]))
+    return result.rows.map((row) => projectFromRow({ ...row, item_count: itemCounts.get(row.setup_revision_id ?? '') ?? 0 }))
   }
 
   async scanJob(
