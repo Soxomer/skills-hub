@@ -4,6 +4,7 @@ import type {
   ApplyReviewedPlanRequest,
   CaptureDefaultRevisionRequest,
   CreateProjectRequest,
+  CreateSetupRequest,
   RequestSetupPlanRequest,
   RollbackOperationRequest,
 } from '@ahm/contracts'
@@ -16,6 +17,7 @@ import {
   type RunnerTransportService,
 } from './runner-transport.js'
 import { SwitchingError, type SwitchingService } from './switching.js'
+import { SetupServiceError, type SetupService } from './setups.js'
 
 function requiredHeader(request: FastifyRequest, name: string): string {
   const value = request.headers[name]
@@ -44,6 +46,7 @@ export function createControlPlaneApp(
   transport: RunnerTransportService,
   projects: ProjectService,
   switching?: SwitchingService,
+  setups?: SetupService,
 ): FastifyInstance {
   const app = Fastify({ logger: false })
 
@@ -62,6 +65,10 @@ export function createControlPlaneApp(
         error: error.message,
         ...error.details,
       })
+      return
+    }
+    if (error instanceof SetupServiceError) {
+      void reply.code(error.statusCode).send({ code: error.code, error: error.message })
       return
     }
     if (error instanceof Error && 'validation' in error && error.validation) {
@@ -91,6 +98,15 @@ export function createControlPlaneApp(
     )
     return reply.code(result.created ? 201 : 200).send(result)
   })
+
+  if (setups) {
+    app.get('/api/v1/setups/composer', async (request) => setups.composer(actor(request)))
+
+    app.post<{ Body: CreateSetupRequest }>('/api/v1/setups', async (request, reply) => {
+      const revision = await setups.createSetup(actor(request), request.body)
+      return reply.code(201).send(revision)
+    })
+  }
 
   if (switching) {
     app.get<{ Params: { projectId: string } }>(

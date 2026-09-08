@@ -956,6 +956,108 @@ select:focus-visible {
   margin-left: auto;
 }
 
+.setup-composer-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.setup-composer-trigger strong,
+.setup-composer-heading strong {
+  font-size: 13px;
+}
+
+.setup-composer-trigger p,
+.setup-composer-heading p {
+  max-width: 68ch;
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.setup-composer {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+
+.setup-composer-heading,
+.setup-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.setup-composer .field {
+  max-width: 460px;
+  margin: 0;
+}
+
+.setup-composer-items {
+  display: grid;
+  max-height: 280px;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 0;
+}
+
+.setup-composer-items legend {
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.setup-composer-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.setup-composer-item:hover {
+  border-color: var(--border-strong);
+}
+
+.setup-composer-item:has(input:focus-visible) {
+  border-color: var(--accent);
+}
+
+.setup-composer-item > span {
+  display: grid;
+  gap: 2px;
+}
+
+.setup-composer-item strong {
+  font-size: 12px;
+}
+
+.setup-composer-item small,
+.setup-composer-actions > span {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.setup-composer-error {
+  margin: 0;
+}
+
 .switch-notice {
   margin-bottom: 0;
 }
@@ -1464,6 +1566,9 @@ select:focus-visible {
 
   .review-toolbar,
   .capture-bar,
+  .setup-composer-trigger,
+  .setup-composer-heading,
+  .setup-composer-actions,
   .setup-actions,
   .approval-bar {
     align-items: flex-start;
@@ -1498,6 +1603,11 @@ select:focus-visible {
   }
 
   .capture-bar .primary-button {
+    width: 100%;
+  }
+
+  .setup-composer-trigger .secondary-button,
+  .setup-composer-actions .primary-button {
     width: 100%;
   }
 

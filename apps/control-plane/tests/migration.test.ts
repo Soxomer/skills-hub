@@ -22,6 +22,9 @@ const fifthMigrationPath = fileURLToPath(
 const sixthMigrationPath = fileURLToPath(
   new URL('../migrations/0006_runner_job_setup_revision.sql', import.meta.url),
 )
+const seventhMigrationPath = fileURLToPath(
+  new URL('../migrations/0007_custom_setup_name_uniqueness.sql', import.meta.url),
+)
 const migrations = [
   firstMigrationPath,
   secondMigrationPath,
@@ -29,6 +32,7 @@ const migrations = [
   fourthMigrationPath,
   fifthMigrationPath,
   sixthMigrationPath,
+  seventhMigrationPath,
 ].map((path) => readFileSync(path, 'utf8'))
 
 function createMigratedDatabase() {
@@ -82,13 +86,38 @@ describe('control-plane migration', () => {
         database.public.one<{ version: number }>(
           'SELECT MAX(version) AS version FROM control_plane_schema_migrations',
         ).version,
-      ).toBe(6)
+      ).toBe(7)
     }
+  })
+
+  it('enforces case-insensitive custom Setup names in PostgreSQL', () => {
+    const database = createMigratedDatabase()
+    database.public.none(`
+      INSERT INTO organizations (id, name, created_at)
+      VALUES ('org_01', 'Example', '2026-09-08T00:00:00Z');
+      INSERT INTO users (id, display_name, created_at)
+      VALUES ('user_01', 'Owner', '2026-09-08T00:00:00Z');
+      INSERT INTO setups
+        (id, organization_id, name, kind, created_by, created_at, updated_at)
+      VALUES
+        ('setup_01', 'org_01', 'Shared tools', 'custom', 'user_01',
+         '2026-09-08T00:00:00Z', '2026-09-08T00:00:00Z');
+    `)
+
+    expect(() =>
+      database.public.none(`
+        INSERT INTO setups
+          (id, organization_id, name, kind, created_by, created_at, updated_at)
+        VALUES
+          ('setup_02', 'org_01', 'shared TOOLS', 'custom', 'user_01',
+           '2026-09-08T00:00:00Z', '2026-09-08T00:00:00Z');
+      `),
+    ).toThrow()
   })
 
   it('backfills the Setup revision used by existing plan jobs', () => {
     const database = newDb({ autoCreateForeignKeyIndices: true })
-    for (const migration of migrations.slice(0, -1)) database.public.none(migration)
+    for (const migration of migrations.slice(0, 5)) database.public.none(migration)
     database.public.none(`
       INSERT INTO organizations (id, name, created_at)
       VALUES ('org_01', 'Example', '2026-09-05T00:00:00Z');
@@ -109,7 +138,7 @@ describe('control-plane migration', () => {
          '2026-09-05T00:00:00Z', '2026-09-05T00:05:00Z');
     `)
 
-    database.public.none(migrations.at(-1)!)
+    database.public.none(migrations[5]!)
 
     expect(
       database.public.one<{ setup_revision_id: string }>(

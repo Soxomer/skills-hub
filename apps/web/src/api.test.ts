@@ -139,6 +139,85 @@ describe('ControlPlaneClient', () => {
     )
   })
 
+  it('loads composer items and publishes an exact Setup selection', async () => {
+    const composer = {
+      items: [
+        {
+          sourceSetupRevisionId: 'revision_default',
+          sourceSetupName: 'Default / Project',
+          artifactId: 'artifact_pdf',
+          artifactKind: 'skill' as const,
+          portableSource: 'github:openai/skills/pdf@v1',
+          contentDigest: 'sha256:pdf',
+          toolId: 'codex',
+          targetName: 'pdf',
+        },
+      ],
+    }
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(composer), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            setupId: 'setup_01',
+            setupRevisionId: 'revision_01',
+            name: 'Team essentials',
+            kind: 'custom',
+            revisionNumber: 1,
+            itemCount: 1,
+            createdAt: '2026-09-08T12:00:00.000Z',
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+    const api = client(request)
+
+    await expect(api.setupComposer()).resolves.toEqual(composer)
+    await api.createSetup({
+      name: 'Team essentials',
+      items: [
+        {
+          sourceSetupRevisionId: 'revision_default',
+          artifactId: 'artifact_pdf',
+          contentDigest: 'sha256:pdf',
+          toolId: 'codex',
+          targetName: 'pdf',
+        },
+      ],
+    })
+
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      'https://hub.example.test/api/v1/setups/composer',
+      expect.objectContaining({ headers: expect.objectContaining({ accept: 'application/json' }) }),
+    )
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      'https://hub.example.test/api/v1/setups',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Team essentials',
+          items: [
+            {
+              sourceSetupRevisionId: 'revision_default',
+              artifactId: 'artifact_pdf',
+              contentDigest: 'sha256:pdf',
+              toolId: 'codex',
+              targetName: 'pdf',
+            },
+          ],
+        }),
+      }),
+    )
+  })
+
   it('cancels a job and accepts an empty response', async () => {
     const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }))
 

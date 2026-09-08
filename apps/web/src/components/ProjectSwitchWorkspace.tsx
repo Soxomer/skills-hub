@@ -5,6 +5,7 @@ import type {
   ProjectInstanceOperationsResponse,
   ProjectOperationSummary,
   ProjectSetupStateResponse,
+  SetupComposerItem,
 } from '@ahm/contracts'
 import {
   Activity,
@@ -25,10 +26,10 @@ import {
   Sparkles,
   Trash2,
 } from 'lucide-react'
-import { memo } from 'react'
+import { memo, useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import type { ControlPlaneClient } from '../api'
+import { ControlPlaneApiError, type ControlPlaneClient } from '../api'
 import { actionablePlanCount } from '../switch-state'
 import { useSetupSwitch } from '../useSetupSwitch'
 
@@ -288,6 +289,15 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
             onChange={workflow.selectRevision}
           />
 
+          <SetupComposer
+            client={client}
+            disabled={isWorking}
+            onCreated={async (setupRevisionId) => {
+              await workflow.refreshState()
+              workflow.selectRevision(setupRevisionId)
+            }}
+          />
+
           <div className="setup-actions">
             <div>
               <strong>{workflow.selectedRevision?.name}</strong>
@@ -382,6 +392,204 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
     </section>
   )
 })
+
+function composerItemKey(item: SetupComposerItem): string {
+  return [
+    item.sourceSetupRevisionId,
+    item.artifactId,
+    item.toolId,
+    item.targetName,
+  ].join('\u0000')
+}
+
+function SetupComposer({
+  client,
+  disabled,
+  onCreated,
+}: {
+  client: ControlPlaneClient
+  disabled: boolean
+  onCreated: (setupRevisionId: string) => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [items, setItems] = useState<SetupComposerItem[]>([])
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+  const [loading, setLoading] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    setLoading(true)
+    setError(null)
+    void client
+      .setupComposer()
+      .then((response) => {
+        if (active) setItems(response.items)
+      })
+      .catch((nextError: unknown) => {
+        if (active) {
+          setError(
+            nextError instanceof ControlPlaneApiError
+              ? (nextError.code ?? 'composer')
+              : 'composer',
+          )
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [client, open])
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const selectedItems = items.filter((item) => selectedKeys.has(composerItemKey(item)))
+    setCreating(true)
+    setError(null)
+    try {
+      const created = await client.createSetup({
+        name,
+        items: selectedItems.map((item) => ({
+          sourceSetupRevisionId: item.sourceSetupRevisionId,
+          artifactId: item.artifactId,
+          contentDigest: item.contentDigest,
+          toolId: item.toolId,
+          targetName: item.targetName,
+        })),
+      })
+      await onCreated(created.setupRevisionId)
+      setName('')
+      setSelectedKeys(new Set())
+      setOpen(false)
+    } catch (nextError) {
+      setError(
+        nextError instanceof ControlPlaneApiError ? (nextError.code ?? 'create') : 'create',
+      )
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="setup-composer-trigger">
+        <div>
+          <strong>{t('switchFlow.composer.title')}</strong>
+          <p>{t('switchFlow.composer.description')}</p>
+        </div>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={disabled}
+          onClick={() => setOpen(true)}
+        >
+          <Plus aria-hidden="true" size={15} />
+          {t('switchFlow.composer.open')}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <form className="setup-composer" onSubmit={(event) => void submit(event)}>
+      <div className="setup-composer-heading">
+        <div>
+          <strong>{t('switchFlow.composer.title')}</strong>
+          <p>{t('switchFlow.composer.help')}</p>
+        </div>
+        <button
+          className="text-button"
+          type="button"
+          disabled={creating}
+          onClick={() => setOpen(false)}
+        >
+          {t('switchFlow.composer.close')}
+        </button>
+      </div>
+      <label className="field">
+        <span>{t('switchFlow.composer.nameLabel')}</span>
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder={t('switchFlow.composer.namePlaceholder')}
+          autoComplete="off"
+          maxLength={120}
+          required
+        />
+      </label>
+      {loading ? (
+        <div className="inline-loading" aria-live="polite">
+          <LoaderCircle className="spin" aria-hidden="true" size={17} />
+          {t('switchFlow.composer.loading')}
+        </div>
+      ) : items.length === 0 ? (
+        <p className="empty-state">{t('switchFlow.composer.empty')}</p>
+      ) : (
+        <fieldset className="setup-composer-items">
+          <legend>{t('switchFlow.composer.itemsLabel')}</legend>
+          {items.map((item) => {
+            const key = composerItemKey(item)
+            return (
+              <label key={key} className="setup-composer-item">
+                <input
+                  type="checkbox"
+                  checked={selectedKeys.has(key)}
+                  disabled={creating}
+                  onChange={(event) => {
+                    setSelectedKeys((current) => {
+                      const next = new Set(current)
+                      if (event.target.checked) next.add(key)
+                      else next.delete(key)
+                      return next
+                    })
+                  }}
+                />
+                <span>
+                  <strong>{item.targetName}</strong>
+                  <small>
+                    {t('switchFlow.composer.itemMeta', {
+                      tool: item.toolId,
+                      source: item.sourceSetupName,
+                    })}
+                  </small>
+                </span>
+              </label>
+            )
+          })}
+        </fieldset>
+      )}
+      {error && (
+        <div className="notice notice--error setup-composer-error" role="alert">
+          <AlertTriangle aria-hidden="true" size={17} />
+          <strong>{t(`switchFlow.composer.errors.${error}`)}</strong>
+        </div>
+      )}
+      <div className="setup-composer-actions">
+        <span>
+          {t('switchFlow.composer.selected', { count: selectedKeys.size })}
+        </span>
+        <button
+          className="primary-button"
+          type="submit"
+          disabled={creating || !name.trim() || selectedKeys.size === 0}
+        >
+          {creating ? (
+            <LoaderCircle className="spin" aria-hidden="true" size={16} />
+          ) : (
+            <Plus aria-hidden="true" size={16} />
+          )}
+          {creating ? t('switchFlow.composer.creating') : t('switchFlow.composer.create')}
+        </button>
+      </div>
+    </form>
+  )
+}
 
 function revisionLabel(
   state: ProjectSetupStateResponse | null,

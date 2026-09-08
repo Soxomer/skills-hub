@@ -43,6 +43,7 @@ async function harness() {
     '0004_runner_delivery.sql',
     '0005_project_operation_singleflight.sql',
     '0006_runner_job_setup_revision.sql',
+    '0007_custom_setup_name_uniqueness.sql',
   ]) {
     const path = fileURLToPath(new URL(`../migrations/${migrationName}`, import.meta.url))
     database.public.none(readFileSync(path, 'utf8'))

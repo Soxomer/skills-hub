@@ -28,6 +28,7 @@ try {
     [4, '0004_runner_delivery.sql'],
     [5, '0005_project_operation_singleflight.sql'],
     [6, '0006_runner_job_setup_revision.sql'],
+    [7, '0007_custom_setup_name_uniqueness.sql'],
   ] as const) {
     if (applied.has(version)) continue
     const url = new URL(`../migrations/${name}`, import.meta.url)

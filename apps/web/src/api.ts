@@ -4,6 +4,8 @@ import type {
   CaptureDefaultRevisionRequest,
   CaptureDefaultRevisionResponse,
   CreateProjectRequest,
+  CreateSetupRequest,
+  CreatedSetupRevision,
   CreateRunnerEnrollmentResponse,
   ProjectListResponse,
   ProjectActiveOperation,
@@ -15,6 +17,7 @@ import type {
   RunnerEnrollmentStatus,
   RunnerJobStatusResponse,
   RunnerStatusResponse,
+  SetupComposerResponse,
 } from '@ahm/contracts'
 
 export interface RequestActor {
@@ -104,6 +107,14 @@ export class ControlPlaneClient {
       `/api/v1/projects/${encodeURIComponent(projectId)}/default-revisions`,
       this.jsonRequest('POST', request),
     )
+  }
+
+  setupComposer(): Promise<SetupComposerResponse> {
+    return this.send('/api/v1/setups/composer')
+  }
+
+  createSetup(request: CreateSetupRequest): Promise<CreatedSetupRevision> {
+    return this.send('/api/v1/setups', this.jsonRequest('POST', request))
   }
 
   setupRevisions(projectId: string): Promise<ProjectSetupStateResponse> {
