@@ -1,5 +1,17 @@
 BEGIN;
 
+UPDATE setups
+SET name = setups.name || ' [duplicate · ' || setups.id || ']'
+FROM setups AS preferred
+WHERE setups.kind = 'custom'
+  AND preferred.organization_id = setups.organization_id
+  AND preferred.kind = 'custom'
+  AND LOWER(preferred.name) = LOWER(setups.name)
+  AND (
+    preferred.created_at < setups.created_at
+    OR (preferred.created_at = setups.created_at AND preferred.id < setups.id)
+  );
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_setups_custom_name_ci
 ON setups (organization_id, LOWER(name))
 WHERE kind = 'custom';

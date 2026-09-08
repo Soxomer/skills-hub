@@ -10,6 +10,7 @@ import type {
 interface ComposerItemRow extends QueryResultRow {
   source_setup_revision_id: string
   source_setup_name: string
+  source_revision_number: number | string
   artifact_id: string
   artifact_kind: DiscoveryKind
   artifact_reference: { portableSource?: unknown; contentDigest?: unknown } | string
@@ -28,6 +29,7 @@ function composerItem(row: ComposerItemRow): SetupComposerItem {
   return {
     sourceSetupRevisionId: row.source_setup_revision_id,
     sourceSetupName: row.source_setup_name,
+    sourceRevisionNumber: Number(row.source_revision_number),
     artifactId: row.artifact_id,
     artifactKind: row.artifact_kind,
     portableSource:
@@ -77,6 +79,7 @@ function isUniqueViolation(error: unknown): boolean {
 
 const COMPOSER_ITEMS = `
   SELECT sr.id AS source_setup_revision_id, s.name AS source_setup_name,
+         sr.revision_number AS source_revision_number,
          sri.artifact_id, sri.artifact_kind, sri.artifact_reference,
          sri.tool_id, sri.target_name
   FROM setup_revision_items sri
@@ -87,6 +90,20 @@ const COMPOSER_ITEMS = `
 
 export class PostgresSetupRepository implements SetupRepository {
   constructor(private readonly pool: Pool) {}
+
+  async membershipRole(
+    organizationId: string,
+    userId: string,
+  ): Promise<'owner' | 'admin' | 'member' | 'viewer' | null> {
+    const result = await this.pool.query<
+      QueryResultRow & { role: 'owner' | 'admin' | 'member' | 'viewer' }
+    >(
+      `SELECT role FROM organization_memberships
+       WHERE organization_id = $1 AND user_id = $2`,
+      [organizationId, userId],
+    )
+    return result.rows[0]?.role ?? null
+  }
 
   async listComposerItems(organizationId: string): Promise<SetupComposerItem[]> {
     const result = await this.pool.query<ComposerItemRow>(

@@ -4,7 +4,7 @@ This document records the repeatable, connected acceptance exercise for Setup sw
 
 ## Repeatable connected flow
 
-1. Start an isolated PostgreSQL database and run the control plane with its `DATABASE_URL` pointed at that database.
+1. Start an isolated PostgreSQL database, seed the prototype actor's organization, user, and membership, and run the control plane with its `DATABASE_URL` pointed at that database.
 2. Start `npm run dev:web` and a local `ahm worker` with disposable runner SQLite state.
 3. Enroll one runner, then open a second browser tab. Confirm both tabs show the same device and the same active operation.
 4. Create two projects with distinct initial skills and capture one Default revision for each. Confirm a project's revision picker includes only its own Default plus organization custom Setups.

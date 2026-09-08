@@ -1054,6 +1054,15 @@ select:focus-visible {
   font-size: 11px;
 }
 
+.setup-composer-item code {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .setup-composer-error {
   margin: 0;
 }

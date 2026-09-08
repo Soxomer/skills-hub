@@ -27,6 +27,10 @@ export type CreateSetupOutcome =
   | { outcome: 'itemUnavailable' }
 
 export interface SetupRepository {
+  membershipRole(
+    organizationId: string,
+    userId: string,
+  ): Promise<'owner' | 'admin' | 'member' | 'viewer' | null>
   listComposerItems(organizationId: string): Promise<SetupComposerItem[]>
   createSetup(record: CreateSetupRecord): Promise<CreateSetupOutcome>
 }
@@ -36,6 +40,8 @@ export type SetupServiceErrorCode =
   | 'invalidSetupItems'
   | 'setupNameTaken'
   | 'setupItemUnavailable'
+  | 'setupAccessDenied'
+  | 'setupMutationForbidden'
 
 export class SetupServiceError extends Error {
   constructor(
@@ -104,6 +110,13 @@ export class SetupService {
   }
 
   async composer(actor: RequestActor): Promise<SetupComposerResponse> {
+    if (!(await this.repository.membershipRole(actor.organizationId, actor.userId))) {
+      throw new SetupServiceError(
+        403,
+        'setupAccessDenied',
+        'Organization membership is required to view Setup capabilities',
+      )
+    }
     const available = await this.repository.listComposerItems(actor.organizationId)
     const items = new Map<string, SetupComposerItem>()
     for (const item of available) {
@@ -117,6 +130,21 @@ export class SetupService {
     actor: RequestActor,
     request: CreateSetupRequest,
   ): Promise<CreatedSetupRevision> {
+    const role = await this.repository.membershipRole(actor.organizationId, actor.userId)
+    if (!role) {
+      throw new SetupServiceError(
+        403,
+        'setupAccessDenied',
+        'Organization membership is required to create a Setup',
+      )
+    }
+    if (role === 'viewer') {
+      throw new SetupServiceError(
+        403,
+        'setupMutationForbidden',
+        'Viewers cannot create Setups',
+      )
+    }
     if (typeof request?.name !== 'string') {
       throw new SetupServiceError(400, 'invalidSetupName', 'Setup name is required')
     }

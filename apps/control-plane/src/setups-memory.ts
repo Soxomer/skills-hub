@@ -18,9 +18,28 @@ function itemKey(item: {
 export class InMemorySetupRepository implements SetupRepository {
   private readonly items = new Map<string, SetupComposerItem[]>()
   private readonly names = new Map<string, Set<string>>()
+  private readonly memberships = new Map<
+    string,
+    'owner' | 'admin' | 'member' | 'viewer'
+  >()
+
+  seedMembership(
+    organizationId: string,
+    userId: string,
+    role: 'owner' | 'admin' | 'member' | 'viewer',
+  ): void {
+    this.memberships.set(`${organizationId}:${userId}`, role)
+  }
 
   seedComposerItems(organizationId: string, items: readonly SetupComposerItem[]): void {
     this.items.set(organizationId, structuredClone([...items]))
+  }
+
+  async membershipRole(
+    organizationId: string,
+    userId: string,
+  ): Promise<'owner' | 'admin' | 'member' | 'viewer' | null> {
+    return this.memberships.get(`${organizationId}:${userId}`) ?? null
   }
 
   async listComposerItems(organizationId: string): Promise<SetupComposerItem[]> {
@@ -50,6 +69,7 @@ export class InMemorySetupRepository implements SetupRepository {
       ...item!,
       sourceSetupRevisionId: record.setupRevisionId,
       sourceSetupName: record.name,
+      sourceRevisionNumber: 1,
     }))
     this.items.set(record.organizationId, [
       ...(this.items.get(record.organizationId) ?? []),

@@ -35,6 +35,7 @@ function baseItem() {
   return {
     sourceSetupRevisionId: 'revision_default_a',
     sourceSetupName: 'Default / Project A / project_a',
+    sourceRevisionNumber: 1,
     artifactId: 'artifact_pdf',
     artifactKind: 'skill' as const,
     portableSource: 'github:openai/skills/pdf@v1',
@@ -68,6 +69,8 @@ async function postgresHarness() {
     VALUES ('org_01', 'Example', '2026-09-08T10:00:00Z');
     INSERT INTO users (id, display_name, created_at)
     VALUES ('user_01', 'Owner', '2026-09-08T10:00:00Z');
+    INSERT INTO organization_memberships (organization_id, user_id, role, created_at)
+    VALUES ('org_01', 'user_01', 'owner', '2026-09-08T10:00:00Z');
     INSERT INTO projects (id, organization_id, name, created_at, updated_at)
     VALUES
       ('project_a', 'org_01', 'Project A', '2026-09-08T10:00:00Z', '2026-09-08T10:00:00Z'),
@@ -251,11 +254,58 @@ describe('Setup creation API', () => {
     await app.close()
     await pool.end()
   })
+
+  it('requires membership for reads and rejects viewer mutations', async () => {
+    const { app, pool } = await postgresHarness()
+    const nonmember = await app.inject({
+      method: 'GET',
+      url: '/api/v1/setups/composer',
+      headers: {
+        'x-ahm-organization-id': 'org_01',
+        'x-ahm-user-id': 'user_outsider',
+      },
+    })
+    expect(nonmember.statusCode).toBe(403)
+    expect(nonmember.json()).toMatchObject({ code: 'setupAccessDenied' })
+
+    await pool.query(`
+      INSERT INTO users (id, display_name, created_at)
+      VALUES ('user_viewer', 'Viewer', '2026-09-08T10:00:00Z');
+      INSERT INTO organization_memberships (organization_id, user_id, role, created_at)
+      VALUES ('org_01', 'user_viewer', 'viewer', '2026-09-08T10:00:00Z');
+    `)
+    const viewerRead = await app.inject({
+      method: 'GET',
+      url: '/api/v1/setups/composer',
+      headers: {
+        'x-ahm-organization-id': 'org_01',
+        'x-ahm-user-id': 'user_viewer',
+      },
+    })
+    expect(viewerRead.statusCode).toBe(200)
+    const viewerCreate = await app.inject({
+      method: 'POST',
+      url: '/api/v1/setups',
+      headers: {
+        'x-ahm-organization-id': 'org_01',
+        'x-ahm-user-id': 'user_viewer',
+      },
+      payload: { name: 'Viewer setup', items: [selection()] },
+    })
+    expect(viewerCreate.statusCode).toBe(403)
+    expect(viewerCreate.json()).toMatchObject({ code: 'setupMutationForbidden' })
+    expect(
+      (await pool.query(`SELECT id FROM setups WHERE kind = 'custom'`)).rowCount,
+    ).toBe(0)
+    await app.close()
+    await pool.end()
+  })
 })
 
 describe('Setup service validation and memory persistence', () => {
   it('rejects duplicate destinations and deduplicates copied capabilities', async () => {
     const repository = new InMemorySetupRepository()
+    repository.seedMembership(actor.organizationId, actor.userId, 'owner')
     repository.seedComposerItems(actor.organizationId, [baseItem()])
     const service = new SetupService(repository, {
       now: () => new Date('2026-09-08T12:00:00.000Z'),
@@ -276,5 +326,38 @@ describe('Setup service validation and memory persistence', () => {
     await expect(
       service.createSetup(actor, { name: 'reUSABLE', items: [selection()] }),
     ).rejects.toMatchObject({ code: 'setupNameTaken' })
+  })
+
+  it('allows writers and keeps viewers and outsiders read-only', async () => {
+    for (const role of ['owner', 'admin', 'member'] as const) {
+      const repository = new InMemorySetupRepository()
+      const userId = `user_${role}`
+      repository.seedMembership(actor.organizationId, userId, role)
+      repository.seedComposerItems(actor.organizationId, [baseItem()])
+      const service = new SetupService(repository, { randomId: () => role })
+      await expect(
+        service.createSetup(
+          { organizationId: actor.organizationId, userId },
+          { name: `${role} setup`, items: [selection()] },
+        ),
+      ).resolves.toMatchObject({ kind: 'custom', revisionNumber: 1 })
+    }
+
+    const repository = new InMemorySetupRepository()
+    repository.seedMembership(actor.organizationId, 'user_viewer', 'viewer')
+    repository.seedComposerItems(actor.organizationId, [baseItem()])
+    const service = new SetupService(repository)
+    await expect(
+      service.composer({ organizationId: actor.organizationId, userId: 'user_viewer' }),
+    ).resolves.toEqual({ items: [baseItem()] })
+    await expect(
+      service.createSetup(
+        { organizationId: actor.organizationId, userId: 'user_viewer' },
+        { name: 'Blocked', items: [selection()] },
+      ),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'setupMutationForbidden' })
+    await expect(
+      service.composer({ organizationId: actor.organizationId, userId: 'user_outsider' }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'setupAccessDenied' })
   })
 })

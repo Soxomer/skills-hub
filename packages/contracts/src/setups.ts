@@ -8,6 +8,7 @@ import type {
 export interface SetupComposerItem {
   sourceSetupRevisionId: SetupRevisionId
   sourceSetupName: string
+  sourceRevisionNumber: number
   artifactId: ArtifactId
   artifactKind: DiscoveryKind
   portableSource: string | null

@@ -554,10 +554,17 @@ function SetupComposer({
                   <strong>{item.targetName}</strong>
                   <small>
                     {t('switchFlow.composer.itemMeta', {
+                      kind: t(`switchFlow.composer.artifactKind.${item.artifactKind}`),
                       tool: item.toolId,
                       source: item.sourceSetupName,
+                      revision: item.sourceRevisionNumber,
                     })}
                   </small>
+                  <code title={item.contentDigest}>
+                    {item.contentDigest.length > 28
+                      ? `${item.contentDigest.slice(0, 28)}…`
+                      : item.contentDigest}
+                  </code>
                 </span>
               </label>
             )

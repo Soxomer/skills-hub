@@ -180,7 +180,12 @@ export const resources = {
           loading: 'Loading available capabilities…',
           empty: 'Capture at least one available skill before creating a reusable Setup.',
           itemsLabel: 'Available capabilities',
-          itemMeta: '{{tool}} · from {{source}}',
+          itemMeta: '{{kind}} · {{tool}} · from {{source}} v{{revision}}',
+          artifactKind: {
+            skill: 'Standalone skill',
+            pluginSkill: 'Plugin skill',
+            localContent: 'Local content',
+          },
           selected: '{{count}} selected',
           create: 'Create Setup',
           creating: 'Creating Setup…',
@@ -192,6 +197,8 @@ export const resources = {
             setupNameTaken: 'A Setup with this name already exists.',
             setupItemUnavailable:
               'A selected capability changed or is unavailable. Reload the composer and select it again.',
+            setupAccessDenied: 'Join this organization to view its Setup capabilities.',
+            setupMutationForbidden: 'Your organization role cannot create Setups.',
           },
         },
         prepare: 'Prepare plan',

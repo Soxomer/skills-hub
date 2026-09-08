@@ -145,6 +145,7 @@ describe('ControlPlaneClient', () => {
         {
           sourceSetupRevisionId: 'revision_default',
           sourceSetupName: 'Default / Project',
+          sourceRevisionNumber: 1,
           artifactId: 'artifact_pdf',
           artifactKind: 'skill' as const,
           portableSource: 'github:openai/skills/pdf@v1',

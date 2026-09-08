@@ -7,4 +7,15 @@ describe('web translations', () => {
     expect(Object.keys(resources)).toEqual(['en'])
     expect(JSON.stringify(resources)).not.toMatch(/[\u3400-\u9fff]/u)
   })
+
+  it('keeps the Setup composer source identity translatable', () => {
+    const composer = resources.en.translation.switchFlow.composer
+    expect(composer.itemMeta).toContain('{{kind}}')
+    expect(composer.itemMeta).toContain('{{source}} v{{revision}}')
+    expect(composer.artifactKind).toEqual({
+      skill: 'Standalone skill',
+      pluginSkill: 'Plugin skill',
+      localContent: 'Local content',
+    })
+  })
 })
