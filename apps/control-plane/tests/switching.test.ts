@@ -55,6 +55,8 @@ async function harness() {
      VALUES ('org_01', 'Example', $1);
      INSERT INTO users (id, display_name, created_at)
      VALUES ('user_01', 'Owner', $1);
+     INSERT INTO organization_memberships (organization_id, user_id, role, created_at)
+     VALUES ('org_01', 'user_01', 'owner', $1);
      INSERT INTO projects (id, organization_id, name, created_at, updated_at)
      VALUES ('project_01', 'org_01', 'Project', $1, $1);
      INSERT INTO runner_devices

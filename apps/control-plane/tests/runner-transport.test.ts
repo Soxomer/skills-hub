@@ -6,6 +6,7 @@ import { InMemoryProjectRepository } from '../src/projects-memory.js'
 import { ProjectService } from '../src/projects.js'
 import { InMemoryRunnerTransportRepository } from '../src/runner-transport-memory.js'
 import { RunnerTransportService } from '../src/runner-transport.js'
+import { artifactDigest } from '../src/artifact-digest.js'
 
 const actorHeaders = {
   'x-ahm-organization-id': 'org_01',
@@ -29,6 +30,7 @@ function harness() {
   let now = new Date('2026-09-01T10:00:00.000Z')
   let sequence = 0
   const repository = new InMemoryRunnerTransportRepository()
+  repository.seedMembership({ organizationId: 'org_01', userId: 'user_01' }, 'owner')
   repository.seedProject('org_01', 'project_01')
   const service = new RunnerTransportService(repository, {
     serverUrl: 'https://hub.example.test',
@@ -411,7 +413,7 @@ describe('runner transport', () => {
     const { app } = harness()
     const identity = await connect(app)
     const authorization = { authorization: `Bearer ${identity.credential}` }
-    const contentDigest = `sha256:${'f'.repeat(64)}`
+    const contentDigest = artifactDigest([{ path: 'SKILL.md', kind: 'file', contentBase64: btoa('# Shared') }])
     const bundle = {
       contentDigest,
       entries: [

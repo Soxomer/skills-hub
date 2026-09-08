@@ -1,4 +1,5 @@
 import { Pool } from 'pg'
+import { requireDevelopmentLoopback } from './development-auth.js'
 
 import { createControlPlaneApp } from './http.js'
 import { PostgresProjectRepository } from './projects-pg.js'
@@ -15,6 +16,7 @@ if (!databaseUrl) throw new Error('DATABASE_URL is required')
 
 const port = Number(process.env.PORT ?? '8787')
 const host = process.env.HOST ?? '127.0.0.1'
+requireDevelopmentLoopback(host)
 const serverUrl = process.env.PUBLIC_SERVER_URL ?? `http://${host}:${port}`
 const pool = new Pool({ connectionString: databaseUrl })
 const transportRepository = new PostgresRunnerTransportRepository(pool)

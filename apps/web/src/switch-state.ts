@@ -2,9 +2,23 @@ import type {
   CancellationReceipt,
   ApplyReceipt,
   CanonicalPlan,
+  ProjectInstanceOperationsResponse,
   RollbackReceipt,
   RunnerJobStatusResponse,
 } from '@ahm/contracts'
+
+export function recoverableOperationId(status: ProjectInstanceOperationsResponse | null): string | null {
+  const latest = status?.operations[0]
+  // Only the newest operation can restore the current materialization. Historical
+  // receipts retain their original recoverability even after a later operation.
+  return status && !status.activeOperation && status.health !== 'attention' &&
+    latest?.kind === 'applyPlan' && latest.state === 'succeeded' &&
+    latest.recoverability === 'rollbackAvailable' &&
+    (latest.outcome === 'applied' || latest.outcome === 'noChange') &&
+    latest.setupRevisionId === status.materializedSetupRevisionId
+    ? latest.operationId
+    : null
+}
 
 export function preparedPlan(status: RunnerJobStatusResponse | null): CanonicalPlan | null {
   return status?.state === 'succeeded' && status.result?.result.kind === 'planResult'

@@ -225,24 +225,19 @@ impl RunnerTransport for HttpRunnerTransport {
 }
 
 fn ensure_success(response: reqwest::blocking::Response, operation: &str) -> Result<()> {
-    if response.status().is_success() {
-        return Ok(());
-    }
-    let status = response.status();
-    let body = response.text().unwrap_or_default();
-    bail!("{operation} failed with {status}: {}", body.trim());
+    response
+        .error_for_status()
+        .with_context(|| format!("{operation} failed"))?;
+    Ok(())
 }
 
 fn parse_json_response<T: serde::de::DeserializeOwned>(
     response: reqwest::blocking::Response,
     operation: &str,
 ) -> Result<T> {
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().unwrap_or_default();
-        bail!("{operation} failed with {status}: {}", body.trim());
-    }
     response
+        .error_for_status()
+        .with_context(|| format!("{operation} failed"))?
         .json()
         .with_context(|| format!("decode {operation} response"))
 }

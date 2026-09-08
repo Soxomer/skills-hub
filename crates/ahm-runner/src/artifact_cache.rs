@@ -7,7 +7,7 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::{
-    content_hash::hash_dir,
+    content_hash::{hash_dir, validate_artifact_path},
     sync_engine::{copy_dir_recursive, remove_path_any},
 };
 
@@ -196,6 +196,7 @@ fn verify_digest(path: &Path, digest: &Digest) -> Result<()> {
 }
 
 fn validate_relative_path(value: &str) -> Result<PathBuf> {
+    validate_artifact_path(value)?;
     if value.is_empty() || value.contains('\\') {
         bail!("artifact path is invalid");
     }
