@@ -59,7 +59,6 @@ export interface StoredDefaultCapture {
 export type CaptureDefaultOutcome =
   | { outcome: 'created' | 'existing'; capture: StoredDefaultCapture }
   | { outcome: 'projectMissing' }
-  | { outcome: 'nameTaken' }
 
 export interface ProjectRepository {
   createProject(project: StoredProject): Promise<boolean>
@@ -83,7 +82,6 @@ export type ProjectServiceErrorCode =
   | 'invalidScanResult'
   | 'discoveryNotEligible'
   | 'projectNotFound'
-  | 'defaultSetupNameTaken'
   | 'defaultAlreadyCaptured'
 
 export class ProjectServiceError extends Error {
@@ -287,13 +285,6 @@ export class ProjectService {
     })
     if (outcome.outcome === 'projectMissing') {
       throw new ProjectServiceError(404, 'projectNotFound', 'logical project was not found')
-    }
-    if (outcome.outcome === 'nameTaken') {
-      throw new ProjectServiceError(
-        409,
-        'defaultSetupNameTaken',
-        'the Default Setup name is already reserved',
-      )
     }
     if (
       outcome.outcome === 'existing' &&

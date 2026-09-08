@@ -64,7 +64,6 @@ describe('control-plane migration', () => {
       'runner_devices',
       'runner_enrollments',
       'runner_jobs',
-      'setup_name_claims',
       'setup_revision_items',
       'setup_revisions',
       'setups',
@@ -91,9 +90,8 @@ describe('control-plane migration', () => {
     }
   })
 
-  it('seeds a case-insensitive custom Setup name claim', () => {
-    const database = newDb({ autoCreateForeignKeyIndices: true })
-    for (const migration of migrations.slice(0, 6)) database.public.none(migration)
+  it('enforces case-insensitive Setup names in PostgreSQL', () => {
+    const database = createMigratedDatabase()
     database.public.none(`
       INSERT INTO organizations (id, name, created_at)
       VALUES ('org_01', 'Example', '2026-09-08T00:00:00Z');
@@ -106,15 +104,18 @@ describe('control-plane migration', () => {
          '2026-09-08T00:00:00Z', '2026-09-08T00:00:00Z');
     `)
 
-    database.public.none(migrations[6]!)
-    expect(
-      database.public.many<{ organization_id: string; normalized_name: string }>(
-        `SELECT organization_id, normalized_name FROM setup_name_claims`,
-      ),
-    ).toEqual([{ organization_id: 'org_01', normalized_name: 'shared tools' }])
+    expect(() =>
+      database.public.none(`
+        INSERT INTO setups
+          (id, organization_id, name, kind, created_by, created_at, updated_at)
+        VALUES
+          ('setup_02', 'org_01', 'shared TOOLS', 'custom', 'user_01',
+           '2026-09-08T00:00:00Z', '2026-09-08T00:00:00Z');
+      `),
+    ).toThrow()
   })
 
-  it('claims legacy case-colliding names without changing names or identities', () => {
+  it('rejects incompatible pre-migration data instead of reconciling it', () => {
     const database = newDb({ autoCreateForeignKeyIndices: true })
     for (const migration of migrations.slice(0, 6)) database.public.none(migration)
     database.public.none(`
@@ -129,41 +130,9 @@ describe('control-plane migration', () => {
          '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z'),
         ('setup_b', 'org_01', 'shared tools', 'custom', 'user_01',
          '2026-09-02T00:00:00Z', '2026-09-02T00:00:00Z');
-      INSERT INTO setup_revisions
-        (id, organization_id, setup_id, revision_number, created_by, created_at)
-      VALUES
-        ('revision_a', 'org_01', 'setup_a', 1, 'user_01', '2026-09-01T00:00:00Z'),
-        ('revision_b', 'org_01', 'setup_b', 1, 'user_01', '2026-09-02T00:00:00Z');
     `)
 
-    database.public.none(migrations[6]!)
-
-    const setups = database.public.many<{ id: string; name: string }>(
-      `SELECT id, name FROM setups ORDER BY id`,
-    )
-    expect(setups).toEqual([
-      { id: 'setup_a', name: 'Shared Tools' },
-      { id: 'setup_b', name: 'shared tools' },
-    ])
-    expect(
-      database.public.many<{ id: string; setup_id: string }>(
-        `SELECT id, setup_id FROM setup_revisions ORDER BY id`,
-      ),
-    ).toEqual([
-      { id: 'revision_a', setup_id: 'setup_a' },
-      { id: 'revision_b', setup_id: 'setup_b' },
-    ])
-    expect(
-      database.public.many<{ normalized_name: string }>(
-        `SELECT normalized_name FROM setup_name_claims`,
-      ),
-    ).toEqual([{ normalized_name: 'shared tools' }])
-    expect(() =>
-      database.public.none(`
-        INSERT INTO setup_name_claims (organization_id, normalized_name, claimed_at)
-        VALUES ('org_01', LOWER('SHARED TOOLS'), '2026-09-08T00:00:01Z');
-      `),
-    ).toThrow()
+    expect(() => database.public.none(migrations[6]!)).toThrow()
   })
 
   it('backfills the Setup revision used by existing plan jobs', () => {

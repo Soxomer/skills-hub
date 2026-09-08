@@ -277,15 +277,6 @@ describe('Postgres Default capture persistence', () => {
       portableSource: 'github:openai/skills/pdf@v1',
       contentDigest: 'sha256:pdf',
     })
-    expect(
-      (
-        await pool.query<{ normalized_name: string }>(
-          `SELECT normalized_name FROM setup_name_claims WHERE organization_id = 'org_01'`,
-        )
-      ).rows,
-    ).toEqual([
-      { normalized_name: `default / portable project / ${project.projectId}` },
-    ])
     expect(JSON.stringify(stored.rows[0])).not.toMatch(/path/i)
     await pool.end()
   })

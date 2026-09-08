@@ -4,7 +4,7 @@ This document records the repeatable, connected acceptance exercise for Setup sw
 
 ## Repeatable connected flow
 
-1. Start an isolated PostgreSQL database, seed the prototype actor's organization, user, and membership, and run the control plane with its `DATABASE_URL` pointed at that database.
+1. Start a clean, isolated PostgreSQL database, seed the local development actor's organization and user, and run the control plane with its `DATABASE_URL` pointed at that database. Reset incompatible POC data instead of carrying it through compatibility migrations.
 2. Start `npm run dev:web` and a local `ahm worker` with disposable runner SQLite state.
 3. Enroll one runner, then open a second browser tab. Confirm both tabs show the same device and the same active operation.
 4. Create two projects with distinct initial skills and capture one Default revision for each. Confirm a project's revision picker includes only its own Default plus organization custom Setups.
@@ -23,3 +23,4 @@ This document records the repeatable, connected acceptance exercise for Setup sw
 - On Windows, `cargo test -p ahm-runner sync_engine::tests:: -- --nocapture` passed the junction-preservation and hybrid link/copy tests. `cargo test -p ahm-runner recovery_tests:: -- --nocapture` passed both injected post-mutation cancellation restoration and restart recovery tests.
 - This Windows workspace has no Linux or macOS runner/target installed (`rustup target list --installed` contains only `x86_64-pc-windows-msvc`). The Unix symlink test remains platform-gated and must be executed on Linux and macOS before OMA-30 can be marked Done.
 - The original connected run used a pre-seeded alternate Setup. OMA-113 replaces that setup-only shortcut; repeat the flow above through `New Setup` before treating the browser creation step as connected acceptance evidence.
+- OMA-113 assumes a clean POC database. Migration 0007 establishes case-insensitive Setup-name uniqueness directly and intentionally fails when old data violates that invariant; no legacy reconciliation path is part of the acceptance surface.

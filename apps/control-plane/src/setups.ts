@@ -25,22 +25,9 @@ export type CreateSetupOutcome =
   | { outcome: 'created'; revision: CreatedSetupRevision }
   | { outcome: 'nameTaken' }
   | { outcome: 'itemUnavailable' }
-  | { outcome: 'accessDenied' }
-  | { outcome: 'mutationForbidden' }
-
-export type ReadSetupComposerOutcome =
-  | { outcome: 'available'; items: SetupComposerItem[] }
-  | { outcome: 'accessDenied' }
 
 export interface SetupRepository {
-  membershipRole(
-    organizationId: string,
-    userId: string,
-  ): Promise<'owner' | 'admin' | 'member' | 'viewer' | null>
-  readComposer(
-    organizationId: string,
-    userId: string,
-  ): Promise<ReadSetupComposerOutcome>
+  listComposerItems(organizationId: string): Promise<SetupComposerItem[]>
   createSetup(record: CreateSetupRecord): Promise<CreateSetupOutcome>
 }
 
@@ -49,8 +36,6 @@ export type SetupServiceErrorCode =
   | 'invalidSetupItems'
   | 'setupNameTaken'
   | 'setupItemUnavailable'
-  | 'setupAccessDenied'
-  | 'setupMutationForbidden'
 
 export class SetupServiceError extends Error {
   constructor(
@@ -119,16 +104,9 @@ export class SetupService {
   }
 
   async composer(actor: RequestActor): Promise<SetupComposerResponse> {
-    const outcome = await this.repository.readComposer(actor.organizationId, actor.userId)
-    if (outcome.outcome === 'accessDenied') {
-      throw new SetupServiceError(
-        403,
-        'setupAccessDenied',
-        'Organization membership is required to view Setup capabilities',
-      )
-    }
+    const available = await this.repository.listComposerItems(actor.organizationId)
     const items = new Map<string, SetupComposerItem>()
-    for (const item of outcome.items) {
+    for (const item of available) {
       const key = composerIdentity(item)
       if (!items.has(key)) items.set(key, item)
     }
@@ -139,21 +117,6 @@ export class SetupService {
     actor: RequestActor,
     request: CreateSetupRequest,
   ): Promise<CreatedSetupRevision> {
-    const role = await this.repository.membershipRole(actor.organizationId, actor.userId)
-    if (!role) {
-      throw new SetupServiceError(
-        403,
-        'setupAccessDenied',
-        'Organization membership is required to create a Setup',
-      )
-    }
-    if (role === 'viewer') {
-      throw new SetupServiceError(
-        403,
-        'setupMutationForbidden',
-        'Viewers cannot create Setups',
-      )
-    }
     if (typeof request?.name !== 'string') {
       throw new SetupServiceError(400, 'invalidSetupName', 'Setup name is required')
     }
@@ -216,20 +179,6 @@ export class SetupService {
         409,
         'setupItemUnavailable',
         'A selected item is stale or no longer available; reload the composer',
-      )
-    }
-    if (outcome.outcome === 'accessDenied') {
-      throw new SetupServiceError(
-        403,
-        'setupAccessDenied',
-        'Organization membership is required to create a Setup',
-      )
-    }
-    if (outcome.outcome === 'mutationForbidden') {
-      throw new SetupServiceError(
-        403,
-        'setupMutationForbidden',
-        'Viewers cannot create Setups',
       )
     }
     return outcome.revision

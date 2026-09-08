@@ -45,6 +45,13 @@ Always run `npm run check` before committing.
 - Keep filesystem planning and mutation in the runner execution service so remote work and CLI commands behave equivalently.
 - New protocol fields must be reflected in TypeScript contracts, Rust domain types, validation fixtures, and tests.
 
+## POC iteration policy
+
+- This repository is an active proof of concept. Prefer the intended architecture and a clean implementation over compatibility with earlier local state.
+- Breaking PostgreSQL schema and data changes are allowed. When an invariant changes, use a clean database or reset incompatible local data.
+- Do not add legacy migrations, backfills, reconciliation logic, dual paths, or compatibility shims solely to preserve prior POC state unless the user explicitly requests compatibility.
+- Keep the product safety rules and protocol boundaries above intact while iterating, and keep each change as small as the target architecture allows.
+
 ## TypeScript conventions
 
 - TypeScript is strict; unused locals and parameters fail builds.

@@ -74,7 +74,6 @@ export const resources = {
           invalidScanResult: 'The runner returned a scan for a different project.',
           discoveryNotEligible: 'Conflicting or unsupported discoveries cannot be captured.',
           projectNotFound: 'This logical project no longer exists.',
-          defaultSetupNameTaken: 'The reserved Default Setup name is already in use.',
           defaultAlreadyCaptured: 'This project already has a different Default revision.',
           recovery:
             'The current project and scan progress are preserved. Resolve the issue and try again.',
@@ -201,8 +200,6 @@ export const resources = {
             setupNameTaken: 'A Setup with this name already exists.',
             setupItemUnavailable:
               'A selected capability changed or is unavailable. Reload the composer and select it again.',
-            setupAccessDenied: 'Join this organization to view its Setup capabilities.',
-            setupMutationForbidden: 'Your organization role cannot create Setups.',
           },
         },
         prepare: 'Prepare plan',

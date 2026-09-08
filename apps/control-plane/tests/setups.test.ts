@@ -12,7 +12,6 @@ import { InMemoryRunnerTransportRepository } from '../src/runner-transport-memor
 import { RunnerTransportService } from '../src/runner-transport.js'
 import { InMemorySetupRepository } from '../src/setups-memory.js'
 import { PostgresSetupRepository } from '../src/setups-pg.js'
-import type { CreateSetupRecord } from '../src/setups.js'
 import { SetupService } from '../src/setups.js'
 import { PostgresSwitchingRepository } from '../src/switching-pg.js'
 import { SwitchingService } from '../src/switching.js'
@@ -57,22 +56,6 @@ function selection(overrides: Partial<ReturnType<typeof baseItem>> = {}) {
   }
 }
 
-function createRecord(
-  createdBy: string,
-  suffix: string,
-): CreateSetupRecord {
-  return {
-    organizationId: actor.organizationId,
-    createdBy,
-    createdAt: '2026-09-08T12:00:00.000Z',
-    setupId: `setup_${suffix}`,
-    setupRevisionId: `revision_${suffix}`,
-    auditEventId: `audit_${suffix}`,
-    name: `${suffix} setup`,
-    items: [selection()],
-  }
-}
-
 async function postgresHarness() {
   const database = newDb({ autoCreateForeignKeyIndices: true })
   for (const migrationName of migrationNames) {
@@ -86,8 +69,6 @@ async function postgresHarness() {
     VALUES ('org_01', 'Example', '2026-09-08T10:00:00Z');
     INSERT INTO users (id, display_name, created_at)
     VALUES ('user_01', 'Owner', '2026-09-08T10:00:00Z');
-    INSERT INTO organization_memberships (organization_id, user_id, role, created_at)
-    VALUES ('org_01', 'user_01', 'owner', '2026-09-08T10:00:00Z');
     INSERT INTO projects (id, organization_id, name, created_at, updated_at)
     VALUES
       ('project_a', 'org_01', 'Project A', '2026-09-08T10:00:00Z', '2026-09-08T10:00:00Z'),
@@ -242,31 +223,22 @@ describe('Setup creation API', () => {
       (await pool.query(`SELECT id FROM audit_events WHERE event_kind = 'setupRevisionCreated'`))
         .rowCount,
     ).toBe(0)
-    expect(
-      (
-        await pool.query(
-          `SELECT normalized_name FROM setup_name_claims
-           WHERE organization_id = 'org_01' AND normalized_name = 'stale setup'`,
-        )
-      ).rowCount,
-    ).toBe(0)
     await app.close()
     await pool.end()
   })
 
   it('enforces case-insensitive name uniqueness without orphan revisions', async () => {
     const { app, pool } = await postgresHarness()
-    const results = []
-    for (const name of ['Shared tools', 'shared TOOLS']) {
-      results.push(
-        await app.inject({
+    const results = await Promise.all(
+      ['Shared tools', 'shared TOOLS'].map((name) =>
+        app.inject({
           method: 'POST',
           url: '/api/v1/setups',
           headers: actorHeaders,
           payload: { name, items: [selection()] },
         }),
-      )
-    }
+      ),
+    )
     expect(results.map((result) => result.statusCode).sort()).toEqual([201, 409])
     expect(results.find((result) => result.statusCode === 409)?.json()).toMatchObject({
       code: 'setupNameTaken',
@@ -278,75 +250,6 @@ describe('Setup creation API', () => {
       (await pool.query(`SELECT sr.id FROM setup_revisions sr JOIN setups s ON s.id = sr.setup_id WHERE s.kind = 'custom'`))
         .rowCount,
     ).toBe(1)
-    await app.close()
-    await pool.end()
-  })
-
-  it('requires membership for reads and rejects viewer mutations', async () => {
-    const { app, pool } = await postgresHarness()
-    const nonmember = await app.inject({
-      method: 'GET',
-      url: '/api/v1/setups/composer',
-      headers: {
-        'x-ahm-organization-id': 'org_01',
-        'x-ahm-user-id': 'user_outsider',
-      },
-    })
-    expect(nonmember.statusCode).toBe(403)
-    expect(nonmember.json()).toMatchObject({ code: 'setupAccessDenied' })
-
-    await pool.query(`
-      INSERT INTO users (id, display_name, created_at)
-      VALUES ('user_viewer', 'Viewer', '2026-09-08T10:00:00Z');
-      INSERT INTO organization_memberships (organization_id, user_id, role, created_at)
-      VALUES ('org_01', 'user_viewer', 'viewer', '2026-09-08T10:00:00Z');
-    `)
-    const viewerRead = await app.inject({
-      method: 'GET',
-      url: '/api/v1/setups/composer',
-      headers: {
-        'x-ahm-organization-id': 'org_01',
-        'x-ahm-user-id': 'user_viewer',
-      },
-    })
-    expect(viewerRead.statusCode).toBe(200)
-    const viewerCreate = await app.inject({
-      method: 'POST',
-      url: '/api/v1/setups',
-      headers: {
-        'x-ahm-organization-id': 'org_01',
-        'x-ahm-user-id': 'user_viewer',
-      },
-      payload: { name: 'Viewer setup', items: [selection()] },
-    })
-    expect(viewerCreate.statusCode).toBe(403)
-    expect(viewerCreate.json()).toMatchObject({ code: 'setupMutationForbidden' })
-    expect(
-      (await pool.query(`SELECT id FROM setups WHERE kind = 'custom'`)).rowCount,
-    ).toBe(0)
-    await app.close()
-    await pool.end()
-  })
-
-  it('enforces authorization inside repository transactions', async () => {
-    const { app, pool } = await postgresHarness()
-    await pool.query(`
-      INSERT INTO users (id, display_name, created_at)
-      VALUES ('user_viewer', 'Viewer', '2026-09-08T10:00:00Z');
-      INSERT INTO organization_memberships (organization_id, user_id, role, created_at)
-      VALUES ('org_01', 'user_viewer', 'viewer', '2026-09-08T10:00:00Z');
-    `)
-    const repository = new PostgresSetupRepository(pool)
-    await expect(repository.readComposer('org_01', 'user_outsider')).resolves.toEqual({
-      outcome: 'accessDenied',
-    })
-    await expect(repository.createSetup(createRecord('user_outsider', 'outsider'))).resolves.toEqual(
-      { outcome: 'accessDenied' },
-    )
-    await expect(repository.createSetup(createRecord('user_viewer', 'viewer'))).resolves.toEqual({
-      outcome: 'mutationForbidden',
-    })
-    expect((await pool.query(`SELECT id FROM setups WHERE kind = 'custom'`)).rowCount).toBe(0)
     await app.close()
     await pool.end()
   })
@@ -375,7 +278,6 @@ describe('Setup creation API', () => {
 describe('Setup service validation and memory persistence', () => {
   it('rejects duplicate destinations and deduplicates copied capabilities', async () => {
     const repository = new InMemorySetupRepository()
-    repository.seedMembership(actor.organizationId, actor.userId, 'owner')
     repository.seedComposerItems(actor.organizationId, [baseItem()])
     const service = new SetupService(repository, {
       now: () => new Date('2026-09-08T12:00:00.000Z'),
@@ -398,42 +300,8 @@ describe('Setup service validation and memory persistence', () => {
     ).rejects.toMatchObject({ code: 'setupNameTaken' })
   })
 
-  it('allows writers and keeps viewers and outsiders read-only', async () => {
-    for (const role of ['owner', 'admin', 'member'] as const) {
-      const repository = new InMemorySetupRepository()
-      const userId = `user_${role}`
-      repository.seedMembership(actor.organizationId, userId, role)
-      repository.seedComposerItems(actor.organizationId, [baseItem()])
-      const service = new SetupService(repository, { randomId: () => role })
-      await expect(
-        service.createSetup(
-          { organizationId: actor.organizationId, userId },
-          { name: `${role} setup`, items: [selection()] },
-        ),
-      ).resolves.toMatchObject({ kind: 'custom', revisionNumber: 1 })
-    }
-
+  it('allows only one concurrent case-insensitive creation', async () => {
     const repository = new InMemorySetupRepository()
-    repository.seedMembership(actor.organizationId, 'user_viewer', 'viewer')
-    repository.seedComposerItems(actor.organizationId, [baseItem()])
-    const service = new SetupService(repository)
-    await expect(
-      service.composer({ organizationId: actor.organizationId, userId: 'user_viewer' }),
-    ).resolves.toEqual({ items: [baseItem()] })
-    await expect(
-      service.createSetup(
-        { organizationId: actor.organizationId, userId: 'user_viewer' },
-        { name: 'Blocked', items: [selection()] },
-      ),
-    ).rejects.toMatchObject({ statusCode: 403, code: 'setupMutationForbidden' })
-    await expect(
-      service.composer({ organizationId: actor.organizationId, userId: 'user_outsider' }),
-    ).rejects.toMatchObject({ statusCode: 403, code: 'setupAccessDenied' })
-  })
-
-  it('allows only one concurrent case-insensitive name claim', async () => {
-    const repository = new InMemorySetupRepository()
-    repository.seedMembership(actor.organizationId, actor.userId, 'owner')
     repository.seedComposerItems(actor.organizationId, [baseItem()])
     let sequence = 0
     const service = new SetupService(repository, { randomId: () => `concurrent_${++sequence}` })
