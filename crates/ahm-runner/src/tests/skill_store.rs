@@ -38,6 +38,71 @@ fn schema_is_idempotent() {
 }
 
 #[test]
+fn concurrent_schema_initialization_uses_one_migration_transaction() {
+    use std::sync::{Arc, Barrier};
+
+    let directory = tempfile::tempdir().unwrap();
+    let db = directory.path().join("concurrent.db");
+    let barrier = Arc::new(Barrier::new(8));
+    let workers: Vec<_> = (0..8)
+        .map(|_| {
+            let db = db.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                let store = SkillStore::new(db);
+                barrier.wait();
+                store.ensure_schema()
+            })
+        })
+        .collect();
+    for worker in workers {
+        worker.join().unwrap().expect("concurrent schema startup");
+    }
+    let conn = Connection::open(&db).unwrap();
+    let version: i32 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, super::SCHEMA_VERSION);
+    let descriptions: i32 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('skills') WHERE name = 'description'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(descriptions, 1);
+    SkillStore::new(db)
+        .list_skills()
+        .expect("initialized schema is usable");
+}
+
+#[test]
+fn failed_migration_rolls_back_earlier_schema_changes() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = directory.path().join("incomplete.db");
+    let conn = Connection::open(&db).unwrap();
+    // V4 will fail because the old targets table is absent. V2/V3 must not
+    // leave columns behind with the old version, preventing a later retry.
+    conn.execute_batch("CREATE TABLE skills (id TEXT PRIMARY KEY); PRAGMA user_version = 1;")
+        .unwrap();
+    let store = SkillStore::new(db);
+    assert!(store.ensure_schema().is_err());
+    let version: i32 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 1);
+    let columns: i32 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('skills')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(columns, 1);
+    assert!(store.ensure_schema().is_err());
+}
+
+#[test]
 fn migrates_v8_setups_to_default_snapshot_schema() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db = dir.path().join("test.db");

@@ -79,6 +79,9 @@ struct ConnectArgs {
 
 #[derive(Debug, Args)]
 struct WorkerArgs {
+    /// Home directory used for discovery and the artifact cache.
+    #[arg(long)]
+    home: Option<PathBuf>,
     /// Process at most one claim cycle and exit.
     #[arg(long)]
     once: bool,
@@ -497,7 +500,10 @@ fn run_worker(
         .identity()?
         .context("runner is not connected; run `ahm connect` first")?;
     let transport = HttpRunnerTransport::new(&identity.server_url)?;
-    let executor = LocalJobExecutor::new(RunnerExecutionService::open(db_path)?, scan_home(None)?);
+    let executor = LocalJobExecutor::new(
+        RunnerExecutionService::open(db_path)?,
+        scan_home(args.home)?,
+    );
     let mut worker = RunnerWorker::new(state, transport, executor)
         .with_claim_wait_ms(if args.once { 0 } else { 25_000 });
     if !json {

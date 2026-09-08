@@ -6,6 +6,25 @@ use ahm_runner::sync_engine::SyncMode;
 use ahm_runner::tool_adapters::{save_tool_config, CustomToolConfig, ToolConfig};
 use tempfile::TempDir;
 
+#[test]
+fn worker_accepts_an_isolated_home_without_changing_the_process_home() {
+    use clap::Parser;
+    let fixture = TempDir::new().unwrap();
+    let cli = super::Cli::try_parse_from([
+        "ahm",
+        "worker",
+        "--once",
+        "--home",
+        fixture.path().to_str().unwrap(),
+    ])
+    .unwrap();
+    let super::Command::Worker(args) = cli.command else {
+        panic!("expected worker")
+    };
+    assert!(args.once);
+    assert_eq!(super::scan_home(args.home).unwrap(), fixture.path());
+}
+
 fn managed_skill(store: &SkillStore, root: &Path, id: &str, name: &str) -> SkillRecord {
     let central_path = root.join(name);
     std::fs::create_dir_all(&central_path).unwrap();
