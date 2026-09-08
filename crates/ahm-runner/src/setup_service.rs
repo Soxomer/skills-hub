@@ -281,6 +281,7 @@ impl std::error::Error for OperationInterruption {}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct TargetSnapshot {
+    was_managed: bool,
     id: String,
     skill_id: String,
     tool: String,
@@ -304,6 +305,7 @@ struct ApplyOperation {
 impl From<&SkillTargetRecord> for TargetSnapshot {
     fn from(value: &SkillTargetRecord) -> Self {
         Self {
+            was_managed: true,
             id: value.id.clone(),
             skill_id: value.skill_id.clone(),
             tool: value.tool.clone(),
@@ -1188,11 +1190,7 @@ impl SetupService {
         ensure_no_conflicts(&reconciliation.plan)?;
 
         let operation_id = Uuid::new_v4().to_string();
-        let snapshots = reconciliation
-            .current_records
-            .iter()
-            .map(TargetSnapshot::from)
-            .collect::<Vec<_>>();
+        let snapshots = target_snapshots_before_apply(&reconciliation);
         let snapshots_json = serde_json::to_string(&snapshots)?;
         self.begin_filesystem_operation(
             &operation_id,
@@ -1374,7 +1372,11 @@ impl SetupService {
                 "DELETE FROM skill_targets WHERE scope = 'project' AND project_path = ?1",
                 params![project.path],
             )?;
-            for record in &operation.previous_targets {
+            for record in operation
+                .previous_targets
+                .iter()
+                .filter(|record| record.was_managed)
+            {
                 let record = SkillTargetRecord::from(record);
                 insert_target(&tx, &record)?;
             }
@@ -2267,6 +2269,38 @@ impl SetupService {
     }
 }
 
+fn target_snapshots_before_apply(reconciliation: &Reconciliation) -> Vec<TargetSnapshot> {
+    let mut snapshots = reconciliation
+        .current_records
+        .iter()
+        .map(TargetSnapshot::from)
+        .collect::<Vec<_>>();
+    for operation in &reconciliation.operations {
+        if let PhysicalOperation::Keep(current, desired) = operation {
+            if current.records.is_empty() {
+                // An identical preexisting target is adopted without a write.
+                // Rollback must preserve it on disk and relinquish its ownership.
+                for tool in &desired.tools {
+                    snapshots.push(TargetSnapshot {
+                        was_managed: false,
+                        id: Uuid::new_v4().to_string(),
+                        skill_id: desired.skill.id.clone(),
+                        tool: tool.clone(),
+                        scope: "project".to_string(),
+                        project_path: Some(reconciliation.plan.project.path.clone()),
+                        target_path: desired.target_path.to_string_lossy().to_string(),
+                        mode: sync_mode_name(current.actual_mode).to_string(),
+                        status: "ok".to_string(),
+                        last_error: None,
+                        synced_at: None,
+                    });
+                }
+            }
+        }
+    }
+    snapshots
+}
+
 fn recovery_plan(reconciliation: &Reconciliation) -> FilesystemRecoveryPlan {
     let steps = reconciliation
         .operations
@@ -2744,6 +2778,144 @@ mod recovery_tests {
                 .map_err(Into::into)
             })
             .unwrap()
+    }
+
+    fn adopted_fixture() -> (TempDir, SkillStore, SetupService, PathBuf) {
+        let (temp, store, service, project_path, setup) = fixture();
+        let original = project_path.join(".agents/skills/alpha");
+        std::fs::create_dir_all(&original).unwrap();
+        std::fs::write(original.join("SKILL.md"), "# Alpha").unwrap();
+        let central_path = temp.path().join("library/beta");
+        std::fs::create_dir_all(&central_path).unwrap();
+        std::fs::write(central_path.join("SKILL.md"), "# Beta").unwrap();
+        let mut beta = store.get_skill_by_id("skill-alpha").unwrap().unwrap();
+        beta.id = "skill-beta".to_owned();
+        beta.name = "beta".to_owned();
+        beta.central_path = central_path.to_string_lossy().to_string();
+        store.upsert_skill(&beta).unwrap();
+        service
+            .add_setup_skill(&setup.id, &beta.id, &["codex".to_owned()])
+            .unwrap();
+        service.assign_setup(&project_path, &setup.id).unwrap();
+        (temp, store, service, project_path)
+    }
+
+    fn assert_original_exists(project_path: &Path) {
+        let original = project_path.join(".agents/skills/alpha");
+        assert!(!std::fs::symlink_metadata(&original)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            std::fs::read_to_string(original.join("SKILL.md")).unwrap(),
+            "# Alpha"
+        );
+    }
+
+    #[test]
+    fn rollback_preserves_adopted_directory_and_releases_its_ownership_after_restart() {
+        let (_temp, store, service, project_path) = adopted_fixture();
+        for _ in 0..2 {
+            let applied = service.sync(&project_path, Some("alpha setup")).unwrap();
+            assert_original_exists(&project_path);
+            let reopened = SetupService::from_store(store.clone()).unwrap();
+            reopened
+                .rollback_operation(&project_path, &applied.operation_id)
+                .unwrap();
+            assert_original_exists(&project_path);
+            assert!(std::fs::symlink_metadata(project_path.join(".agents/skills/beta")).is_err());
+            let project = reopened.resolve_project(&project_path).unwrap();
+            assert!(reopened.project_targets(&project.path).unwrap().is_empty());
+            assert!(reopened
+                .status(&project_path)
+                .unwrap()
+                .project
+                .applied_setup
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn rollback_rejects_modified_adopted_content_without_removing_other_targets() {
+        let (_temp, _store, service, project_path) = adopted_fixture();
+        let applied = service.sync(&project_path, None).unwrap();
+        let original = project_path.join(".agents/skills/alpha/SKILL.md");
+        std::fs::write(&original, "user changes").unwrap();
+        assert!(service
+            .rollback_operation(&project_path, &applied.operation_id)
+            .is_err());
+        assert_eq!(std::fs::read_to_string(original).unwrap(), "user changes");
+        assert!(project_path.join(".agents/skills/beta/SKILL.md").exists());
+    }
+
+    #[test]
+    fn cancelled_rollback_restores_new_target_and_keeps_adopted_original_owned() {
+        let (_temp, store, service, project_path) = adopted_fixture();
+        let applied = service.sync(&project_path, None).unwrap();
+        let error = service
+            .rollback_checked(&project_path, Some(&applied.operation_id), &mut || {
+                Ok(!project_path.join(".agents/skills/beta").exists())
+            })
+            .unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<OperationInterruption>().unwrap(),
+            OperationInterruption::CancelledAndRestored(_)
+        ));
+        assert_original_exists(&project_path);
+        assert!(project_path.join(".agents/skills/beta/SKILL.md").exists());
+        let project = service.resolve_project(&project_path).unwrap();
+        assert_eq!(service.project_targets(&project.path).unwrap().len(), 2);
+        assert_eq!(journal_count(&store), 0);
+        service
+            .rollback_operation(&project_path, &applied.operation_id)
+            .unwrap();
+        assert_original_exists(&project_path);
+        assert!(service.project_targets(&project.path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn restart_recovers_interrupted_rollback_without_losing_adopted_original() {
+        let (_temp, store, service, project_path) = adopted_fixture();
+        let applied = service.sync(&project_path, None).unwrap();
+        let project = service.resolve_project(&project_path).unwrap();
+        let operation = service.latest_operation(&project.id).unwrap();
+        let reconciliation = service
+            .reconciliation_from_records(
+                project.clone(),
+                None,
+                operation
+                    .previous_targets
+                    .iter()
+                    .map(SkillTargetRecord::from)
+                    .collect(),
+            )
+            .unwrap();
+        let journal_id = Uuid::new_v4().to_string();
+        service
+            .begin_filesystem_operation(
+                &journal_id,
+                &project.id,
+                "rollback",
+                &recovery_plan(&reconciliation),
+            )
+            .unwrap();
+        service
+            .execute_files(&reconciliation, &journal_id, &mut || Ok(false))
+            .unwrap();
+        assert_original_exists(&project_path);
+        assert!(!project_path.join(".agents/skills/beta").exists());
+
+        let reopened = SetupService::from_store(store.clone()).unwrap();
+        reopened.plan(&project_path, None).unwrap();
+        assert_original_exists(&project_path);
+        assert!(project_path.join(".agents/skills/beta/SKILL.md").exists());
+        assert_eq!(reopened.project_targets(&project.path).unwrap().len(), 2);
+        assert_eq!(journal_count(&store), 0);
+        reopened
+            .rollback_operation(&project_path, &applied.operation_id)
+            .unwrap();
+        assert_original_exists(&project_path);
+        assert!(reopened.project_targets(&project.path).unwrap().is_empty());
     }
 
     #[test]
