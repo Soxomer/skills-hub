@@ -254,7 +254,7 @@ describe('Setup creation API', () => {
     await pool.end()
   })
 
-  it('rejects a custom name that collides with an existing Default Setup', async () => {
+  it('rejects custom names in the system Default Setup namespace', async () => {
     const { app, pool } = await postgresHarness()
     for (const name of [
       'Default / Project A / project_a',
@@ -266,8 +266,8 @@ describe('Setup creation API', () => {
         headers: actorHeaders,
         payload: { name, items: [selection()] },
       })
-      expect(response.statusCode).toBe(409)
-      expect(response.json()).toMatchObject({ code: 'setupNameTaken' })
+      expect(response.statusCode).toBe(400)
+      expect(response.json()).toMatchObject({ code: 'invalidSetupName' })
     }
     expect((await pool.query(`SELECT id FROM setups WHERE kind = 'custom'`)).rowCount).toBe(0)
     await app.close()

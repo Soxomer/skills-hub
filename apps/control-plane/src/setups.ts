@@ -121,7 +121,11 @@ export class SetupService {
       throw new SetupServiceError(400, 'invalidSetupName', 'Setup name is required')
     }
     const name = request.name.trim()
-    if (name.length < 1 || name.length > 120) {
+    if (
+      name.length < 1 ||
+      name.length > 120 ||
+      name.toLocaleLowerCase('en').startsWith('default /')
+    ) {
       throw new SetupServiceError(
         400,
         'invalidSetupName',
