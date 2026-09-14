@@ -5,6 +5,7 @@ import type {
   CaptureDefaultRevisionRequest,
   CreateProjectRequest,
   CreateSetupRequest,
+  PublishSetupRevisionRequest,
   RequestSetupPlanRequest,
   RollbackOperationRequest,
 } from '@ahm/contracts'
@@ -100,6 +101,20 @@ export function createControlPlaneApp(
   })
 
   if (setups) {
+    app.get('/api/v1/setups', async (request) => setups.listSetups(actor(request)))
+    app.get<{ Params: { setupId: string } }>('/api/v1/setups/:setupId', async (request) =>
+      setups.setupDetail(actor(request), request.params.setupId),
+    )
+    app.post<{ Params: { setupId: string }; Body: PublishSetupRevisionRequest }>(
+      '/api/v1/setups/:setupId/revisions', async (request, reply) => {
+        const revision = await setups.publishRevision(actor(request), request.params.setupId, request.body)
+        return reply.code(201).send(revision)
+      },
+    )
+    app.get<{ Params: { setupId: string; revisionId: string; contentDigest: string } }>(
+      '/api/v1/setups/:setupId/revisions/:revisionId/artifacts/:contentDigest', async (request) =>
+        setups.revisionArtifact(actor(request), request.params.setupId, request.params.revisionId, request.params.contentDigest),
+    )
     app.get('/api/v1/setups/composer', async (request) => setups.composer(actor(request)))
 
     app.post<{ Body: CreateSetupRequest }>('/api/v1/setups', async (request, reply) => {

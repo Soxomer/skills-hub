@@ -58,6 +58,8 @@ The connection code expires after ten minutes and is used only for enrollment. A
 
 For an unattended workstation, run `ahm worker` with the operating system's normal user-service manager. Restart it on failure and after login; do not run it as an elevated or system-wide service unless the managed projects require that ownership.
 
+For isolated acceptance testing, use explicit `--db` and `--runner-state` paths and `ahm worker --home <fixture-home>`. The home override controls discovery and the artifact cache; it does not change the process home or relocate registered project paths. Omit it for normal use.
+
 ## Recovery model
 
 - PostgreSQL durably stores desired Setup revisions, approvals, runner jobs, and portable receipts.

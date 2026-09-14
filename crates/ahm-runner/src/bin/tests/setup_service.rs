@@ -6,6 +6,25 @@ use ahm_runner::sync_engine::SyncMode;
 use ahm_runner::tool_adapters::{save_tool_config, CustomToolConfig, ToolConfig};
 use tempfile::TempDir;
 
+#[test]
+fn worker_accepts_an_isolated_home_without_changing_the_process_home() {
+    use clap::Parser;
+    let fixture = TempDir::new().unwrap();
+    let cli = super::Cli::try_parse_from([
+        "ahm",
+        "worker",
+        "--once",
+        "--home",
+        fixture.path().to_str().unwrap(),
+    ])
+    .unwrap();
+    let super::Command::Worker(args) = cli.command else {
+        panic!("expected worker")
+    };
+    assert!(args.once);
+    assert_eq!(super::scan_home(args.home).unwrap(), fixture.path());
+}
+
 fn managed_skill(store: &SkillStore, root: &Path, id: &str, name: &str) -> SkillRecord {
     let central_path = root.join(name);
     std::fs::create_dir_all(&central_path).unwrap();
@@ -41,6 +60,23 @@ fn setup() -> (TempDir, SkillStore, SetupService) {
     store.ensure_schema().unwrap();
     let service = SetupService::from_store(store.clone()).unwrap();
     (temp, store, service)
+}
+
+#[test]
+fn managed_inventory_excludes_paths_and_source_credentials() {
+    let (temp, store, service) = setup();
+    let mut skill = managed_skill(&store, temp.path(), "review", "Review");
+    skill.source_ref = Some("https://secret:token@example.test/private".to_owned());
+    skill.description = Some("/private/workstation/path".to_owned());
+    skill.enabled = false;
+    store.upsert_skill(&skill).unwrap();
+    let report = service.managed_skill_inventory().unwrap();
+    assert_eq!(report.len(), 1);
+    assert!(!report[0].enabled);
+    let json = serde_json::to_string(&report).unwrap();
+    assert!(!json.contains("token"));
+    assert!(!json.contains("private"));
+    assert!(!json.contains("centralPath"));
 }
 
 fn registered_project(temp: &TempDir, service: &SetupService, name: &str) -> std::path::PathBuf {

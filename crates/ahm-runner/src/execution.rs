@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
+#[cfg(feature = "acceptance-tests")]
+use crate::setup_service::TestFaultInjection;
 use crate::setup_service::{
     ApplyPlan, ApplyResult, DefaultSetupPreview, RecoveredOperation, SetupService,
 };
@@ -14,6 +16,13 @@ impl RunnerExecutionService {
     pub fn open(db_path: PathBuf) -> Result<Self> {
         Ok(Self {
             local_admin: SetupService::open(db_path)?,
+        })
+    }
+
+    #[cfg(feature = "acceptance-tests")]
+    pub fn open_with_test_fault(db_path: PathBuf, test_fault: TestFaultInjection) -> Result<Self> {
+        Ok(Self {
+            local_admin: SetupService::open(db_path)?.with_test_fault(test_fault),
         })
     }
 

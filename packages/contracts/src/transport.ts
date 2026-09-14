@@ -51,6 +51,7 @@ export interface RunnerProjectInstanceSummary {
 }
 
 export interface RunnerStatusResponse {
+  skillLibrary?: { reportedAt: string; skills: ManagedSkillSummary[] } | null
   deviceId: string
   label: string
   status: 'active' | 'revoked'
@@ -78,8 +79,19 @@ export interface RegisterProjectInstanceRequest {
 }
 
 export interface ClaimRunnerJobRequest {
+  skillLibrary?: ManagedSkillSummary[]
   capabilities: RunnerCapabilityReport
   waitMs?: number
+}
+
+/** Runner-owned inventory projection. Never includes workstation paths or source credentials. */
+export interface ManagedSkillSummary {
+  id: string
+  name: string
+  sourceType: string
+  enabled: boolean
+  tags: string[]
+  targets: { tool: string; scope: 'global' | 'project' }[]
 }
 
 export interface LeasedRunnerJob {

@@ -6,6 +6,7 @@ import { InMemoryProjectRepository } from '../src/projects-memory.js'
 import { ProjectService } from '../src/projects.js'
 import { InMemoryRunnerTransportRepository } from '../src/runner-transport-memory.js'
 import { RunnerTransportService } from '../src/runner-transport.js'
+import { artifactDigest } from '../src/artifact-digest.js'
 
 const actorHeaders = {
   'x-ahm-organization-id': 'org_01',
@@ -29,6 +30,7 @@ function harness() {
   let now = new Date('2026-09-01T10:00:00.000Z')
   let sequence = 0
   const repository = new InMemoryRunnerTransportRepository()
+  repository.seedMembership({ organizationId: 'org_01', userId: 'user_01' }, 'owner')
   repository.seedProject('org_01', 'project_01')
   const service = new RunnerTransportService(repository, {
     serverUrl: 'https://hub.example.test',
@@ -45,6 +47,25 @@ function harness() {
     },
   }
 }
+
+it('reports a runner-owned library with tenant isolation and preserves it between reports', async () => {
+  const { app } = harness()
+  const identity = await connect(app)
+  const skills = [{ id: 'review', name: 'Review', sourceType: 'git', enabled: true, tags: ['Quality'], targets: [{ tool: 'codex', scope: 'global' }] }]
+  const claim = (skillLibrary?: unknown) => app.inject({ method: 'POST', url: '/runner/v1/jobs/claim', headers: { authorization: `Bearer ${identity.credential}` }, payload: { capabilities, waitMs: 0, ...(skillLibrary === undefined ? {} : { skillLibrary }) } })
+  expect((await claim(skills)).statusCode).toBe(204)
+  const status = () => app.inject({ method: 'GET', url: `/api/v1/runners/${identity.deviceId}`, headers: actorHeaders })
+  expect((await status()).json().skillLibrary.skills).toEqual(skills)
+  await claim()
+  expect((await status()).json().skillLibrary.skills).toEqual(skills)
+  expect((await claim([{ ...skills[0], centralPath: '/private' }])).statusCode).toBe(400)
+  expect((await status()).json().skillLibrary.skills).toEqual(skills)
+  const foreign = await app.inject({ method: 'GET', url: `/api/v1/runners/${identity.deviceId}`, headers: { ...actorHeaders, 'x-ahm-organization-id': 'other' } })
+  expect([403, 404]).toContain(foreign.statusCode)
+  await claim([])
+  expect((await status()).json().skillLibrary.skills).toEqual([])
+  await app.close()
+})
 
 async function connect(app: ReturnType<typeof createControlPlaneApp>) {
   const created = await app.inject({
@@ -411,7 +432,7 @@ describe('runner transport', () => {
     const { app } = harness()
     const identity = await connect(app)
     const authorization = { authorization: `Bearer ${identity.credential}` }
-    const contentDigest = `sha256:${'f'.repeat(64)}`
+    const contentDigest = artifactDigest([{ path: 'SKILL.md', kind: 'file', contentBase64: btoa('# Shared') }])
     const bundle = {
       contentDigest,
       entries: [

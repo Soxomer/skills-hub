@@ -1,0 +1,8 @@
+{
+  "contentDigest": "sha256:32664c7b2b0b89a51ae5c627ff5785feba10efbea2625ed24d0a606b760679aa",
+  "entries": [
+    { "path": "nested/é.txt", "kind": "file", "contentBase64": "aGVsbG8=" },
+    { "path": "nested", "kind": "directory", "contentBase64": null },
+    { "path": "SKILL.md", "kind": "file", "contentBase64": "IyBTaGFyZWQK" }
+  ]
+}

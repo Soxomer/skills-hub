@@ -23,6 +23,9 @@ use crate::{
 };
 
 pub trait JobExecutor {
+    fn skill_library(&self) -> anyhow::Result<Option<Vec<ahm_domain::ManagedSkillSummary>>> {
+        Ok(None)
+    }
     fn capabilities(&self) -> RunnerCapabilities;
     fn execute(
         &self,
@@ -222,6 +225,12 @@ impl LocalJobExecutor {
 }
 
 impl JobExecutor for LocalJobExecutor {
+    fn skill_library(&self) -> anyhow::Result<Option<Vec<ahm_domain::ManagedSkillSummary>>> {
+        self.runner
+            .local_admin()
+            .managed_skill_inventory()
+            .map(Some)
+    }
     fn capabilities(&self) -> RunnerCapabilities {
         runner_capabilities()
     }

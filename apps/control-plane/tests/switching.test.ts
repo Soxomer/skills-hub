@@ -55,6 +55,8 @@ async function harness() {
      VALUES ('org_01', 'Example', $1);
      INSERT INTO users (id, display_name, created_at)
      VALUES ('user_01', 'Owner', $1);
+     INSERT INTO organization_memberships (organization_id, user_id, role, created_at)
+     VALUES ('org_01', 'user_01', 'owner', $1);
      INSERT INTO projects (id, organization_id, name, created_at, updated_at)
      VALUES ('project_01', 'org_01', 'Project', $1, $1);
      INSERT INTO runner_devices
@@ -936,6 +938,66 @@ describe('Setup switching', () => {
           recoverability: 'manualIntervention',
         },
       ],
+    })
+
+    const recoveredPlan: ResultEnvelope = {
+      protocolVersion: '1.0',
+      jobId: 'job_recovered_plan',
+      idempotencyKey: 'plan-after-recovery',
+      organizationId: 'org_01',
+      deviceId: 'device_01',
+      projectInstanceId: 'instance_01',
+      result: {
+        kind: 'planResult',
+        payload: {
+          projectId: 'project_01',
+          plan: {
+            setupRevisionId: 'revision_default',
+            planDigest: `sha256:${'a'.repeat(64)}`,
+            conflicts: [],
+            actions: [
+              {
+                actionId: 'action_recovered',
+                kind: 'link',
+                change: 'unchanged',
+                artifactId: 'artifact_default',
+                destination: {
+                  toolId: 'codex',
+                  projectRelativePath: '.agents/skills/default',
+                },
+              },
+            ],
+          },
+        },
+      },
+    }
+    await pool.query(
+      `INSERT INTO runner_jobs
+       (id, organization_id, device_id, project_instance_id, protocol_version,
+        idempotency_key, job_kind, payload, setup_revision_id, state, issued_at, expires_at,
+        completed_at, result_json, result_digest)
+       VALUES ('job_recovered_plan', 'org_01', 'device_01', 'instance_01', '1.0',
+        'plan-after-recovery', 'planSetup', $1::jsonb, 'revision_default', 'succeeded', $2, $3, $2,
+        $4::jsonb, $5)`,
+      [
+        JSON.stringify({ projectId: 'project_01', revision: { setupRevisionId: 'revision_default' } }),
+        '2026-09-02T10:01:00.000Z',
+        '2026-09-02T11:00:00.000Z',
+        JSON.stringify(recoveredPlan),
+        `sha256:${'b'.repeat(64)}`,
+      ],
+    )
+    const afterRecovery = await app.inject({
+      method: 'GET',
+      url: '/api/v1/project-instances/instance_01/operations',
+      headers: actorHeaders,
+    })
+    expect(afterRecovery.json()).toMatchObject({
+      health: 'current',
+      reviewedPlan: {
+        jobId: 'job_recovered_plan',
+        plan: { setupRevisionId: 'revision_default' },
+      },
     })
     await app.close()
     await pool.end()

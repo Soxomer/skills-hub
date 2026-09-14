@@ -6,6 +6,7 @@ This document records the repeatable, connected acceptance exercise for Setup sw
 
 1. Start a clean, isolated PostgreSQL database, seed the local development actor's organization and user, and run the control plane with its `DATABASE_URL` pointed at that database. Reset incompatible POC data instead of carrying it through compatibility migrations.
 2. Start `npm run dev:web` and a local `ahm worker` with disposable runner SQLite state.
+   Supply `--home <fixture-home>` to the worker and create the fixture tool's detection directory (for Codex, `<fixture-home>/.codex`). Use fresh project trees for every run, not only fresh databases.
 3. Enroll one runner, then open a second browser tab. Confirm both tabs show the same device and the same active operation.
 4. Create two projects with distinct initial skills and capture one Default revision for each. Confirm a project's revision picker includes only its own Default plus organization custom Setups.
 5. In the browser, open `New Setup`, name it, select capabilities from the captured revisions, and create revision 1. Do not seed Setup rows directly. Confirm the new custom revision appears in both projects' normal Setup picker.
@@ -24,3 +25,88 @@ This document records the repeatable, connected acceptance exercise for Setup sw
 - This Windows workspace has no Linux or macOS runner/target installed (`rustup target list --installed` contains only `x86_64-pc-windows-msvc`). The Unix symlink test remains platform-gated and must be executed on Linux and macOS before OMA-30 can be marked Done.
 - The original connected run used a pre-seeded alternate Setup. OMA-113 replaces that setup-only shortcut; repeat the flow above through `New Setup` before treating the browser creation step as connected acceptance evidence.
 - OMA-113 assumes a clean POC database. Migration 0007 establishes case-insensitive Setup-name uniqueness directly and intentionally fails when old data violates that invariant; no legacy reconciliation path is part of the acceptance surface.
+
+## Follow-up connected run: discoveries
+
+The independent Setups page was exercised against a live local API, PostgreSQL 16,
+and an enrolled Windows worker. Both Defaults and a reusable Setup were created
+through browser controls, without seeding Setup rows. Apply and rollback were
+observed in durable runner job state. The initial attempts are **not** a completed
+acceptance pass: they exposed the following issues and test-harness corrections.
+
+- Concurrent worker/CLI startup against a new SQLite database could attempt the
+  same column migration twice. Commit `211cf05` serializes schema initialization
+  and tests both concurrency and rollback on migration failure.
+- OMA-124: rollback removed pre-existing identical skill content after Apply
+  adopted it. The apply snapshot only recorded previously managed targets.
+  This was reproduced solely in disposable fixtures; do not count a successful
+  rollback receipt alone as proof that the original tree survived.
+- Browser automation must wait for the app's post-operation transition and use
+  `Prepare another plan` before starting the next operation. A no-change receipt
+  does not necessarily offer Rollback. Earlier locator timeouts were harness
+  errors, not failed runner jobs.
+
+Acceptance now checks original skill bytes immediately after Rollback, in
+addition to unrelated files and the final Default assignment. Disposable run
+databases and local evidence remain under the task's isolated acceptance scope.
+
+## Post-fix connected evidence
+
+After the OMA-124 fix, the complete two-project browser creation/apply/reload/
+rollback/Default sequence passed with fresh fixture trees on Windows. The live
+database is `ahm_connected_1788904599944`; local evidence is retained in ignored
+`.oma30-acceptance/connected/run-1788904599753/`.
+
+- Browser-created `Connected combined Setup` has two items and revision
+  `revision_26375b04-2437-4261-bfa9-92f3c1c09c59`.
+- Both projects completed Apply, browser reload, durable Rollback, and explicit
+  Use Default with separately approved plans. Original skill bytes were checked
+  immediately after rollback; both unrelated files survived.
+- PostgreSQL confirms four successful apply jobs, two successful rollback jobs,
+  six successful plan jobs, and two successful scans. Both final assignments
+  point to their own project's Default revision 1.
+- Runner SQLite agrees: both custom materializations are `rolledBack`, both
+  Default materializations are `applied`, and all journal jobs succeeded.
+- Browser page-error collection was empty. No real user projects or home skill
+  content were used. Test servers and workers were stopped after the run.
+- Four regression tests additionally cover original-directory preservation,
+  readoption, modified-content conflicts, cancellation, and interrupted-rollback
+  restart recovery. The new required snapshot ownership field deliberately
+  changes local POC operation JSON: use fresh disposable state rather than
+  attempting to roll back operations recorded by an older build.
+
+This closes the previously missing **browser-created Setup** acceptance slice.
+It does not rerun the older multi-tab cancellation and stale-plan scenarios, or
+prove hosted macOS/Linux execution. OMA-30/122 remain open for those outstanding
+verification boundaries; the CI matrix is configured but no hosted run was
+returned by the GitHub Actions query at handoff.
+
+Final local gate: `npm run check` passed with 125 TypeScript tests and 96 Rust
+tests, plus all builds, lint, version/boundary checks, rustfmt, and Clippy.
+
+## Consolidation acceptance — 2026-09-15
+
+Repeated the connected browser flow using PostgreSQL 18.4 on loopback and two
+fresh disposable Windows checkouts. The browser created both projects, captured
+their independent Defaults, and published the two-item `Acceptance combined`
+Setup through normal product controls. No Setup rows were seeded.
+
+- Two browser tabs requesting a plan produced one shared operation; cancellation
+  from the second tab completed before filesystem mutation.
+- Adding an unmanaged destination after review caused `planDigestMismatch`.
+  The browser displayed a fresh conflicting plan without an Apply action, and
+  the conflicting file retained its exact bytes.
+- An opt-in `acceptance-tests` runner build failed after the first filesystem
+  action. Recovery remained required after browser reload: Setup selection and
+  Apply were blocked. `Retry recovery` restored the previous state and enabled
+  review again. Normal runner builds do not contain the fault switch.
+- Both projects completed custom Apply, browser reload, durable Rollback, and
+  explicit return to their own Default. Original skill bytes and unrelated files
+  survived; PostgreSQL assignments and runner SQLite materializations agree.
+- Fixed a connected-flow dead end after successful/no-change Apply by offering
+  `Prepare another plan`; a browser interaction regression test covers it.
+- Real PostgreSQL concurrent-publisher testing passed separately. The CI format
+  command now uses supported `cargo fmt --all`, and CI supports manual dispatch.
+
+Local evidence: `.oma30-acceptance/ahm_acceptance_1789425060225/evidence.json`.
+Hosted Linux/macOS results are still required before OMA-30 is closed.

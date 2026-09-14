@@ -15,6 +15,8 @@ import type { Pool, PoolClient, QueryResultRow } from 'pg'
 
 import type {
   JobCompletion,
+  BrowserRunnerRepository,
+  RequestActor,
   JobAcknowledgement,
   JobControlCheck,
   ProjectInstanceRoute,
@@ -23,6 +25,8 @@ import type {
   RunnerEnrollmentRecord,
   RunnerTransportRepository,
 } from './runner-transport.js'
+import { RunnerTransportError } from './runner-transport.js'
+import { membershipAllows, type BrowserAccess, type MembershipRole } from './development-auth.js'
 
 interface EnrollmentRow extends QueryResultRow {
   id: string
@@ -43,6 +47,7 @@ interface AuthenticationRow extends QueryResultRow {
 }
 
 interface RunnerStatusRow extends QueryResultRow {
+  skill_library: RunnerStatusResponse['skillLibrary']
   id: string
   label: string
   status: RunnerStatusResponse['status']
@@ -299,10 +304,27 @@ async function transaction<T>(pool: Pool, operation: (client: PoolClient) => Pro
 }
 
 export class PostgresRunnerTransportRepository implements RunnerTransportRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly pool: Pool, private readonly browserClient?: PoolClient) {}
+
+  private get browserDatabase(): Pool | PoolClient {
+    return this.browserClient ?? this.pool
+  }
+
+  async withActor<T>(actor: RequestActor, access: BrowserAccess, operation: (repository: BrowserRunnerRepository) => Promise<T>): Promise<T> {
+    return transaction(this.pool, async (client) => {
+      const membership = await client.query<{ role: MembershipRole }>(
+        `SELECT role FROM organization_memberships WHERE organization_id = $1 AND user_id = $2 FOR SHARE`,
+        [actor.organizationId, actor.userId],
+      )
+      if (!membershipAllows(membership.rows[0]?.role, access)) {
+        throw new RunnerTransportError(403, 'organization membership does not permit this operation')
+      }
+      return operation(new PostgresRunnerTransportRepository(this.pool, client))
+    })
+  }
 
   async createEnrollment(record: RunnerEnrollmentRecord): Promise<void> {
-    await this.pool.query(
+    await this.browserDatabase.query(
       `INSERT INTO runner_enrollments
        (id, organization_id, created_by, code_hash, state, claimed_device_id,
         created_at, expires_at, claimed_at)
@@ -326,12 +348,12 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
     enrollmentId: string,
     now: string,
   ): Promise<RunnerEnrollmentRecord | null> {
-    await this.pool.query(
+    await this.browserDatabase.query(
       `UPDATE runner_enrollments SET state = 'expired'
        WHERE id = $1 AND organization_id = $2 AND state = 'waiting' AND expires_at <= $3`,
       [enrollmentId, organizationId, now],
     )
-    const result = await this.pool.query<EnrollmentRow>(
+    const result = await this.browserDatabase.query<EnrollmentRow>(
       `SELECT * FROM runner_enrollments WHERE id = $1 AND organization_id = $2`,
       [enrollmentId, organizationId],
     )
@@ -402,13 +424,13 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
     deviceId: string,
   ): Promise<RunnerStatusResponse | null> {
     const [deviceResult, projectInstancesResult] = await Promise.all([
-      this.pool.query<RunnerStatusRow>(
+      this.browserDatabase.query<RunnerStatusRow>(
         `SELECT id, label, status, enrolled_at, last_seen_at, runner_version,
-                supported_protocol_versions, capabilities
+                supported_protocol_versions, capabilities, skill_library
          FROM runner_devices WHERE organization_id = $1 AND id = $2`,
         [organizationId, deviceId],
       ),
-      this.pool.query<ProjectInstanceStatusRow>(
+      this.browserDatabase.query<ProjectInstanceStatusRow>(
         `SELECT id, project_id, registered_at, last_seen_at
          FROM project_instances
          WHERE organization_id = $1 AND device_id = $2
@@ -433,6 +455,7 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
       status: device.status,
       enrolledAt: iso(device.enrolled_at),
       lastSeenAt: device.last_seen_at ? iso(device.last_seen_at) : null,
+      skillLibrary: device.skill_library ?? null,
       capabilities,
       projectInstances: projectInstancesResult.rows.map((instance) => ({
         projectInstanceId: instance.id,
@@ -476,7 +499,7 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
     organizationId: string,
     projectInstanceId: string,
   ): Promise<ProjectInstanceRoute | null> {
-    const result = await this.pool.query<
+    const result = await this.browserDatabase.query<
       QueryResultRow & { organization_id: string; id: string; project_id: string; device_id: string }
     >(
       `SELECT organization_id, id, project_id, device_id
@@ -495,7 +518,7 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
   }
 
   async enqueueJob(job: JobEnvelope): Promise<void> {
-    await this.pool.query(
+    await this.browserDatabase.query(
       `INSERT INTO runner_jobs
        (id, organization_id, device_id, project_instance_id, protocol_version,
         idempotency_key, job_kind, payload, state, issued_at, expires_at)
@@ -559,12 +582,14 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
     leaseId: string,
     now: string,
     leaseExpiresAt: string,
+    skillLibrary?: import('@ahm/contracts').ManagedSkillSummary[],
   ): Promise<LeasedRunnerJob | null> {
     return transaction(this.pool, async (client) => {
       await client.query(
         `UPDATE runner_devices
          SET last_seen_at = $1, runner_version = $2,
-             supported_protocol_versions = $3::jsonb, capabilities = $4::jsonb
+             supported_protocol_versions = $3::jsonb, capabilities = $4::jsonb,
+             skill_library = COALESCE($7::jsonb, skill_library)
          WHERE organization_id = $5 AND id = $6 AND status = 'active'`,
         [
           now,
@@ -573,6 +598,7 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
           JSON.stringify(capabilities.capabilities),
           runner.organizationId,
           runner.deviceId,
+          skillLibrary === undefined ? null : JSON.stringify({ reportedAt: now, skills: skillLibrary }),
         ],
       )
       await client.query(
@@ -737,7 +763,7 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
     organizationId: string,
     jobId: string,
   ): Promise<RunnerJobStatusResponse | null> {
-    const result = await this.pool.query<JobRow>(
+    const result = await this.browserDatabase.query<JobRow>(
       `SELECT * FROM runner_jobs WHERE organization_id = $1 AND id = $2`,
       [organizationId, jobId],
     )
@@ -757,7 +783,7 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
     jobId: string,
     now: string,
   ): Promise<boolean> {
-    const result = await this.pool.query(
+    const result = await this.browserDatabase.query(
       `UPDATE runner_jobs
        SET cancel_requested_at = $1,
            state = CASE WHEN state = 'pending' THEN 'cancelled' ELSE state END,
@@ -770,7 +796,7 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
   }
 
   async revokeRunner(organizationId: string, deviceId: string): Promise<boolean> {
-    const result = await this.pool.query(
+    const result = await this.browserDatabase.query(
       `UPDATE runner_devices SET status = 'revoked'
        WHERE organization_id = $1 AND id = $2 AND status = 'active'`,
       [organizationId, deviceId],

@@ -234,23 +234,14 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
               </p>
               <code>{workflow.receipt.operationId}</code>
             </div>
-            {workflow.receipt.recoverability === 'rollbackAvailable' && (
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={!runnerOnline || workflow.submitting}
-                onClick={() => void workflow.rollback()}
-              >
-                {isWorking && trackedActiveKind === 'rollback' ? (
-                  <LoaderCircle className="spin" aria-hidden="true" size={15} />
-                ) : (
-                  <RotateCcw aria-hidden="true" size={15} />
-                )}
-                {isWorking && trackedActiveKind === 'rollback'
-                  ? t('switchFlow.rollback.starting')
-                  : t('switchFlow.rollback.action')}
-              </button>
-            )}
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={!runnerOnline || isWorking || workflow.operations?.health === 'attention'}
+              onClick={() => void workflow.preparePlan()}
+            >
+              {t('switchFlow.prepareAgain')}
+            </button>
           </div>
         </>
       ) : (
@@ -388,7 +379,14 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
         </>
       )}
 
-      {workflow.operations && <OperationHistory status={workflow.operations} />}
+      {workflow.operations && (
+        <OperationHistory
+          status={workflow.operations}
+          rollbackOperationId={workflow.rollbackOperationId}
+          disabled={!runnerOnline || isWorking}
+          onRollback={() => void workflow.rollback()}
+        />
+      )}
     </section>
   )
 })
@@ -724,7 +722,14 @@ function operationTime(value: string): string {
   }).format(new Date(value))
 }
 
-function OperationHistory({ status }: { status: ProjectInstanceOperationsResponse }) {
+interface OperationHistoryProps {
+  status: ProjectInstanceOperationsResponse
+  rollbackOperationId: string | null
+  disabled: boolean
+  onRollback: () => void
+}
+
+function OperationHistory({ status, rollbackOperationId, disabled, onRollback }: OperationHistoryProps) {
   const { t } = useTranslation()
   return (
     <section className="operation-history" aria-labelledby="operation-history-title">
@@ -740,7 +745,13 @@ function OperationHistory({ status }: { status: ProjectInstanceOperationsRespons
       ) : (
         <ol>
           {status.operations.map((operation) => (
-            <OperationHistoryItem key={operation.jobId} operation={operation} />
+            <OperationHistoryItem
+              key={operation.jobId}
+              operation={operation}
+              canRollback={rollbackOperationId !== null && operation.operationId === rollbackOperationId}
+              disabled={disabled}
+              onRollback={onRollback}
+            />
           ))}
         </ol>
       )}
@@ -748,7 +759,14 @@ function OperationHistory({ status }: { status: ProjectInstanceOperationsRespons
   )
 }
 
-function OperationHistoryItem({ operation }: { operation: ProjectOperationSummary }) {
+interface OperationHistoryItemProps {
+  operation: ProjectOperationSummary
+  canRollback: boolean
+  disabled: boolean
+  onRollback: () => void
+}
+
+function OperationHistoryItem({ operation, canRollback, disabled, onRollback }: OperationHistoryItemProps) {
   const { t } = useTranslation()
   const failed = ['failed', 'expired', 'cancelled'].includes(operation.state)
   return (
@@ -770,6 +788,12 @@ function OperationHistoryItem({ operation }: { operation: ProjectOperationSummar
           {operationTime(operation.completedAt ?? operation.issuedAt)}
         </time>
         <code>{operation.operationId ?? operation.jobId}</code>
+        {canRollback && (
+          <button className="secondary-button" type="button" disabled={disabled} onClick={onRollback}>
+            <RotateCcw aria-hidden="true" size={15} />
+            {t('switchFlow.rollback.action')}
+          </button>
+        )}
       </div>
     </li>
   )

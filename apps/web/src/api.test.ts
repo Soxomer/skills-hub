@@ -11,6 +11,22 @@ function client(request: typeof fetch) {
 }
 
 describe('ControlPlaneClient', () => {
+  it('encodes Setup library, revision publication, and content inspection routes', async () => {
+    const request = vi.fn<typeof fetch>().mockImplementation(async () => new Response('{}', { status: 200 }))
+    const api = client(request)
+    await api.setups()
+    await api.setup('setup / one')
+    await api.publishSetupRevision('setup / one', { expectedRevisionNumber: 2, items: [] })
+    await api.setupArtifact('setup / one', 'revision / 2', 'sha256:abc')
+    expect(request.mock.calls.map(([url]) => url)).toEqual([
+      'https://hub.example.test/api/v1/setups',
+      'https://hub.example.test/api/v1/setups/setup%20%2F%20one',
+      'https://hub.example.test/api/v1/setups/setup%20%2F%20one/revisions',
+      'https://hub.example.test/api/v1/setups/setup%20%2F%20one/revisions/revision%20%2F%202/artifacts/sha256%3Aabc',
+    ])
+    expect(request.mock.calls[2]?.[1]).toMatchObject({ method: 'POST', body: JSON.stringify({ expectedRevisionNumber: 2, items: [] }) })
+  })
+
   it('sends actor context and parses runner enrollment responses', async () => {
     const request = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

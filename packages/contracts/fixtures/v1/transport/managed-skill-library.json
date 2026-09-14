@@ -1,0 +1,6 @@
+[
+  { "id": "skill-review", "name": "Review", "sourceType": "git", "enabled": true,
+    "tags": ["Quality"], "targets": [{ "tool": "codex", "scope": "global" }] },
+  { "id": "skill-tests", "name": "Tests", "sourceType": "local", "enabled": false,
+    "tags": [], "targets": [{ "tool": "claude_code", "scope": "project" }] }
+]

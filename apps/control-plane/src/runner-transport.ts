@@ -1,4 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { artifactDigest } from './artifact-digest.js'
+import { isSkillLibrary } from './skill-library.js'
+import type { BrowserAccess } from './development-auth.js'
 
 import {
   PROTOCOL_VERSION,
@@ -74,6 +77,7 @@ export type JobControlCheck =
   | { outcome: 'conflict' | 'unknown' }
 
 export interface RunnerTransportRepository {
+  withActor<T>(actor: RequestActor, access: BrowserAccess, operation: (repository: BrowserRunnerRepository) => Promise<T>): Promise<T>
   createEnrollment(record: RunnerEnrollmentRecord): Promise<void>
   enrollmentStatus(
     organizationId: string,
@@ -113,6 +117,7 @@ export interface RunnerTransportRepository {
     leaseId: string,
     now: string,
     leaseExpiresAt: string,
+    skillLibrary?: ClaimRunnerJobRequest['skillLibrary'],
   ): Promise<LeasedRunnerJob | null>
   acknowledgeJob(
     runner: RunnerAuthentication,
@@ -181,12 +186,15 @@ function validateArtifactBundle(bundle: ArtifactBundle): void {
   const paths = new Set<string>()
   for (const entry of bundle.entries) {
     if (
-      typeof entry.path !== 'string' ||
+      !entry || typeof entry.path !== 'string' ||
       entry.path.length === 0 ||
       entry.path.length > 500 ||
       entry.path.includes('\\') ||
+      entry.path.includes(':') ||
+      Buffer.from(entry.path).toString('utf8') !== entry.path ||
+      [...entry.path].some((char) => char.charCodeAt(0) < 32 || (char.charCodeAt(0) >= 127 && char.charCodeAt(0) <= 159)) ||
       entry.path.startsWith('/') ||
-      entry.path.split('/').some((part) => part === '' || part === '.' || part === '..') ||
+      entry.path.split('/').some((part) => part === '' || part === '.' || part === '..' || part === '.git') ||
       paths.has(entry.path)
     ) {
       throw new RunnerTransportError(400, 'artifact bundle contains an invalid path')
@@ -210,7 +218,23 @@ function validateArtifactBundle(bundle: ArtifactBundle): void {
       throw new RunnerTransportError(413, 'artifact bundle exceeds 10 MiB')
     }
   }
+  const directories = new Set(bundle.entries.filter((entry) => entry.kind === 'directory').map((entry) => entry.path))
+  for (const entry of bundle.entries) {
+    const parts = entry.path.split('/')
+    for (let count = 1; count < parts.length; count += 1) {
+      if (!directories.has(parts.slice(0, count).join('/'))) {
+        throw new RunnerTransportError(400, 'artifact parent directory is missing')
+      }
+    }
+  }
+  if (artifactDigest(bundle.entries) !== bundle.contentDigest) {
+    throw new RunnerTransportError(400, 'artifact content digest does not match its bytes')
+  }
 }
+
+export type BrowserRunnerRepository = Pick<RunnerTransportRepository,
+  'createEnrollment' | 'enrollmentStatus' | 'runnerStatus' | 'projectInstance' |
+  'enqueueJob' | 'jobStatus' | 'requestCancellation' | 'revokeRunner'>
 
 function supportedJobKinds(report: RunnerCapabilityReport): string[] {
   const kinds: string[] = []
@@ -310,7 +334,7 @@ export class RunnerTransportService {
     const code = this.randomSecret(16)
     const enrollmentId = this.randomId()
     const expiresAt = new Date(now.getTime() + this.enrollmentTtlMs).toISOString()
-    await this.repository.createEnrollment({
+    await this.repository.withActor(actor, 'write', (repository) => repository.createEnrollment({
       id: enrollmentId,
       organizationId: actor.organizationId,
       createdBy: actor.userId,
@@ -320,7 +344,7 @@ export class RunnerTransportService {
       createdAt: now.toISOString(),
       expiresAt,
       claimedAt: null,
-    })
+    }))
     return {
       enrollmentId,
       code,
@@ -333,11 +357,11 @@ export class RunnerTransportService {
     actor: RequestActor,
     enrollmentId: string,
   ): Promise<RunnerEnrollmentStatus> {
-    const record = await this.repository.enrollmentStatus(
+    const record = await this.repository.withActor(actor, 'read', (repository) => repository.enrollmentStatus(
       actor.organizationId,
       enrollmentId,
       this.now().toISOString(),
-    )
+    ))
     if (!record) throw new RunnerTransportError(404, 'runner enrollment not found')
     return {
       enrollmentId: record.id,
@@ -378,7 +402,7 @@ export class RunnerTransportService {
   }
 
   async runnerStatus(actor: RequestActor, deviceId: string): Promise<RunnerStatusResponse> {
-    const runner = await this.repository.runnerStatus(actor.organizationId, deviceId)
+    const runner = await this.repository.withActor(actor, 'read', (repository) => repository.runnerStatus(actor.organizationId, deviceId))
     if (!runner) throw new RunnerTransportError(404, 'runner not found')
     return runner
   }
@@ -401,27 +425,30 @@ export class RunnerTransportService {
     projectInstanceId: string,
     includeUnmanaged: boolean,
   ): Promise<{ jobId: string }> {
-    const route = await this.repository.projectInstance(actor.organizationId, projectInstanceId)
-    if (!route) throw new RunnerTransportError(404, 'project instance not found')
-    const now = this.now()
-    const jobId = this.randomId()
-    const job: JobEnvelope = {
-      protocolVersion: PROTOCOL_VERSION,
-      jobId,
-      idempotencyKey: `scan-${jobId}`,
-      organizationId: actor.organizationId,
-      deviceId: route.deviceId,
-      projectInstanceId: route.projectInstanceId,
-      issuedAt: now.toISOString(),
-      expiresAt: new Date(now.getTime() + this.jobTtlMs).toISOString(),
-      job: {
-        kind: 'scanProject',
-        payload: { projectId: route.projectId, includeUnmanaged },
-      },
-    }
-    await this.repository.enqueueJob(job)
-    this.jobSignal.notify(route.deviceId)
-    return { jobId }
+    const queued = await this.repository.withActor(actor, 'write', async (repository) => {
+      const route = await repository.projectInstance(actor.organizationId, projectInstanceId)
+      if (!route) throw new RunnerTransportError(404, 'project instance not found')
+      const now = this.now()
+      const jobId = this.randomId()
+      const job: JobEnvelope = {
+        protocolVersion: PROTOCOL_VERSION,
+        jobId,
+        idempotencyKey: `scan-${jobId}`,
+        organizationId: actor.organizationId,
+        deviceId: route.deviceId,
+        projectInstanceId: route.projectInstanceId,
+        issuedAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + this.jobTtlMs).toISOString(),
+        job: {
+          kind: 'scanProject',
+          payload: { projectId: route.projectId, includeUnmanaged },
+        },
+      }
+      await repository.enqueueJob(job)
+      return { jobId, deviceId: route.deviceId }
+    })
+    this.jobSignal.notify(queued.deviceId)
+    return { jobId: queued.jobId }
   }
 
   async storeArtifact(credential: string, bundle: ArtifactBundle): Promise<void> {
@@ -446,6 +473,9 @@ export class RunnerTransportService {
   ): Promise<LeasedRunnerJob | null> {
     validateCapabilities(request.capabilities)
     const runner = await this.authenticate(credential)
+    if (request.skillLibrary !== undefined && !isSkillLibrary(request.skillLibrary)) {
+      throw new RunnerTransportError(400, 'invalid managed skill inventory')
+    }
     const waitMs = Math.min(
       25_000,
       Math.max(0, Number.isFinite(request.waitMs) ? Math.floor(request.waitMs ?? 0) : 0),
@@ -459,6 +489,7 @@ export class RunnerTransportService {
         this.randomId(),
         this.now().toISOString(),
         new Date(this.now().getTime() + this.leaseTtlMs).toISOString(),
+        request.skillLibrary,
       )
     const immediate = await claim()
     if (immediate || waitMs === 0) return immediate
@@ -557,25 +588,25 @@ export class RunnerTransportService {
   }
 
   async jobStatus(actor: RequestActor, jobId: string): Promise<RunnerJobStatusResponse> {
-    const status = await this.repository.jobStatus(actor.organizationId, jobId)
+    const status = await this.repository.withActor(actor, 'read', (repository) => repository.jobStatus(actor.organizationId, jobId))
     if (!status) throw new RunnerTransportError(404, 'runner job not found')
     return status
   }
 
   async cancelJob(actor: RequestActor, jobId: string): Promise<void> {
     if (
-      !(await this.repository.requestCancellation(
+      !(await this.repository.withActor(actor, 'write', (repository) => repository.requestCancellation(
         actor.organizationId,
         jobId,
         this.now().toISOString(),
-      ))
+      )))
     ) {
       throw new RunnerTransportError(404, 'cancellable runner job not found')
     }
   }
 
   async revokeRunner(actor: RequestActor, deviceId: string): Promise<void> {
-    if (!(await this.repository.revokeRunner(actor.organizationId, deviceId))) {
+    if (!(await this.repository.withActor(actor, 'write', (repository) => repository.revokeRunner(actor.organizationId, deviceId)))) {
       throw new RunnerTransportError(404, 'runner not found')
     }
   }

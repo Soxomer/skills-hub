@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, Transaction, TransactionBehavior};
 
 // Schema versioning: bump when making changes and add a migration step.
 const SCHEMA_VERSION: i32 = 11;
@@ -141,7 +142,12 @@ impl SkillStore {
 
     pub fn ensure_schema(&self) -> Result<()> {
         self.with_conn(|conn| {
-            conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+            conn.busy_timeout(Duration::from_secs(10))?;
+            // Worker startup and CLI registration may initialize the same file.
+            // Acquire the writer lock before reading its version, and roll back
+            // all schema changes if any migration fails.
+            let transaction = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+                .context("failed to lock database schema initialization")?;
 
             let user_version: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
             if user_version == 0 {
@@ -194,7 +200,9 @@ impl SkillStore {
                 );
             }
 
-            Ok(())
+            transaction
+                .commit()
+                .context("failed to commit database schema initialization")
         })
     }
 
@@ -741,8 +749,7 @@ impl SkillStore {
 
 fn migrate_skill_targets_to_v4(conn: &Connection) -> Result<()> {
     conn.execute_batch(
-        "BEGIN;
-         DROP INDEX IF EXISTS idx_skill_targets_unique_scope;
+        "DROP INDEX IF EXISTS idx_skill_targets_unique_scope;
          CREATE TABLE skill_targets_new (
            id TEXT PRIMARY KEY,
            skill_id TEXT NOT NULL,
@@ -764,8 +771,7 @@ fn migrate_skill_targets_to_v4(conn: &Connection) -> Result<()> {
          DROP TABLE skill_targets;
          ALTER TABLE skill_targets_new RENAME TO skill_targets;
          CREATE UNIQUE INDEX idx_skill_targets_unique_scope
-         ON skill_targets(skill_id, tool, scope, COALESCE(project_path, ''));
-         COMMIT;",
+         ON skill_targets(skill_id, tool, scope, COALESCE(project_path, ''));",
     )?;
     Ok(())
 }

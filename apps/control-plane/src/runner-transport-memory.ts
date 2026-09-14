@@ -11,6 +11,8 @@ import type {
 
 import type {
   JobCompletion,
+  BrowserRunnerRepository,
+  RequestActor,
   JobAcknowledgement,
   JobControlCheck,
   ProjectInstanceRoute,
@@ -19,8 +21,11 @@ import type {
   RunnerEnrollmentRecord,
   RunnerTransportRepository,
 } from './runner-transport.js'
+import { RunnerTransportError } from './runner-transport.js'
+import { membershipAllows, type BrowserAccess, type MembershipRole } from './development-auth.js'
 
 interface MemoryDevice extends RunnerAuthentication {
+  skillLibrary?: RunnerStatusResponse['skillLibrary']
   label: string
   credentialHash: string
   capabilities: RunnerCapabilityReport
@@ -47,6 +52,7 @@ interface MemoryProjectInstance extends ProjectInstanceRoute {
 }
 
 export class InMemoryRunnerTransportRepository implements RunnerTransportRepository {
+  private readonly memberships = new Map<string, MembershipRole>()
   private readonly enrollments = new Map<string, RunnerEnrollmentRecord>()
   private readonly enrollmentByCode = new Map<string, string>()
   private readonly devices = new Map<string, MemoryDevice>()
@@ -55,6 +61,21 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
   private readonly projectInstances = new Map<string, MemoryProjectInstance>()
   private readonly jobs = new Map<string, MemoryJob>()
   private readonly artifacts = new Map<string, ArtifactBundle>()
+
+  seedMembership(actor: RequestActor, role: MembershipRole): void {
+    this.memberships.set(JSON.stringify([actor.organizationId, actor.userId]), role)
+  }
+
+  removeMembership(actor: RequestActor): void {
+    this.memberships.delete(JSON.stringify([actor.organizationId, actor.userId]))
+  }
+
+  async withActor<T>(actor: RequestActor, access: BrowserAccess, operation: (repository: BrowserRunnerRepository) => Promise<T>): Promise<T> {
+    if (!membershipAllows(this.memberships.get(JSON.stringify([actor.organizationId, actor.userId])), access)) {
+      throw new RunnerTransportError(403, 'organization membership does not permit this operation')
+    }
+    return operation(this)
+  }
 
   seedProject(organizationId: string, projectId: string): void {
     this.projects.set(`${organizationId}:${projectId}`, projectId)
@@ -132,6 +153,7 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
       status: device.status,
       enrolledAt: device.enrolledAt,
       lastSeenAt: device.lastSeenAt,
+      skillLibrary: device.skillLibrary ?? null,
       capabilities: device.capabilities,
       projectInstances: [...this.projectInstances.values()]
         .filter(
@@ -227,11 +249,13 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
     leaseId: string,
     now: string,
     leaseExpiresAt: string,
+    skillLibrary?: import('@ahm/contracts').ManagedSkillSummary[],
   ): Promise<LeasedRunnerJob | null> {
     const device = this.devices.get(runner.deviceId)
     if (device) {
       device.capabilities = capabilities
       device.lastSeenAt = now
+      if (skillLibrary !== undefined) device.skillLibrary = { reportedAt: now, skills: structuredClone(skillLibrary) }
     }
     for (const job of this.jobs.values()) {
       if (

@@ -17,6 +17,7 @@ import {
   cancelledWithoutMutation,
   jobInFlight,
   preparedPlan,
+  recoverableOperationId,
   rollbackReceipt,
 } from './switch-state'
 
@@ -462,13 +463,14 @@ export function useSetupSwitch(
     refreshState,
   ])
 
+  const rollbackOperationId = contextReady ? recoverableOperationId(operations) : null
   const rollback = useCallback(async () => {
-    if (!contextReady || !receipt || !projectInstanceId) return false
+    if (!contextReady || !rollbackOperationId || !projectInstanceId) return false
     setSubmitting(true)
     setError(null)
     try {
       const queued = await client.rollbackSetup(projectInstanceId, {
-        operationId: receipt.operationId,
+        operationId: rollbackOperationId,
       })
       if (contextKeyRef.current !== contextKey) return false
       operationsRequestSequence.current += 1
@@ -490,7 +492,7 @@ export function useSetupSwitch(
     } finally {
       if (contextKeyRef.current === contextKey) setSubmitting(false)
     }
-  }, [adoptOperationConflict, client, contextKey, contextReady, projectInstanceId, receipt])
+  }, [adoptOperationConflict, client, contextKey, contextReady, projectInstanceId, rollbackOperationId])
 
   const keepOperationRunning = useCallback(() => setOperationConflict(null), [])
 
@@ -558,6 +560,7 @@ export function useSetupSwitch(
     preparePlan,
     applyPlan,
     rollback,
+    rollbackOperationId,
     keepOperationRunning,
     cancelActiveOperation,
     retryRecovery,

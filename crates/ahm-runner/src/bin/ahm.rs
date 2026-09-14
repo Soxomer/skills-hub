@@ -6,6 +6,8 @@ use ahm_domain::{
 };
 use ahm_runner::execution::RunnerExecutionService;
 use ahm_runner::job_dispatcher::{runner_capabilities, LocalJobExecutor};
+#[cfg(feature = "acceptance-tests")]
+use ahm_runner::setup_service::TestFaultInjection;
 use ahm_runner::setup_service::{
     default_cli_db_path, ApplyActionKind, ApplyPlan, DefaultSetupCandidateKind,
     DefaultSetupCaptureResult, DefaultSetupPreview, Project, ProjectStatus, SetupDetail,
@@ -79,12 +81,18 @@ struct ConnectArgs {
 
 #[derive(Debug, Args)]
 struct WorkerArgs {
+    /// Home directory used for discovery and the artifact cache.
+    #[arg(long)]
+    home: Option<PathBuf>,
     /// Process at most one claim cycle and exit.
     #[arg(long)]
     once: bool,
     /// Retry delay after a transport failure.
     #[arg(long, default_value_t = 2)]
     poll_seconds: u64,
+    #[cfg(feature = "acceptance-tests")]
+    #[arg(long, hide = true)]
+    test_partial_apply_once: bool,
 }
 
 #[derive(Debug, Args)]
@@ -497,7 +505,18 @@ fn run_worker(
         .identity()?
         .context("runner is not connected; run `ahm connect` first")?;
     let transport = HttpRunnerTransport::new(&identity.server_url)?;
-    let executor = LocalJobExecutor::new(RunnerExecutionService::open(db_path)?, scan_home(None)?);
+    #[cfg(feature = "acceptance-tests")]
+    let runner = if args.test_partial_apply_once {
+        RunnerExecutionService::open_with_test_fault(
+            db_path,
+            TestFaultInjection::partial_apply_once(),
+        )?
+    } else {
+        RunnerExecutionService::open(db_path)?
+    };
+    #[cfg(not(feature = "acceptance-tests"))]
+    let runner = RunnerExecutionService::open(db_path)?;
+    let executor = LocalJobExecutor::new(runner, scan_home(args.home)?);
     let mut worker = RunnerWorker::new(state, transport, executor)
         .with_claim_wait_ms(if args.once { 0 } else { 25_000 });
     if !json {

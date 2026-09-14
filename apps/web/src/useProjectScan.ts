@@ -3,7 +3,7 @@ import type {
   ProjectSummary,
   RunnerJobStatusResponse,
 } from '@ahm/contracts'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { ControlPlaneApiError, type ControlPlaneClient } from './api'
 import {
@@ -85,6 +85,27 @@ export function useProjectScan(client: ControlPlaneClient) {
   const [startingScan, setStartingScan] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [error, setError] = useState<ProjectWorkflowError | null>(null)
+  const contextVersion = useRef(0)
+  const selectedProjectRef = useRef(selectedProjectId)
+  const jobRequestVersion = useRef(0)
+
+  // Invalidate outstanding requests synchronously, including A -> B -> A switches.
+  const selectProject = useCallback((projectId: string) => {
+    if (selectedProjectRef.current === projectId) return
+    contextVersion.current += 1
+    selectedProjectRef.current = projectId
+    setSelectedProjectId(projectId)
+    setScan(null)
+    setJobStatus(null)
+    setCapture(null)
+    setStartingScan(false)
+    setCapturing(false)
+    setError(null)
+  }, [])
+
+  useEffect(() => () => {
+    contextVersion.current += 1
+  }, [])
 
   const refreshProjects = useCallback(
     async (showLoading = true) => {
@@ -92,12 +113,9 @@ export function useProjectScan(client: ControlPlaneClient) {
       try {
         const response = await client.projects()
         setProjects(response.projects)
-        setSelectedProjectId((current) => {
-          if (current && response.projects.some((project) => project.projectId === current)) {
-            return current
-          }
-          return response.projects[0]?.projectId ?? ''
-        })
+        if (!response.projects.some((project) => project.projectId === selectedProjectRef.current)) {
+          selectProject(response.projects[0]?.projectId ?? '')
+        }
         setError((current) => (current?.stage === 'projects' ? null : current))
       } catch (nextError) {
         setError(workflowError('projects', nextError))
@@ -105,7 +123,7 @@ export function useProjectScan(client: ControlPlaneClient) {
         if (showLoading) setLoadingProjects(false)
       }
     },
-    [client],
+    [client, selectProject],
   )
 
   useEffect(() => {
@@ -133,8 +151,12 @@ export function useProjectScan(client: ControlPlaneClient) {
   const activeJobId = scan?.jobId ?? null
   const refreshJob = useCallback(async () => {
     if (!activeJobId) return
+    const context = contextVersion.current
+    const request = ++jobRequestVersion.current
+    const isCurrent = () => context === contextVersion.current && request === jobRequestVersion.current
     try {
       const status = await client.job(activeJobId)
+      if (!isCurrent()) return
       setJobStatus(status)
       const discoveries = scanDiscoveries(status)
       if (discoveries) {
@@ -149,7 +171,7 @@ export function useProjectScan(client: ControlPlaneClient) {
       }
       setError((current) => (current?.stage === 'status' ? null : current))
     } catch (nextError) {
-      setError(workflowError('status', nextError))
+      if (isCurrent()) setError(workflowError('status', nextError))
     }
   }, [activeJobId, client])
 
@@ -161,6 +183,7 @@ export function useProjectScan(client: ControlPlaneClient) {
 
   const createProject = useCallback(
     async (name: string, repositoryIdentity: string) => {
+      const context = contextVersion.current
       setCreatingProject(true)
       setError(null)
       try {
@@ -169,36 +192,27 @@ export function useProjectScan(client: ControlPlaneClient) {
           repositoryIdentity: repositoryIdentity.trim() || null,
         })
         setProjects((current) => [...current, project])
-        setSelectedProjectId(project.projectId)
-        setScan(null)
-        setJobStatus(null)
-        setCapture(null)
+        if (context === contextVersion.current) selectProject(project.projectId)
         return true
       } catch (nextError) {
-        setError(workflowError('create', nextError))
+        if (context === contextVersion.current) setError(workflowError('create', nextError))
         return false
       } finally {
         setCreatingProject(false)
       }
     },
-    [client],
+    [client, selectProject],
   )
-
-  const selectProject = useCallback((projectId: string) => {
-    setSelectedProjectId(projectId)
-    setScan((current) => (current?.projectId === projectId ? current : null))
-    setJobStatus((current) => (scan?.projectId === projectId ? current : null))
-    setCapture(null)
-    setError(null)
-  }, [scan?.projectId])
 
   const startScan = useCallback(
     async (projectInstanceId: string) => {
       if (!selectedProjectId) return false
+      const context = ++contextVersion.current
       setStartingScan(true)
       setError(null)
       try {
         const queued = await client.scanProject(projectInstanceId)
+        if (context !== contextVersion.current) return false
         setScan({
           projectId: selectedProjectId,
           projectInstanceId,
@@ -214,10 +228,10 @@ export function useProjectScan(client: ControlPlaneClient) {
         setCapture(null)
         return true
       } catch (nextError) {
-        setError(workflowError('scan', nextError))
+        if (context === contextVersion.current) setError(workflowError('scan', nextError))
         return false
       } finally {
-        setStartingScan(false)
+        if (context === contextVersion.current) setStartingScan(false)
       }
     },
     [client, selectedProjectId],
@@ -249,6 +263,7 @@ export function useProjectScan(client: ControlPlaneClient) {
 
   const captureDefault = useCallback(async () => {
     if (!scan || !discoveries || scan.includedDiscoveryIds === null) return false
+    const context = contextVersion.current
     setCapturing(true)
     setError(null)
     try {
@@ -256,14 +271,15 @@ export function useProjectScan(client: ControlPlaneClient) {
         scanJobId: scan.jobId,
         includedDiscoveryIds: scan.includedDiscoveryIds,
       })
+      if (context !== contextVersion.current) return false
       setCapture(result)
       await refreshProjects(false)
       return true
     } catch (nextError) {
-      setError(workflowError('capture', nextError))
+      if (context === contextVersion.current) setError(workflowError('capture', nextError))
       return false
     } finally {
-      setCapturing(false)
+      if (context === contextVersion.current) setCapturing(false)
     }
   }, [client, discoveries, refreshProjects, scan])
 

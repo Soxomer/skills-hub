@@ -1,5 +1,9 @@
 # Agent Harness Manager — Product and Implementation Roadmap
 
+## Feature-parity correction — 2026-09-09
+
+Skills Hub's existing features are the baseline, not optional new features. Follow [the restoration backlog](FEATURE-PARITY-RESTORATION.md) alongside this AHM roadmap. Projects and Setups add to the managed-skills product; they do not replace My Skills, Explore, import, tools, tags, updates or preferences.
+
 Status: accepted product direction; implementation roadmap
 
 Last updated: 2026-08-30
@@ -8,7 +12,7 @@ Last updated: 2026-08-30
 
 Agent Harness Manager lets individuals, teams, and companies assemble, evaluate, assign, and safely switch the capabilities used by AI coding agents.
 
-The product is not another plugin format or marketplace. It is the management layer between upstream capability sources and the agent-specific files or configuration installed on a machine or project.
+The AHM layer is not another plugin format or marketplace. It is the management layer between upstream capability sources and the agent-specific files or configuration installed on a machine or project. Skills Hub's existing Explore/catalog experience remains part of the product being ported.
 
 Its core promise is:
 
