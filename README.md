@@ -83,6 +83,8 @@ The CLI and remote worker use the same execution service and adapter registry. S
 
 ## Quality gate
 
+Hosting configuration and verification: [Deployment guide](docs/DEPLOYMENT.md).
+
 ```bash
 npm run check
 ```
