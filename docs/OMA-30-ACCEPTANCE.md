@@ -110,3 +110,28 @@ Setup through normal product controls. No Setup rows were seeded.
 
 Local evidence: `.oma30-acceptance/ahm_acceptance_1789425060225/evidence.json`.
 Hosted Linux/macOS results are still required before OMA-30 is closed.
+
+## Hosted platform verification — 2026-09-15
+
+The first hosted run exposed duplicate Default candidates on Windows and macOS:
+the persisted target used a directory alias while scanning used its canonical
+parent. Selection keys now canonicalize the parent directory while preserving
+distinct symlink destinations. Regression coverage includes missing targets and
+two Unix symlinks pointing at the same content.
+
+[CI run 34905890846](https://github.com/Soxomer/skills-hub/actions/runs/34905890846)
+passed the web/control-plane job with PostgreSQL 16 and the complete Rust
+format/Clippy/test jobs on Ubuntu, Windows 2022 and macOS 14 at `0336ffd`.
+This supplies the previously missing hosted symlink/junction/copy evidence.
+
+The real PostgreSQL test additionally forces both publishers to wait on the
+same Setup lock, injects an audit-insert failure and checks that no revision or
+items escape the transaction, forces two plan requests onto the same project
+lock, and checks one admitted operation. Concurrent worker claims reuse one
+lease and increment the attempt count once. Cancellation, durable terminal
+state and duplicate-result acknowledgement are also exercised through the
+transport service. The complete local gate passes with 133 TypeScript tests
+and 100 Windows Rust tests.
+
+These are engineering acceptance results. The milestone's user demo acceptance
+remains a separate product decision before plugin-provenance work (OMA-31).

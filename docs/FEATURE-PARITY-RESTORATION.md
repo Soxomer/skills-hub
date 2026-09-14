@@ -8,6 +8,12 @@ Baseline: `6d65fd018cbdaac8eeeeb487ab21c20060069912`, before cutover `c7ac637`. 
 
 ## Sequenced restoration backlog
 
+Resumption checkpoint — 2026-09-15: the read-only My Skills slice and pending
+Setup reliability work are consolidated in `main` through PR #2. Connected
+acceptance and platform results are recorded in [OMA-30 acceptance](OMA-30-ACCEPTANCE.md).
+The next product slice is standalone Git/local import, followed by Explore.
+Neither flow is implemented by the consolidation; do not count them as shipped.
+
 | Slice | Required outcome | Status |
 | --- | --- | --- |
 | Managed library visibility | My Skills lists real runner library entries, tags, enabled state, tool/scope targets; searchable and filterable; offline reports labeled | Implemented read-only; not full library parity |
@@ -34,6 +40,42 @@ No source URLs, credentials, local paths, file contents or target errors are pub
 - Test on an isolated populated runner library and PostgreSQL, including empty reports and offline/revoked devices.
 - Verify desktop/mobile layouts and keyboard access; run `npm run check` before handoff.
 - Do not mark the port complete until original capabilities are restored or their removal is explicitly approved.
+
+## Next implementation slice: import, then Explore
+
+Restore the original flow: choose Git or a local folder, preview discovered
+`SKILL.md` files and supporting content, select skills, set tags and intended
+targets, then import into My Skills. Applying to a project uses a separate
+reviewed Setup plan. Global target changes also require an explicit reviewed
+mutation; importing into the library alone must not silently sync targets.
+
+Implementation boundaries to carry into the next change:
+
+1. Add device-scoped, declarative preview/import jobs to both protocol packages.
+   A library import must work before a project is registered; do not invent a
+   project instance or overload a Setup scan. Keep project Apply approvals
+   required and scoped to their current exact plan.
+2. Keep Git fetching, source revision resolution, staging and SQLite library
+   writes in the runner. Seal the preview content so subsequent source changes
+   cannot change what the user selected. Use the existing validated artifact
+   cache and bounded portable file format. A browser-selected local folder
+   needs explicit content-upload consent and relative paths only; workstation
+   paths and credentials remain local.
+3. Persist preview identity, selection, source revision, tags and an idempotent
+   import receipt. Preserve existing content on conflicts and support replay
+   after interruption. Publish only the resulting bounded library projection.
+4. Add My Skills import controls, source preview, selection and durable status.
+   Exercise browser/API/runner together with disposable Git and local fixtures,
+   including multi-skill repositories, traversal/link rejection, stale previews,
+   duplicate requests, cancellation, tenant isolation and offline devices.
+5. Reuse that import route for Explore's original curated catalog, remote
+   search, preview and installed-state indicators. Recover the original source
+   logic from the baseline before adding new providers or changing behavior.
+
+The existing work under the property/mutation-testing branch and the older
+acceptance worktree is retained separately. Their patches must be compared with
+current `main`; applying the old acceptance patch wholesale would duplicate or
+replace fixes already consolidated.
 
 ## First-slice verification — 2026-09-09
 
