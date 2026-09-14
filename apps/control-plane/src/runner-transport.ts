@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { artifactDigest } from './artifact-digest.js'
+import { isSkillLibrary } from './skill-library.js'
 import type { BrowserAccess } from './development-auth.js'
 
 import {
@@ -116,6 +117,7 @@ export interface RunnerTransportRepository {
     leaseId: string,
     now: string,
     leaseExpiresAt: string,
+    skillLibrary?: ClaimRunnerJobRequest['skillLibrary'],
   ): Promise<LeasedRunnerJob | null>
   acknowledgeJob(
     runner: RunnerAuthentication,
@@ -471,6 +473,9 @@ export class RunnerTransportService {
   ): Promise<LeasedRunnerJob | null> {
     validateCapabilities(request.capabilities)
     const runner = await this.authenticate(credential)
+    if (request.skillLibrary !== undefined && !isSkillLibrary(request.skillLibrary)) {
+      throw new RunnerTransportError(400, 'invalid managed skill inventory')
+    }
     const waitMs = Math.min(
       25_000,
       Math.max(0, Number.isFinite(request.waitMs) ? Math.floor(request.waitMs ?? 0) : 0),
@@ -484,6 +489,7 @@ export class RunnerTransportService {
         this.randomId(),
         this.now().toISOString(),
         new Date(this.now().getTime() + this.leaseTtlMs).toISOString(),
+        request.skillLibrary,
       )
     const immediate = await claim()
     if (immediate || waitMs === 0) return immediate

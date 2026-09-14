@@ -40,9 +40,58 @@ pub struct RegisterProjectInstanceRequest {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClaimRunnerJobRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_library: Option<Vec<ManagedSkillSummary>>,
     pub capabilities: RunnerCapabilityReport,
     #[serde(default)]
     pub wait_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManagedSkillSummary {
+    pub id: String,
+    pub name: String,
+    pub source_type: String,
+    pub enabled: bool,
+    pub tags: Vec<String>,
+    pub targets: Vec<ManagedSkillTarget>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManagedSkillTarget {
+    pub tool: String,
+    pub scope: ManagedSkillScope,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ManagedSkillScope {
+    Global,
+    Project,
+}
+
+#[cfg(test)]
+mod inventory_tests {
+    use super::*;
+    #[test]
+    fn portable_inventory_matches_shared_fixture() {
+        let raw = include_str!(
+            "../../../packages/contracts/fixtures/v1/transport/managed-skill-library.json"
+        );
+        let skills: Vec<ManagedSkillSummary> = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            serde_json::to_value(skills).unwrap(),
+            serde_json::from_str::<serde_json::Value>(raw).unwrap()
+        );
+        let invalid = raw.replacen(
+            "\"name\": \"Review\"",
+            "\"centralPath\": \"/private\", \"name\": \"Review\"",
+            1,
+        );
+        assert!(serde_json::from_str::<Vec<ManagedSkillSummary>>(&invalid).is_err());
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

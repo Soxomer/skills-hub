@@ -62,6 +62,23 @@ fn setup() -> (TempDir, SkillStore, SetupService) {
     (temp, store, service)
 }
 
+#[test]
+fn managed_inventory_excludes_paths_and_source_credentials() {
+    let (temp, store, service) = setup();
+    let mut skill = managed_skill(&store, temp.path(), "review", "Review");
+    skill.source_ref = Some("https://secret:token@example.test/private".to_owned());
+    skill.description = Some("/private/workstation/path".to_owned());
+    skill.enabled = false;
+    store.upsert_skill(&skill).unwrap();
+    let report = service.managed_skill_inventory().unwrap();
+    assert_eq!(report.len(), 1);
+    assert!(!report[0].enabled);
+    let json = serde_json::to_string(&report).unwrap();
+    assert!(!json.contains("token"));
+    assert!(!json.contains("private"));
+    assert!(!json.contains("centralPath"));
+}
+
 fn registered_project(temp: &TempDir, service: &SetupService, name: &str) -> std::path::PathBuf {
     let project = temp.path().join(name);
     std::fs::create_dir_all(&project).unwrap();

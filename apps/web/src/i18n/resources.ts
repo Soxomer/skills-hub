@@ -1,8 +1,20 @@
 export const resources = {
   en: {
     translation: {
+      skills: {
+        title: 'My Skills', description: 'The managed skill library on your connected runner, separate from saved Setups.',
+        refresh: 'Refresh report', refreshing: 'Refreshing…', error: 'The runner report could not be refreshed. Try Refresh report again.',
+        connectTitle: 'Connect a runner to view its skills', connectDescription: 'Open Projects to connect the workstation that holds your managed library.',
+        device: 'Library on {{label}}.', reported: 'Last reported {{date}}.', offline: 'Runner offline. This is its last reported library, not a live scan.',
+        waiting: 'No library report yet. Start the updated ahm worker and refresh after its next poll.',
+        emptyTitle: 'No managed skills on this runner', emptyDescription: 'This report contains managed library entries only. Project discoveries and saved Setup contents are separate.',
+        search: 'Search skills, tags, or tools', tag: 'Tags', allTags: 'All tags', state: 'Enabled state', all: 'All states', enabled: 'Enabled', disabled: 'Disabled',
+        count: '{{count}} of {{total}} skills', noResults: 'No skills match these filters.', clear: 'Clear filters', name: 'Skill', source: 'Source', targets: 'Tool targets',
+        noTags: 'No tags', noTargets: 'No targets', sources: { git: 'Git repository', local: 'Local folder', other: 'Other' }, scopes: { global: 'Global', project: 'Project' },
+        readOnly: 'Read-only library report. Import, editing, and bulk management are being restored. Viewing this list does not change skills or project assignments.',
+      },
       library: {
-        navigation: 'Main navigation', projects: 'Projects', setups: 'Setups',
+        navigation: 'Main navigation', projects: 'Projects', setups: 'Setups', skills: 'My Skills',
         description: 'Saved agent configurations. Inspect their contents, publish versions, and reuse them across projects.',
         create: 'Create Setup', loading: 'Loading saved configurations…',
         loadError: 'Saved Setups could not be loaded. Try again.',

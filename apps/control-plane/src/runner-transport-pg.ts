@@ -47,6 +47,7 @@ interface AuthenticationRow extends QueryResultRow {
 }
 
 interface RunnerStatusRow extends QueryResultRow {
+  skill_library: RunnerStatusResponse['skillLibrary']
   id: string
   label: string
   status: RunnerStatusResponse['status']
@@ -425,7 +426,7 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
     const [deviceResult, projectInstancesResult] = await Promise.all([
       this.browserDatabase.query<RunnerStatusRow>(
         `SELECT id, label, status, enrolled_at, last_seen_at, runner_version,
-                supported_protocol_versions, capabilities
+                supported_protocol_versions, capabilities, skill_library
          FROM runner_devices WHERE organization_id = $1 AND id = $2`,
         [organizationId, deviceId],
       ),
@@ -454,6 +455,7 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
       status: device.status,
       enrolledAt: iso(device.enrolled_at),
       lastSeenAt: device.last_seen_at ? iso(device.last_seen_at) : null,
+      skillLibrary: device.skill_library ?? null,
       capabilities,
       projectInstances: projectInstancesResult.rows.map((instance) => ({
         projectInstanceId: instance.id,
@@ -580,12 +582,14 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
     leaseId: string,
     now: string,
     leaseExpiresAt: string,
+    skillLibrary?: import('@ahm/contracts').ManagedSkillSummary[],
   ): Promise<LeasedRunnerJob | null> {
     return transaction(this.pool, async (client) => {
       await client.query(
         `UPDATE runner_devices
          SET last_seen_at = $1, runner_version = $2,
-             supported_protocol_versions = $3::jsonb, capabilities = $4::jsonb
+             supported_protocol_versions = $3::jsonb, capabilities = $4::jsonb,
+             skill_library = COALESCE($7::jsonb, skill_library)
          WHERE organization_id = $5 AND id = $6 AND status = 'active'`,
         [
           now,
@@ -594,6 +598,7 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
           JSON.stringify(capabilities.capabilities),
           runner.organizationId,
           runner.deviceId,
+          skillLibrary === undefined ? null : JSON.stringify({ reportedAt: now, skills: skillLibrary }),
         ],
       )
       await client.query(

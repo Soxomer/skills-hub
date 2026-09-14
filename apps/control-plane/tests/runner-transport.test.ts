@@ -48,6 +48,25 @@ function harness() {
   }
 }
 
+it('reports a runner-owned library with tenant isolation and preserves it between reports', async () => {
+  const { app } = harness()
+  const identity = await connect(app)
+  const skills = [{ id: 'review', name: 'Review', sourceType: 'git', enabled: true, tags: ['Quality'], targets: [{ tool: 'codex', scope: 'global' }] }]
+  const claim = (skillLibrary?: unknown) => app.inject({ method: 'POST', url: '/runner/v1/jobs/claim', headers: { authorization: `Bearer ${identity.credential}` }, payload: { capabilities, waitMs: 0, ...(skillLibrary === undefined ? {} : { skillLibrary }) } })
+  expect((await claim(skills)).statusCode).toBe(204)
+  const status = () => app.inject({ method: 'GET', url: `/api/v1/runners/${identity.deviceId}`, headers: actorHeaders })
+  expect((await status()).json().skillLibrary.skills).toEqual(skills)
+  await claim()
+  expect((await status()).json().skillLibrary.skills).toEqual(skills)
+  expect((await claim([{ ...skills[0], centralPath: '/private' }])).statusCode).toBe(400)
+  expect((await status()).json().skillLibrary.skills).toEqual(skills)
+  const foreign = await app.inject({ method: 'GET', url: `/api/v1/runners/${identity.deviceId}`, headers: { ...actorHeaders, 'x-ahm-organization-id': 'other' } })
+  expect([403, 404]).toContain(foreign.statusCode)
+  await claim([])
+  expect((await status()).json().skillLibrary.skills).toEqual([])
+  await app.close()
+})
+
 async function connect(app: ReturnType<typeof createControlPlaneApp>) {
   const created = await app.inject({
     method: 'POST',

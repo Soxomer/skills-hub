@@ -369,6 +369,59 @@ impl SetupService {
             .collect())
     }
 
+    pub fn managed_skill_inventory(&self) -> Result<Vec<ahm_domain::ManagedSkillSummary>> {
+        use ahm_domain::{ManagedSkillScope, ManagedSkillSummary, ManagedSkillTarget};
+        self.store
+            .list_skills()?
+            .into_iter()
+            .map(|skill| {
+                let tags: Vec<String> = self
+                    .store
+                    .get_skill_tags(&skill.id)?
+                    .into_iter()
+                    .map(|tag| tag.name)
+                    .collect();
+                let mut targets = Vec::new();
+                for target in self.store.list_skill_targets(&skill.id)? {
+                    let scope = match target.scope.as_str() {
+                        "global" => ManagedSkillScope::Global,
+                        "project" => ManagedSkillScope::Project,
+                        _ => continue,
+                    };
+                    let portable = ManagedSkillTarget {
+                        tool: target.tool,
+                        scope,
+                    };
+                    if !targets.contains(&portable) {
+                        targets.push(portable);
+                    }
+                }
+                let valid_text =
+                    |text: &str| !text.is_empty() && text.encode_utf16().count() <= 512;
+                if !valid_text(&skill.id)
+                    || !valid_text(&skill.name)
+                    || !tags.iter().all(|tag| valid_text(tag))
+                    || !targets.iter().all(|target| valid_text(&target.tool))
+                {
+                    anyhow::bail!("managed skill metadata exceeds portable reporting limits");
+                }
+                Ok(ManagedSkillSummary {
+                    id: skill.id,
+                    name: skill.name,
+                    enabled: skill.enabled,
+                    source_type: match skill.source_type.as_str() {
+                        "git" => "git",
+                        "local" => "local",
+                        _ => "other",
+                    }
+                    .to_owned(),
+                    tags,
+                    targets,
+                })
+            })
+            .collect()
+    }
+
     pub fn stage_portable_revision(
         &self,
         revision: &PortableSetupRevision,

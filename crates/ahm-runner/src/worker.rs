@@ -77,6 +77,22 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
         self.flush_outbox(&identity)?;
 
         let request = ClaimRunnerJobRequest {
+            skill_library: match self.executor.skill_library() {
+                Ok(Some(skills))
+                    if skills.len() <= 5000 && serde_json::to_vec(&skills)?.len() <= 512_000 =>
+                {
+                    Some(skills)
+                }
+                Ok(None) => None,
+                Ok(Some(_)) => {
+                    log::warn!("skill library exceeds reporting limit");
+                    None
+                }
+                Err(error) => {
+                    log::warn!("skill library unavailable: {error:#}");
+                    None
+                }
+            },
             capabilities: RunnerCapabilityReport {
                 protocol_version: PROTOCOL_VERSION,
                 supported_protocol_versions: vec![PROTOCOL_VERSION],

@@ -25,6 +25,7 @@ import { RunnerTransportError } from './runner-transport.js'
 import { membershipAllows, type BrowserAccess, type MembershipRole } from './development-auth.js'
 
 interface MemoryDevice extends RunnerAuthentication {
+  skillLibrary?: RunnerStatusResponse['skillLibrary']
   label: string
   credentialHash: string
   capabilities: RunnerCapabilityReport
@@ -152,6 +153,7 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
       status: device.status,
       enrolledAt: device.enrolledAt,
       lastSeenAt: device.lastSeenAt,
+      skillLibrary: device.skillLibrary ?? null,
       capabilities: device.capabilities,
       projectInstances: [...this.projectInstances.values()]
         .filter(
@@ -247,11 +249,13 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
     leaseId: string,
     now: string,
     leaseExpiresAt: string,
+    skillLibrary?: import('@ahm/contracts').ManagedSkillSummary[],
   ): Promise<LeasedRunnerJob | null> {
     const device = this.devices.get(runner.deviceId)
     if (device) {
       device.capabilities = capabilities
       device.lastSeenAt = now
+      if (skillLibrary !== undefined) device.skillLibrary = { reportedAt: now, skills: structuredClone(skillLibrary) }
     }
     for (const job of this.jobs.values()) {
       if (

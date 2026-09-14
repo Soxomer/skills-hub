@@ -18,6 +18,7 @@ import { CommandBlock } from './components/CommandBlock'
 import { ConnectionBadge } from './components/ConnectionBadge'
 import { ProjectScanWorkspace } from './components/ProjectScanWorkspace'
 import { SetupLibrary } from './components/SetupLibrary'
+import { SkillLibrary } from './components/SkillLibrary'
 import { connectionDisplayState } from './runner-status'
 import { useRunnerConnection } from './useRunnerConnection'
 
@@ -33,7 +34,7 @@ export const App = memo(function App() {
   const { t } = useTranslation()
   const client = useMemo(() => createBrowserClient(), [])
   const connection = useRunnerConnection(client)
-  const [page, setPage] = useState<'projects' | 'setups'>('projects')
+  const [page, setPage] = useState<'projects' | 'setups' | 'skills'>('projects')
   const effectiveStatus =
     connection.status ??
     (connection.enrollment
@@ -58,7 +59,7 @@ export const App = memo(function App() {
           </span>
         </a>
         <nav className="primary-nav" aria-label={t('library.navigation')}>
-          {(['projects', 'setups'] as const).map((area) => (
+          {(['skills', 'projects', 'setups'] as const).map((area) => (
             <button key={area} type="button" aria-current={page === area ? 'page' : undefined}
               onClick={() => setPage(area)}>{t(`library.${area}`)}</button>
           ))}
@@ -66,7 +67,7 @@ export const App = memo(function App() {
       </header>
 
       <main id="main-content" className="workspace" data-page={page}>
-        {page === 'setups' ? <SetupLibrary client={client} onProjects={() => setPage('projects')} /> : <>
+        {page === 'skills' ? <SkillLibrary key={connection.runner?.deviceId ?? 'unconnected'} runner={connection.runner} online={displayState === 'connected'} error={Boolean(connection.error)} onRefresh={connection.refresh} onProjects={() => setPage('projects')} /> : page === 'setups' ? <SetupLibrary client={client} onProjects={() => setPage('projects')} /> : <>
         <div className="page-heading">
           <div>
             <p className="eyebrow">{t('brand.eyebrow')}</p>
