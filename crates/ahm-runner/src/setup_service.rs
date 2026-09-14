@@ -2810,7 +2810,46 @@ fn path_key(path: &Path) -> String {
 }
 
 fn scan_selection_key(tool: &str, path: &Path) -> String {
-    format!("{tool}|{}", path_key(path))
+    // Resolve directory aliases without collapsing distinct symlink targets.
+    let normalized = path
+        .parent()
+        .and_then(|parent| parent.canonicalize().ok())
+        .zip(path.file_name())
+        .map(|(parent, name)| clean_canonical_path(parent).join(name))
+        .unwrap_or_else(|| path.to_path_buf());
+    format!("{tool}|{}", path_key(&normalized))
+}
+
+#[cfg(test)]
+mod scan_selection_tests {
+    use super::scan_selection_key;
+
+    #[test]
+    fn parent_aliases_share_a_key_even_when_the_target_is_missing() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("skills");
+        std::fs::create_dir(&directory).unwrap();
+        assert_eq!(
+            scan_selection_key("codex", &directory.join("missing")),
+            scan_selection_key("codex", &directory.join("../skills/missing")),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn distinct_symlink_destinations_keep_separate_keys() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        let first = root.path().join("first");
+        let second = root.path().join("second");
+        std::os::unix::fs::symlink(&source, &first).unwrap();
+        std::os::unix::fs::symlink(&source, &second).unwrap();
+        assert_ne!(
+            scan_selection_key("codex", &first),
+            scan_selection_key("codex", &second),
+        );
+    }
 }
 
 fn unique_snapshot_path(central_repo: &Path, fingerprint: &str) -> PathBuf {
