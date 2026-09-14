@@ -234,6 +234,14 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
               </p>
               <code>{workflow.receipt.operationId}</code>
             </div>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={!runnerOnline || isWorking || workflow.operations?.health === 'attention'}
+              onClick={() => void workflow.preparePlan()}
+            >
+              {t('switchFlow.prepareAgain')}
+            </button>
           </div>
         </>
       ) : (

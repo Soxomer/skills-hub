@@ -4,6 +4,9 @@ version = "0.9.1"
 edition.workspace = true
 rust-version.workspace = true
 
+[features]
+acceptance-tests = []
+
 [dependencies]
 ahm-domain = { path = "../ahm-domain" }
 anyhow.workspace = true

@@ -1,6 +1,11 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
+#[cfg(any(test, feature = "acceptance-tests"))]
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use ahm_domain::PortableSetupRevision;
 use anyhow::{Context, Result};
@@ -160,6 +165,37 @@ pub struct ProjectStatus {
 #[derive(Clone, Debug)]
 pub struct SetupService {
     store: SkillStore,
+    #[cfg(any(test, feature = "acceptance-tests"))]
+    test_fault: Option<TestFaultInjection>,
+}
+
+/// An opt-in, one-shot fault hook for connected acceptance testing.
+///
+/// It intentionally leaves the operation journal after the first filesystem mutation so a
+/// subsequent plan exercises normal recovery before any further work can be approved.
+#[derive(Clone, Debug)]
+#[cfg(any(test, feature = "acceptance-tests"))]
+pub struct TestFaultInjection {
+    fail_after_first_action: Arc<AtomicBool>,
+    hold_recovery_once: Arc<AtomicBool>,
+}
+
+#[cfg(any(test, feature = "acceptance-tests"))]
+impl TestFaultInjection {
+    pub fn partial_apply_once() -> Self {
+        Self {
+            fail_after_first_action: Arc::new(AtomicBool::new(true)),
+            hold_recovery_once: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    fn fail_after_action(&self) -> bool {
+        self.fail_after_first_action.swap(false, Ordering::SeqCst)
+    }
+
+    fn hold_recovery(&self) -> bool {
+        self.hold_recovery_once.swap(false, Ordering::SeqCst)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -345,12 +381,26 @@ impl SetupService {
         }
         let store = SkillStore::new(db_path);
         store.ensure_schema()?;
-        Ok(Self { store })
+        Ok(Self {
+            store,
+            #[cfg(any(test, feature = "acceptance-tests"))]
+            test_fault: None,
+        })
     }
 
     pub fn from_store(store: SkillStore) -> Result<Self> {
         store.ensure_schema()?;
-        Ok(Self { store })
+        Ok(Self {
+            store,
+            #[cfg(any(test, feature = "acceptance-tests"))]
+            test_fault: None,
+        })
+    }
+
+    #[cfg(any(test, feature = "acceptance-tests"))]
+    pub fn with_test_fault(mut self, test_fault: TestFaultInjection) -> Self {
+        self.test_fault = Some(test_fault);
+        self
     }
 
     pub fn list_skills(&self) -> Result<Vec<SkillSummary>> {
@@ -2186,6 +2236,20 @@ impl SetupService {
             operation_id: operation_id.to_owned(),
             actions_completed: failure.actions_completed,
         };
+        #[cfg(any(test, feature = "acceptance-tests"))]
+        if self
+            .test_fault
+            .as_ref()
+            .is_some_and(TestFaultInjection::hold_recovery)
+        {
+            return OperationInterruption::NeedsAttention {
+                operation: fallback,
+                message: format!(
+                    "{message}; test fault is holding recovery until the next recovery action"
+                ),
+                cancelled: failure.cancelled,
+            };
+        }
         let journal = match self.filesystem_journal_by_operation(operation_id) {
             Ok(Some(journal)) => journal,
             Ok(None) => {
@@ -2248,6 +2312,19 @@ impl SetupService {
                                     execution.actions_completed,
                                 )
                                 .map_err(|error| (error, false))?;
+                                #[cfg(any(test, feature = "acceptance-tests"))]
+                                if self
+                                    .test_fault
+                                    .as_ref()
+                                    .is_some_and(TestFaultInjection::fail_after_action)
+                                {
+                                    return Err((
+                                        anyhow::anyhow!(
+                                            "test fault injected after a local filesystem action"
+                                        ),
+                                        false,
+                                    ));
+                                }
                             }
                         }
                     }
@@ -2268,6 +2345,19 @@ impl SetupService {
                             execution.actions_completed,
                         )
                         .map_err(|error| (error, false))?;
+                        #[cfg(any(test, feature = "acceptance-tests"))]
+                        if self
+                            .test_fault
+                            .as_ref()
+                            .is_some_and(TestFaultInjection::fail_after_action)
+                        {
+                            return Err((
+                                anyhow::anyhow!(
+                                    "test fault injected after a local filesystem action"
+                                ),
+                                false,
+                            ));
+                        }
                     }
                     PhysicalOperation::Keep(current, desired) => {
                         execution
@@ -3000,6 +3090,35 @@ mod recovery_tests {
             .project
             .applied_setup
             .is_none());
+    }
+
+    #[test]
+    fn partial_apply_fault_blocks_until_the_next_recovery_action() {
+        let (_temp, store, service, project_path, _setup) = fixture();
+        let service = service.with_test_fault(TestFaultInjection::partial_apply_once());
+
+        let error = service.sync(&project_path, None).unwrap_err();
+        let interruption = error.downcast_ref::<OperationInterruption>().unwrap();
+        assert!(matches!(
+            interruption,
+            OperationInterruption::NeedsAttention {
+                operation: RecoveredOperation {
+                    actions_completed: 1,
+                    ..
+                },
+                ..
+            }
+        ));
+        assert!(project_path.join(".agents/skills/alpha").exists());
+        assert_eq!(journal_count(&store), 1);
+
+        let recovered = service
+            .recover_incomplete_operation(&project_path)
+            .unwrap()
+            .expect("the recovery journal is present");
+        assert_eq!(recovered.actions_completed, 1);
+        assert!(!project_path.join(".agents/skills/alpha").exists());
+        assert_eq!(journal_count(&store), 0);
     }
 
     #[test]

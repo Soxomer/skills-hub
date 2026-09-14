@@ -83,3 +83,30 @@ returned by the GitHub Actions query at handoff.
 
 Final local gate: `npm run check` passed with 125 TypeScript tests and 96 Rust
 tests, plus all builds, lint, version/boundary checks, rustfmt, and Clippy.
+
+## Consolidation acceptance — 2026-09-15
+
+Repeated the connected browser flow using PostgreSQL 18.4 on loopback and two
+fresh disposable Windows checkouts. The browser created both projects, captured
+their independent Defaults, and published the two-item `Acceptance combined`
+Setup through normal product controls. No Setup rows were seeded.
+
+- Two browser tabs requesting a plan produced one shared operation; cancellation
+  from the second tab completed before filesystem mutation.
+- Adding an unmanaged destination after review caused `planDigestMismatch`.
+  The browser displayed a fresh conflicting plan without an Apply action, and
+  the conflicting file retained its exact bytes.
+- An opt-in `acceptance-tests` runner build failed after the first filesystem
+  action. Recovery remained required after browser reload: Setup selection and
+  Apply were blocked. `Retry recovery` restored the previous state and enabled
+  review again. Normal runner builds do not contain the fault switch.
+- Both projects completed custom Apply, browser reload, durable Rollback, and
+  explicit return to their own Default. Original skill bytes and unrelated files
+  survived; PostgreSQL assignments and runner SQLite materializations agree.
+- Fixed a connected-flow dead end after successful/no-change Apply by offering
+  `Prepare another plan`; a browser interaction regression test covers it.
+- Real PostgreSQL concurrent-publisher testing passed separately. The CI format
+  command now uses supported `cargo fmt --all`, and CI supports manual dispatch.
+
+Local evidence: `.oma30-acceptance/ahm_acceptance_1789425060225/evidence.json`.
+Hosted Linux/macOS results are still required before OMA-30 is closed.

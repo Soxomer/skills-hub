@@ -64,6 +64,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount())
   container.remove()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -180,6 +181,29 @@ function rollbackButton() {
 }
 
 describe('durable operation recovery', () => {
+  it('allows another plan after a successful no-change Apply without reloading', async () => {
+    vi.useFakeTimers()
+    const client = { ...mockClient(), prepareSetupPlan: vi.fn().mockResolvedValue({ jobId: 'next-plan' }) }
+    const active = operations()
+    active.activeOperation = { jobId: 'apply-job', kind: 'applyPlan', state: 'acknowledged',
+      setupRevisionId: 'custom', cancelRequested: false, issuedAt: date }
+    client.projectOperations.mockResolvedValueOnce(active).mockResolvedValue(operations())
+    client.job.mockResolvedValue({ jobId: 'apply-job', state: 'succeeded', cancelRequested: false,
+      result: { protocolVersion: '1.0', jobId: 'apply-job', idempotencyKey: 'apply',
+        organizationId: 'org', deviceId: 'device', projectInstanceId: 'instance-A',
+        result: { kind: 'applyReceipt', payload: { operationId: 'no-change', projectId: 'A',
+          setupRevisionId: 'custom', planDigest: `sha256:${'a'.repeat(64)}`, outcome: 'noChange', actionsApplied: 0,
+          recoverability: 'notNeeded', completedAt: date } } } })
+    await mountSwitch(client)
+    await act(async () => { await vi.advanceTimersByTimeAsync(800) })
+    const again = [...container.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Prepare another plan')
+    expect(again, 'successful Apply must not leave the workflow at a dead end').toBeDefined()
+    client.job.mockResolvedValue({ jobId: 'next-plan', state: 'pending', result: null, cancelRequested: false })
+    await act(async () => again!.click())
+    expect(client.prepareSetupPlan).toHaveBeenCalledWith('instance-A', { setupRevisionId: 'custom' })
+    expect(container.querySelector('select')).not.toBeNull()
+  })
+
   it('restores the history action on a fresh mount and submits the durable operation ID', async () => {
     const client = mockClient()
     client.projectOperations.mockResolvedValue(operations())
