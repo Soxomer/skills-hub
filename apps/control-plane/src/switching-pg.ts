@@ -489,6 +489,8 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
   }
 
   async enqueuePlan(job: JobEnvelope): Promise<PlanQueueOutcome> {
+    const projectInstanceId = job.projectInstanceId
+    if (!projectInstanceId) throw new Error("A Setup plan requires a project instance")
     return transaction(this.pool, async (client) => {
       await client.query(
         `SELECT id FROM project_instances
@@ -499,13 +501,13 @@ export class PostgresSwitchingRepository implements SwitchingRepository {
       await expirePendingSetupOperations(
         client,
         job.organizationId,
-        job.projectInstanceId,
+        projectInstanceId,
         job.issuedAt,
       )
       const activeOperation = await activeSetupOperation(
         client,
         job.organizationId,
-        job.projectInstanceId,
+        projectInstanceId,
       )
       if (activeOperation) return { outcome: 'operationInProgress', activeOperation }
       await insertJob(client, job)

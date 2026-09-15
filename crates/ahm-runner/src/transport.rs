@@ -262,6 +262,7 @@ mod tests {
                 plan_setup: false,
                 apply_plan: false,
                 rollback_operation: false,
+                library: true,
                 supported_tools: vec![Identifier::new("codex").unwrap()],
             },
         }

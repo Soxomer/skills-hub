@@ -23,6 +23,9 @@ use crate::{
 };
 
 pub trait JobExecutor {
+    fn maintenance(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
     fn skill_library(&self) -> anyhow::Result<Option<Vec<ahm_domain::ManagedSkillSummary>>> {
         Ok(None)
     }
@@ -225,6 +228,9 @@ impl LocalJobExecutor {
 }
 
 impl JobExecutor for LocalJobExecutor {
+    fn maintenance(&self) -> anyhow::Result<()> {
+        crate::library::maintenance(&self.home, &self.runner.local_admin().library_store())
+    }
     fn skill_library(&self) -> anyhow::Result<Option<Vec<ahm_domain::ManagedSkillSummary>>> {
         self.runner
             .local_admin()
@@ -277,6 +283,28 @@ impl JobExecutor for LocalJobExecutor {
             recovery_error
         } else if is_expired(&job.expires_at, now) {
             protocol_error(ProtocolErrorCode::ExpiredJob, "job has expired", false)
+        } else if let RunnerJob::LibraryAction(request) = &job.job {
+            if job.project_instance_id.is_some() {
+                protocol_error(
+                    ProtocolErrorCode::Conflict,
+                    "Library actions belong to the device",
+                    false,
+                )
+            } else {
+                match self.runner.library(&self.home, request, should_cancel) {
+                    Ok(value) => {
+                        RunnerResult::LibraryResponse(ahm_domain::LibraryResponse { value })
+                    }
+                    Err(error) => {
+                        eprintln!("Library action {} failed: {error:#}", job.job_id.as_str());
+                        protocol_error(
+                            ProtocolErrorCode::OperationFailed,
+                            crate::library::public_error(&error),
+                            false,
+                        )
+                    }
+                }
+            }
         } else if let Some(project) = project {
             if project.organization_id != identity.organization_id {
                 protocol_error(
@@ -286,6 +314,7 @@ impl JobExecutor for LocalJobExecutor {
                 )
             } else {
                 match &job.job {
+                    RunnerJob::LibraryAction(_) => unreachable!("device job handled above"),
                     RunnerJob::ScanProject(scan) if scan.project_id == project.project_id => {
                         self.execute_scan(job, project, &scan.project_id, scan.include_unmanaged)
                     }
@@ -336,8 +365,8 @@ impl JobExecutor for LocalJobExecutor {
                                             self.artifact_cache.root(),
                                         )?;
                                         if approval.organization_id != job.organization_id
-                                            || approval.project_instance_id
-                                                != job.project_instance_id
+                                            || Some(&approval.project_instance_id)
+                                                != job.project_instance_id.as_ref()
                                             || approval.setup_revision_id
                                                 != apply.revision.setup_revision_id
                                             || approval.plan_digest != plan.plan_digest
@@ -516,6 +545,7 @@ fn is_expired(expires_at: &IsoTimestamp, now: &IsoTimestamp) -> bool {
 
 pub fn runner_capabilities() -> RunnerCapabilities {
     RunnerCapabilities {
+        library: true,
         scan_project: true,
         plan_setup: true,
         apply_plan: true,
@@ -922,7 +952,7 @@ mod tests {
                 idempotency_key: identifier("scan_job_01"),
                 organization_id: identifier("org_01"),
                 device_id: identifier("device_01"),
-                project_instance_id: identifier("instance_01"),
+                project_instance_id: Some(identifier("instance_01")),
                 issued_at: IsoTimestamp::new("2026-09-01T10:00:00Z").unwrap(),
                 expires_at: IsoTimestamp::new("2026-09-01T10:05:00Z").unwrap(),
                 job: RunnerJob::ScanProject(ScanProjectJob {
@@ -1007,7 +1037,7 @@ mod tests {
                 idempotency_key: Identifier::new(format!("idem_{job_id}")).unwrap(),
                 organization_id: identifier("org_01"),
                 device_id: identifier("device_01"),
-                project_instance_id: identifier("instance_01"),
+                project_instance_id: Some(identifier("instance_01")),
                 issued_at: IsoTimestamp::new("2026-09-02T10:00:00Z").unwrap(),
                 expires_at: IsoTimestamp::new("2026-09-02T10:05:00Z").unwrap(),
                 job: runner_job,

@@ -7,8 +7,8 @@ use ahm_domain::{
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
-const RUNNER_SCHEMA_VERSION: i64 = 2;
-const RUNNER_SCHEMA_V2: &str = r#"
+const RUNNER_SCHEMA_VERSION: i64 = 3;
+const RUNNER_SCHEMA_V3: &str = r#"
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS runner_schema_migrations (
@@ -58,8 +58,8 @@ CREATE TABLE IF NOT EXISTS operation_journal (
   job_id TEXT NOT NULL UNIQUE,
   idempotency_key TEXT NOT NULL UNIQUE,
   request_digest TEXT NOT NULL,
-  project_instance_id TEXT NOT NULL REFERENCES project_instances(id) ON DELETE CASCADE,
-  operation_kind TEXT NOT NULL CHECK (operation_kind IN ('scanProject', 'planSetup', 'applyPlan', 'rollbackOperation')),
+  project_instance_id TEXT NULL REFERENCES project_instances(id) ON DELETE CASCADE,
+  operation_kind TEXT NOT NULL CHECK (operation_kind IN ('scanProject', 'planSetup', 'applyPlan', 'rollbackOperation', 'libraryAction')),
   status TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'rolledBack')),
   plan_digest TEXT NULL,
   recoverability TEXT NOT NULL CHECK (recoverability IN ('notNeeded', 'rollbackAvailable', 'manualIntervention')),
@@ -99,22 +99,9 @@ ON result_outbox(delivered_at, next_attempt_at);
 INSERT OR IGNORE INTO runner_schema_migrations (version, applied_at)
 VALUES (1, '2026-08-31T00:00:00Z');
 INSERT OR IGNORE INTO runner_schema_migrations (version, applied_at)
-VALUES (2, '2026-09-01T00:00:00Z');
+VALUES (3, '2026-09-01T00:00:00Z');
 
-PRAGMA user_version = 2;
-"#;
-
-const RUNNER_SCHEMA_V1_TO_V2: &str = r#"
-ALTER TABLE runner_identity RENAME COLUMN credential_ciphertext TO credential_secret;
-ALTER TABLE runner_identity ADD COLUMN server_url TEXT NOT NULL DEFAULT '';
-ALTER TABLE operation_journal ADD COLUMN request_digest TEXT NULL;
-UPDATE operation_journal SET request_digest = '' WHERE request_digest IS NULL;
-ALTER TABLE operation_journal ADD COLUMN result_json TEXT NULL;
-ALTER TABLE operation_journal ADD COLUMN result_digest TEXT NULL;
-ALTER TABLE result_outbox ADD COLUMN lease_id TEXT NOT NULL DEFAULT '';
-INSERT OR IGNORE INTO runner_schema_migrations (version, applied_at)
-VALUES (2, '2026-09-01T00:00:00Z');
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 "#;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -446,7 +433,7 @@ impl RunnerStateStore {
                 job.job_id.as_str(),
                 job.idempotency_key.as_str(),
                 request_digest,
-                job.project_instance_id.as_str(),
+                job.project_instance_id.as_ref().map(|id| id.as_str()),
                 job_kind(job),
                 started_at.as_str(),
             ],
@@ -632,8 +619,7 @@ impl RunnerStateStore {
             .connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
         match version {
-            0 => self.connection.execute_batch(RUNNER_SCHEMA_V2)?,
-            1 => self.connection.execute_batch(RUNNER_SCHEMA_V1_TO_V2)?,
+            0 => self.connection.execute_batch(RUNNER_SCHEMA_V3)?,
             RUNNER_SCHEMA_VERSION => {}
             other => return Err(RunnerStateError::UnsupportedSchema(other)),
         }
@@ -643,6 +629,7 @@ impl RunnerStateStore {
 
 fn job_kind(job: &JobEnvelope) -> &'static str {
     match job.job {
+        ahm_domain::RunnerJob::LibraryAction(_) => "libraryAction",
         ahm_domain::RunnerJob::ScanProject(_) => "scanProject",
         ahm_domain::RunnerJob::PlanSetup(_) => "planSetup",
         ahm_domain::RunnerJob::ApplyPlan(_) => "applyPlan",
@@ -826,55 +813,15 @@ mod tests {
     }
 
     #[test]
-    fn version_one_runner_state_is_upgraded_in_place() {
-        let connection = Connection::open_in_memory().unwrap();
-        connection
-            .execute_batch(
-                r#"
-                CREATE TABLE runner_schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
-                CREATE TABLE runner_identity (
-                  singleton INTEGER PRIMARY KEY,
-                  organization_id TEXT NOT NULL,
-                  device_id TEXT NOT NULL,
-                  credential_ciphertext BLOB NOT NULL,
-                  credential_expires_at TEXT NULL,
-                  enrolled_at TEXT NOT NULL
-                );
-                CREATE TABLE operation_journal (
-                  operation_id TEXT PRIMARY KEY,
-                  job_id TEXT NOT NULL,
-                  idempotency_key TEXT NOT NULL
-                );
-                CREATE TABLE result_outbox (
-                  job_id TEXT PRIMARY KEY,
-                  idempotency_key TEXT NOT NULL,
-                  result_json TEXT NOT NULL,
-                  attempt_count INTEGER NOT NULL,
-                  next_attempt_at TEXT NOT NULL,
-                  delivered_at TEXT NULL
-                );
-                PRAGMA user_version = 1;
-                "#,
-            )
-            .unwrap();
-
-        let store = RunnerStateStore::from_connection(connection).unwrap();
-        let columns = store
-            .connection
-            .prepare("PRAGMA table_info(runner_identity)")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(1))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert!(columns.contains(&"credential_secret".to_owned()));
-        assert!(columns.contains(&"server_url".to_owned()));
-        assert_eq!(
-            store
-                .connection
-                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
-                .unwrap(),
-            RUNNER_SCHEMA_VERSION
-        );
+    fn old_poc_runner_state_requires_a_clean_database() {
+        for version in [1, 2] {
+            let connection = Connection::open_in_memory().unwrap();
+            connection
+                .pragma_update(None, "user_version", version)
+                .unwrap();
+            assert!(
+                matches!(RunnerStateStore::from_connection(connection), Err(RunnerStateError::UnsupportedSchema(v)) if v == version)
+            );
+        }
     }
 }

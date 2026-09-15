@@ -1,0 +1,19 @@
+{
+  "protocolVersion": "1.0",
+  "jobId": "library_01",
+  "idempotencyKey": "library-library_01",
+  "organizationId": "org_01",
+  "deviceId": "device_01",
+  "projectInstanceId": null,
+  "result": {
+    "kind": "libraryResponse",
+    "payload": {
+      "value": {
+        "name": "Home",
+        "handle": "folder-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/Home",
+        "parent": null,
+        "children": []
+      }
+    }
+  }
+}

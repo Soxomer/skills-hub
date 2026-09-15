@@ -173,6 +173,7 @@ pub fn negotiate_protocol_version(remote_versions: &[ProtocolVersion]) -> Option
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunnerCapabilities {
+    pub library: bool,
     pub scan_project: bool,
     pub plan_setup: bool,
     pub apply_plan: bool,
@@ -193,6 +194,7 @@ pub struct CapabilityEnvelope {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "payload", rename_all = "camelCase")]
 pub enum RunnerJob {
+    LibraryAction(crate::LibraryRequest),
     ScanProject(ScanProjectJob),
     PlanSetup(PlanSetupJob),
     ApplyPlan(ApplyPlanJob),
@@ -269,7 +271,7 @@ pub struct JobEnvelope {
     pub idempotency_key: Identifier,
     pub organization_id: OrganizationId,
     pub device_id: DeviceId,
-    pub project_instance_id: ProjectInstanceId,
+    pub project_instance_id: Option<ProjectInstanceId>,
     pub issued_at: IsoTimestamp,
     pub expires_at: IsoTimestamp,
     pub job: RunnerJob,
@@ -450,6 +452,7 @@ pub struct ErrorResult {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "payload", rename_all = "camelCase")]
 pub enum RunnerResult {
+    LibraryResponse(crate::LibraryResponse),
     ScanResult(ScanResult),
     PlanResult(PlanResult),
     ApplyReceipt(ApplyReceipt),
@@ -466,7 +469,7 @@ pub struct ResultEnvelope {
     pub idempotency_key: Identifier,
     pub organization_id: OrganizationId,
     pub device_id: DeviceId,
-    pub project_instance_id: ProjectInstanceId,
+    pub project_instance_id: Option<ProjectInstanceId>,
     pub result: RunnerResult,
 }
 

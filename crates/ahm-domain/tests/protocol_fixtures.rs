@@ -24,7 +24,7 @@ fn golden_fixtures_parse_and_round_trip_without_drift() {
         .collect::<Vec<_>>();
     paths.sort();
 
-    assert_eq!(paths.len(), 11);
+    assert_eq!(paths.len(), 13);
     for path in paths {
         let source: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         let envelope: ProtocolEnvelope = serde_json::from_value(source.clone())

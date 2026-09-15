@@ -3,9 +3,15 @@
   "$id": "https://agent-harness-manager.local/contracts/v1/protocol.schema.json",
   "title": "Agent Harness Manager runner protocol v1",
   "oneOf": [
-    { "$ref": "#/$defs/capabilityEnvelope" },
-    { "$ref": "#/$defs/jobEnvelope" },
-    { "$ref": "#/$defs/resultEnvelope" }
+    {
+      "$ref": "#/$defs/capabilityEnvelope"
+    },
+    {
+      "$ref": "#/$defs/jobEnvelope"
+    },
+    {
+      "$ref": "#/$defs/resultEnvelope"
+    }
   ],
   "$defs": {
     "identifier": {
@@ -25,7 +31,11 @@
       "const": "1.0"
     },
     "recoverability": {
-      "enum": ["notNeeded", "rollbackAvailable", "manualIntervention"]
+      "enum": [
+        "notNeeded",
+        "rollbackAvailable",
+        "manualIntervention"
+      ]
     },
     "runnerCapabilities": {
       "type": "object",
@@ -35,17 +45,31 @@
         "planSetup",
         "applyPlan",
         "rollbackOperation",
-        "supportedTools"
+        "supportedTools",
+        "library"
       ],
       "properties": {
-        "scanProject": { "type": "boolean" },
-        "planSetup": { "type": "boolean" },
-        "applyPlan": { "type": "boolean" },
-        "rollbackOperation": { "type": "boolean" },
+        "scanProject": {
+          "type": "boolean"
+        },
+        "planSetup": {
+          "type": "boolean"
+        },
+        "applyPlan": {
+          "type": "boolean"
+        },
+        "rollbackOperation": {
+          "type": "boolean"
+        },
         "supportedTools": {
           "type": "array",
-          "items": { "$ref": "#/$defs/identifier" },
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
           "uniqueItems": true
+        },
+        "library": {
+          "type": "boolean"
         }
       }
     },
@@ -60,31 +84,53 @@
         "capabilities"
       ],
       "properties": {
-        "protocolVersion": { "$ref": "#/$defs/protocolVersion" },
+        "protocolVersion": {
+          "$ref": "#/$defs/protocolVersion"
+        },
         "supportedProtocolVersions": {
           "type": "array",
-          "items": { "$ref": "#/$defs/protocolVersion" },
+          "items": {
+            "$ref": "#/$defs/protocolVersion"
+          },
           "minItems": 1,
           "uniqueItems": true
         },
-        "runnerVersion": { "$ref": "#/$defs/identifier" },
-        "deviceId": { "$ref": "#/$defs/identifier" },
-        "capabilities": { "$ref": "#/$defs/runnerCapabilities" }
+        "runnerVersion": {
+          "$ref": "#/$defs/identifier"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/runnerCapabilities"
+        }
       }
     },
     "scanProjectJob": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "payload"],
+      "required": [
+        "kind",
+        "payload"
+      ],
       "properties": {
-        "kind": { "const": "scanProject" },
+        "kind": {
+          "const": "scanProject"
+        },
         "payload": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["projectId", "includeUnmanaged"],
+          "required": [
+            "projectId",
+            "includeUnmanaged"
+          ],
           "properties": {
-            "projectId": { "$ref": "#/$defs/identifier" },
-            "includeUnmanaged": { "type": "boolean" }
+            "projectId": {
+              "$ref": "#/$defs/identifier"
+            },
+            "includeUnmanaged": {
+              "type": "boolean"
+            }
           }
         }
       }
@@ -101,47 +147,92 @@
         "targetName"
       ],
       "properties": {
-        "artifactId": { "$ref": "#/$defs/identifier" },
-        "artifactKind": { "enum": ["skill", "pluginSkill", "localContent"] },
-        "portableSource": {
-          "oneOf": [
-            { "type": "string", "minLength": 1 },
-            { "type": "null" }
+        "artifactId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "artifactKind": {
+          "enum": [
+            "skill",
+            "pluginSkill",
+            "localContent"
           ]
         },
-        "contentDigest": { "$ref": "#/$defs/digest" },
-        "toolId": { "$ref": "#/$defs/identifier" },
-        "targetName": { "$ref": "#/$defs/identifier" }
+        "portableSource": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contentDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "toolId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "targetName": {
+          "$ref": "#/$defs/identifier"
+        }
       }
     },
     "portableSetupRevision": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["setupId", "setupRevisionId", "revisionNumber", "items"],
+      "required": [
+        "setupId",
+        "setupRevisionId",
+        "revisionNumber",
+        "items"
+      ],
       "properties": {
-        "setupId": { "$ref": "#/$defs/identifier" },
-        "setupRevisionId": { "$ref": "#/$defs/identifier" },
-        "revisionNumber": { "type": "integer", "minimum": 1 },
+        "setupId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "setupRevisionId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "revisionNumber": {
+          "type": "integer",
+          "minimum": 1
+        },
         "items": {
           "type": "array",
           "maxItems": 5000,
-          "items": { "$ref": "#/$defs/portableSetupRevisionItem" }
+          "items": {
+            "$ref": "#/$defs/portableSetupRevisionItem"
+          }
         }
       }
     },
     "planSetupJob": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "payload"],
+      "required": [
+        "kind",
+        "payload"
+      ],
       "properties": {
-        "kind": { "const": "planSetup" },
+        "kind": {
+          "const": "planSetup"
+        },
         "payload": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["projectId", "revision"],
+          "required": [
+            "projectId",
+            "revision"
+          ],
           "properties": {
-            "projectId": { "$ref": "#/$defs/identifier" },
-            "revision": { "$ref": "#/$defs/portableSetupRevision" }
+            "projectId": {
+              "$ref": "#/$defs/identifier"
+            },
+            "revision": {
+              "$ref": "#/$defs/portableSetupRevision"
+            }
           }
         }
       }
@@ -160,30 +251,61 @@
         "expiresAt"
       ],
       "properties": {
-        "approvalId": { "$ref": "#/$defs/identifier" },
-        "organizationId": { "$ref": "#/$defs/identifier" },
-        "projectInstanceId": { "$ref": "#/$defs/identifier" },
-        "setupRevisionId": { "$ref": "#/$defs/identifier" },
-        "planDigest": { "$ref": "#/$defs/digest" },
-        "approvedBy": { "$ref": "#/$defs/identifier" },
-        "approvedAt": { "$ref": "#/$defs/timestamp" },
-        "expiresAt": { "$ref": "#/$defs/timestamp" }
+        "approvalId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "organizationId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "projectInstanceId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "setupRevisionId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "planDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "approvedBy": {
+          "$ref": "#/$defs/identifier"
+        },
+        "approvedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/timestamp"
+        }
       }
     },
     "applyPlanJob": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "payload"],
+      "required": [
+        "kind",
+        "payload"
+      ],
       "properties": {
-        "kind": { "const": "applyPlan" },
+        "kind": {
+          "const": "applyPlan"
+        },
         "payload": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["projectId", "revision", "approval"],
+          "required": [
+            "projectId",
+            "revision",
+            "approval"
+          ],
           "properties": {
-            "projectId": { "$ref": "#/$defs/identifier" },
-            "revision": { "$ref": "#/$defs/portableSetupRevision" },
-            "approval": { "$ref": "#/$defs/planApproval" }
+            "projectId": {
+              "$ref": "#/$defs/identifier"
+            },
+            "revision": {
+              "$ref": "#/$defs/portableSetupRevision"
+            },
+            "approval": {
+              "$ref": "#/$defs/planApproval"
+            }
           }
         }
       }
@@ -191,26 +313,49 @@
     "rollbackOperationJob": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "payload"],
+      "required": [
+        "kind",
+        "payload"
+      ],
       "properties": {
-        "kind": { "const": "rollbackOperation" },
+        "kind": {
+          "const": "rollbackOperation"
+        },
         "payload": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["projectId", "operationId"],
+          "required": [
+            "projectId",
+            "operationId"
+          ],
           "properties": {
-            "projectId": { "$ref": "#/$defs/identifier" },
-            "operationId": { "$ref": "#/$defs/identifier" }
+            "projectId": {
+              "$ref": "#/$defs/identifier"
+            },
+            "operationId": {
+              "$ref": "#/$defs/identifier"
+            }
           }
         }
       }
     },
     "runnerJob": {
       "oneOf": [
-        { "$ref": "#/$defs/scanProjectJob" },
-        { "$ref": "#/$defs/planSetupJob" },
-        { "$ref": "#/$defs/applyPlanJob" },
-        { "$ref": "#/$defs/rollbackOperationJob" }
+        {
+          "$ref": "#/$defs/scanProjectJob"
+        },
+        {
+          "$ref": "#/$defs/planSetupJob"
+        },
+        {
+          "$ref": "#/$defs/applyPlanJob"
+        },
+        {
+          "$ref": "#/$defs/rollbackOperationJob"
+        },
+        {
+          "$ref": "#/$defs/libraryActionJob"
+        }
       ]
     },
     "jobEnvelope": {
@@ -228,15 +373,40 @@
         "job"
       ],
       "properties": {
-        "protocolVersion": { "$ref": "#/$defs/protocolVersion" },
-        "jobId": { "$ref": "#/$defs/identifier" },
-        "idempotencyKey": { "$ref": "#/$defs/identifier" },
-        "organizationId": { "$ref": "#/$defs/identifier" },
-        "deviceId": { "$ref": "#/$defs/identifier" },
-        "projectInstanceId": { "$ref": "#/$defs/identifier" },
-        "issuedAt": { "$ref": "#/$defs/timestamp" },
-        "expiresAt": { "$ref": "#/$defs/timestamp" },
-        "job": { "$ref": "#/$defs/runnerJob" }
+        "protocolVersion": {
+          "$ref": "#/$defs/protocolVersion"
+        },
+        "jobId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "idempotencyKey": {
+          "$ref": "#/$defs/identifier"
+        },
+        "organizationId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "projectInstanceId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "issuedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "job": {
+          "$ref": "#/$defs/runnerJob"
+        }
       }
     },
     "scanDiscovery": {
@@ -252,35 +422,72 @@
         "contentDigest"
       ],
       "properties": {
-        "discoveryId": { "$ref": "#/$defs/identifier" },
-        "kind": { "enum": ["skill", "pluginSkill", "localContent"] },
-        "state": { "enum": ["available", "conflict", "unsupported"] },
-        "name": { "$ref": "#/$defs/identifier" },
-        "toolId": { "$ref": "#/$defs/identifier" },
-        "portableSource": {
-          "oneOf": [
-            { "type": "string", "minLength": 1 },
-            { "type": "null" }
+        "discoveryId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "kind": {
+          "enum": [
+            "skill",
+            "pluginSkill",
+            "localContent"
           ]
         },
-        "contentDigest": { "$ref": "#/$defs/digest" }
+        "state": {
+          "enum": [
+            "available",
+            "conflict",
+            "unsupported"
+          ]
+        },
+        "name": {
+          "$ref": "#/$defs/identifier"
+        },
+        "toolId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "portableSource": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contentDigest": {
+          "$ref": "#/$defs/digest"
+        }
       }
     },
     "scanResult": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "payload"],
+      "required": [
+        "kind",
+        "payload"
+      ],
       "properties": {
-        "kind": { "const": "scanResult" },
+        "kind": {
+          "const": "scanResult"
+        },
         "payload": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["projectId", "discoveries"],
+          "required": [
+            "projectId",
+            "discoveries"
+          ],
           "properties": {
-            "projectId": { "$ref": "#/$defs/identifier" },
+            "projectId": {
+              "$ref": "#/$defs/identifier"
+            },
             "discoveries": {
               "type": "array",
-              "items": { "$ref": "#/$defs/scanDiscovery" }
+              "items": {
+                "$ref": "#/$defs/scanDiscovery"
+              }
             }
           }
         }
@@ -289,19 +496,48 @@
     "planAction": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["actionId", "kind", "artifactId", "destination"],
+      "required": [
+        "actionId",
+        "kind",
+        "artifactId",
+        "destination"
+      ],
       "properties": {
-        "actionId": { "$ref": "#/$defs/identifier" },
-        "kind": { "enum": ["link", "copy", "removeManaged"] },
-        "change": { "enum": ["add", "replace", "remove", "unchanged"] },
-        "metadataOnly": { "type": "boolean" },
-        "artifactId": { "$ref": "#/$defs/identifier" },
+        "actionId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "kind": {
+          "enum": [
+            "link",
+            "copy",
+            "removeManaged"
+          ]
+        },
+        "change": {
+          "enum": [
+            "add",
+            "replace",
+            "remove",
+            "unchanged"
+          ]
+        },
+        "metadataOnly": {
+          "type": "boolean"
+        },
+        "artifactId": {
+          "$ref": "#/$defs/identifier"
+        },
         "destination": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["toolId", "projectRelativePath"],
+          "required": [
+            "toolId",
+            "projectRelativePath"
+          ],
           "properties": {
-            "toolId": { "$ref": "#/$defs/identifier" },
+            "toolId": {
+              "$ref": "#/$defs/identifier"
+            },
             "projectRelativePath": {
               "type": "string",
               "minLength": 1,
@@ -314,33 +550,59 @@
     "canonicalPlan": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["setupRevisionId", "planDigest", "actions", "conflicts"],
+      "required": [
+        "setupRevisionId",
+        "planDigest",
+        "actions",
+        "conflicts"
+      ],
       "properties": {
-        "setupRevisionId": { "$ref": "#/$defs/identifier" },
-        "planDigest": { "$ref": "#/$defs/digest" },
+        "setupRevisionId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "planDigest": {
+          "$ref": "#/$defs/digest"
+        },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/$defs/planAction" }
+          "items": {
+            "$ref": "#/$defs/planAction"
+          }
         },
         "conflicts": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
     "planResult": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "payload"],
+      "required": [
+        "kind",
+        "payload"
+      ],
       "properties": {
-        "kind": { "const": "planResult" },
+        "kind": {
+          "const": "planResult"
+        },
         "payload": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["projectId", "plan"],
+          "required": [
+            "projectId",
+            "plan"
+          ],
           "properties": {
-            "projectId": { "$ref": "#/$defs/identifier" },
-            "plan": { "$ref": "#/$defs/canonicalPlan" }
+            "projectId": {
+              "$ref": "#/$defs/identifier"
+            },
+            "plan": {
+              "$ref": "#/$defs/canonicalPlan"
+            }
           }
         }
       }
@@ -348,9 +610,14 @@
     "applyReceipt": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "payload"],
+      "required": [
+        "kind",
+        "payload"
+      ],
       "properties": {
-        "kind": { "const": "applyReceipt" },
+        "kind": {
+          "const": "applyReceipt"
+        },
         "payload": {
           "type": "object",
           "additionalProperties": false,
@@ -365,14 +632,35 @@
             "completedAt"
           ],
           "properties": {
-            "projectId": { "$ref": "#/$defs/identifier" },
-            "operationId": { "$ref": "#/$defs/identifier" },
-            "setupRevisionId": { "$ref": "#/$defs/identifier" },
-            "planDigest": { "$ref": "#/$defs/digest" },
-            "outcome": { "enum": ["applied", "rolledBack", "noChange"] },
-            "recoverability": { "$ref": "#/$defs/recoverability" },
-            "actionsApplied": { "type": "integer", "minimum": 0 },
-            "completedAt": { "$ref": "#/$defs/timestamp" }
+            "projectId": {
+              "$ref": "#/$defs/identifier"
+            },
+            "operationId": {
+              "$ref": "#/$defs/identifier"
+            },
+            "setupRevisionId": {
+              "$ref": "#/$defs/identifier"
+            },
+            "planDigest": {
+              "$ref": "#/$defs/digest"
+            },
+            "outcome": {
+              "enum": [
+                "applied",
+                "rolledBack",
+                "noChange"
+              ]
+            },
+            "recoverability": {
+              "$ref": "#/$defs/recoverability"
+            },
+            "actionsApplied": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "completedAt": {
+              "$ref": "#/$defs/timestamp"
+            }
           }
         }
       }
@@ -380,9 +668,14 @@
     "rollbackReceipt": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "payload"],
+      "required": [
+        "kind",
+        "payload"
+      ],
       "properties": {
-        "kind": { "const": "rollbackReceipt" },
+        "kind": {
+          "const": "rollbackReceipt"
+        },
         "payload": {
           "type": "object",
           "additionalProperties": false,
@@ -395,17 +688,35 @@
             "completedAt"
           ],
           "properties": {
-            "projectId": { "$ref": "#/$defs/identifier" },
-            "operationId": { "$ref": "#/$defs/identifier" },
+            "projectId": {
+              "$ref": "#/$defs/identifier"
+            },
+            "operationId": {
+              "$ref": "#/$defs/identifier"
+            },
             "restoredSetupRevisionId": {
               "oneOf": [
-                { "$ref": "#/$defs/identifier" },
-                { "type": "null" }
+                {
+                  "$ref": "#/$defs/identifier"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
-            "outcome": { "enum": ["applied", "rolledBack", "noChange"] },
-            "recoverability": { "$ref": "#/$defs/recoverability" },
-            "completedAt": { "$ref": "#/$defs/timestamp" }
+            "outcome": {
+              "enum": [
+                "applied",
+                "rolledBack",
+                "noChange"
+              ]
+            },
+            "recoverability": {
+              "$ref": "#/$defs/recoverability"
+            },
+            "completedAt": {
+              "$ref": "#/$defs/timestamp"
+            }
           }
         }
       }
@@ -413,9 +724,14 @@
     "cancellationReceipt": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "payload"],
+      "required": [
+        "kind",
+        "payload"
+      ],
       "properties": {
-        "kind": { "const": "cancellationReceipt" },
+        "kind": {
+          "const": "cancellationReceipt"
+        },
         "payload": {
           "type": "object",
           "additionalProperties": false,
@@ -428,17 +744,35 @@
             "completedAt"
           ],
           "properties": {
-            "projectId": { "$ref": "#/$defs/identifier" },
+            "projectId": {
+              "$ref": "#/$defs/identifier"
+            },
             "operationId": {
               "oneOf": [
-                { "$ref": "#/$defs/identifier" },
-                { "type": "null" }
+                {
+                  "$ref": "#/$defs/identifier"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
-            "outcome": { "enum": ["cancelledAndRestored", "needsAttention"] },
-            "recoverability": { "$ref": "#/$defs/recoverability" },
-            "actionsApplied": { "type": "integer", "minimum": 0 },
-            "completedAt": { "$ref": "#/$defs/timestamp" }
+            "outcome": {
+              "enum": [
+                "cancelledAndRestored",
+                "needsAttention"
+              ]
+            },
+            "recoverability": {
+              "$ref": "#/$defs/recoverability"
+            },
+            "actionsApplied": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "completedAt": {
+              "$ref": "#/$defs/timestamp"
+            }
           }
         }
       }
@@ -446,13 +780,23 @@
     "errorResult": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "payload"],
+      "required": [
+        "kind",
+        "payload"
+      ],
       "properties": {
-        "kind": { "const": "error" },
+        "kind": {
+          "const": "error"
+        },
         "payload": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["code", "message", "retryable", "recoverability"],
+          "required": [
+            "code",
+            "message",
+            "retryable",
+            "recoverability"
+          ],
           "properties": {
             "code": {
               "enum": [
@@ -465,26 +809,48 @@
                 "planDigestMismatch",
                 "approvalExpired",
                 "conflict",
-          "operationFailed",
-          "jobCancelled",
-          "idempotencyMismatch"
+                "operationFailed",
+                "jobCancelled",
+                "idempotencyMismatch"
               ]
             },
-            "message": { "type": "string", "minLength": 1 },
-            "retryable": { "type": "boolean" },
-            "recoverability": { "$ref": "#/$defs/recoverability" }
+            "message": {
+              "type": "string",
+              "minLength": 1
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "recoverability": {
+              "$ref": "#/$defs/recoverability"
+            }
           }
         }
       }
     },
     "runnerResult": {
       "oneOf": [
-        { "$ref": "#/$defs/scanResult" },
-        { "$ref": "#/$defs/planResult" },
-        { "$ref": "#/$defs/applyReceipt" },
-        { "$ref": "#/$defs/rollbackReceipt" },
-        { "$ref": "#/$defs/cancellationReceipt" },
-        { "$ref": "#/$defs/errorResult" }
+        {
+          "$ref": "#/$defs/scanResult"
+        },
+        {
+          "$ref": "#/$defs/planResult"
+        },
+        {
+          "$ref": "#/$defs/applyReceipt"
+        },
+        {
+          "$ref": "#/$defs/rollbackReceipt"
+        },
+        {
+          "$ref": "#/$defs/cancellationReceipt"
+        },
+        {
+          "$ref": "#/$defs/errorResult"
+        },
+        {
+          "$ref": "#/$defs/libraryResponse"
+        }
       ]
     },
     "resultEnvelope": {
@@ -500,13 +866,1918 @@
         "result"
       ],
       "properties": {
-        "protocolVersion": { "$ref": "#/$defs/protocolVersion" },
-        "jobId": { "$ref": "#/$defs/identifier" },
-        "idempotencyKey": { "$ref": "#/$defs/identifier" },
-        "organizationId": { "$ref": "#/$defs/identifier" },
-        "deviceId": { "$ref": "#/$defs/identifier" },
-        "projectInstanceId": { "$ref": "#/$defs/identifier" },
-        "result": { "$ref": "#/$defs/runnerResult" }
+        "protocolVersion": {
+          "$ref": "#/$defs/protocolVersion"
+        },
+        "jobId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "idempotencyKey": {
+          "$ref": "#/$defs/identifier"
+        },
+        "organizationId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "projectInstanceId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "$ref": "#/$defs/runnerResult"
+        }
+      }
+    },
+    "libraryRequest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_tool_config"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "set_tool_config"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "config"
+              ],
+              "properties": {
+                "config": {
+                  "type": "object"
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_tool_status"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_onboarding_plan"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_discovery_scan_settings"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "set_discovery_scan_config"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "config"
+              ],
+              "properties": {
+                "config": {
+                  "type": "object"
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_git_cache_cleanup_days"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "set_git_cache_cleanup_days"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "days"
+              ],
+              "properties": {
+                "days": {
+                  "type": "integer"
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "clear_git_cache_now"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_git_cache_ttl_secs"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "set_git_cache_ttl_secs"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "secs"
+              ],
+              "properties": {
+                "secs": {
+                  "type": "integer"
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_auto_update_config"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "set_auto_update_config"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enabled",
+                "intervalHours"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "intervalHours": {
+                  "type": "integer"
+                },
+                "scheduleType": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "intervalValue": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "intervalUnit": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "dailyTime": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "run_auto_update_now"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "trigger_auto_update_task_now_cmd"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_recent_projects"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "save_recent_project"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "projectPath"
+              ],
+              "properties": {
+                "projectPath": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_central_repo_path"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "set_central_repo_path"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "list_local_skills_cmd"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "basePath"
+              ],
+              "properties": {
+                "basePath": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "install_local_selection"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "basePath",
+                "subpath"
+              ],
+              "properties": {
+                "basePath": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "subpath": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "name": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "list_git_skills_cmd"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "repoUrl"
+              ],
+              "properties": {
+                "repoUrl": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "preview_git_skill_cmd"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "repoUrl"
+              ],
+              "properties": {
+                "repoUrl": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "skillName": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "install_git_selection"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "repoUrl",
+                "subpath"
+              ],
+              "properties": {
+                "repoUrl": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "subpath": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "name": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "trackingUrl": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "sync_skill_to_tool"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sourcePath",
+                "skillId",
+                "tool",
+                "name"
+              ],
+              "properties": {
+                "sourcePath": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "skillId": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "tool": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "name": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "overwrite": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "overwriteIfSameContent": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "scope": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "projectPath": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "unsync_skill_from_tool"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "skillId",
+                "tool"
+              ],
+              "properties": {
+                "skillId": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "tool": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "scope": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "projectPath": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "set_skill_enabled"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "skillId",
+                "enabled"
+              ],
+              "properties": {
+                "skillId": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "enabled": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "update_managed_skill"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "skillId"
+              ],
+              "properties": {
+                "skillId": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_github_token"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "set_github_token"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "token"
+              ],
+              "properties": {
+                "token": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_github_proxy_config"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "set_github_proxy_config"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enabled",
+                "port"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "port": {
+                  "type": "integer"
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "import_existing_skill"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sourcePath"
+              ],
+              "properties": {
+                "sourcePath": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "name": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_managed_skills"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_tags"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "create_tag"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "rename_tag"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "tagId",
+                "name"
+              ],
+              "properties": {
+                "tagId": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "delete_tag"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "tagId"
+              ],
+              "properties": {
+                "tagId": {
+                  "type": "integer"
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_skill_tags"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "skillId"
+              ],
+              "properties": {
+                "skillId": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "set_skill_tags"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "skillId",
+                "tagIds"
+              ],
+              "properties": {
+                "skillId": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "tagIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_untagged_skill_ids"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "delete_managed_skill"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "skillId"
+              ],
+              "properties": {
+                "skillId": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "get_featured_skills"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "search_skills_online"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "query"
+              ],
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "limit": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "list_skill_files"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "centralPath"
+              ],
+              "properties": {
+                "centralPath": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "read_skill_file"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "centralPath",
+                "filePath"
+              ],
+              "properties": {
+                "centralPath": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "filePath": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "expectedDigest"
+          ],
+          "properties": {
+            "command": {
+              "const": "list_directories"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "parent": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "expectedDigest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "libraryActionJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "libraryAction"
+        },
+        "payload": {
+          "$ref": "#/$defs/libraryRequest"
+        }
+      }
+    },
+    "libraryResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "libraryResponse"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "value"
+          ],
+          "properties": {
+            "value": {}
+          }
+        }
       }
     }
   }

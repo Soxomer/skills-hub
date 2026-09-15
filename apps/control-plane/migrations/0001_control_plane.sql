@@ -121,10 +121,11 @@ CREATE TABLE IF NOT EXISTS runner_jobs (
   id TEXT PRIMARY KEY,
   organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   device_id TEXT NOT NULL,
-  project_instance_id TEXT NOT NULL,
+  project_instance_id TEXT NULL,
   protocol_version TEXT NOT NULL CHECK (protocol_version = '1.0'),
   idempotency_key TEXT NOT NULL,
-  job_kind TEXT NOT NULL CHECK (job_kind IN ('scanProject', 'planSetup', 'applyPlan', 'rollbackOperation')),
+  job_kind TEXT NOT NULL CHECK (job_kind IN ('scanProject', 'planSetup', 'applyPlan', 'rollbackOperation', 'libraryAction')),
+  CHECK ((job_kind = 'libraryAction') = (project_instance_id IS NULL)),
   payload JSONB NOT NULL,
   state TEXT NOT NULL CONSTRAINT runner_jobs_state_check
     CHECK (state IN ('pending', 'leased', 'succeeded', 'failed', 'expired', 'cancelled')),

@@ -113,6 +113,8 @@ struct SkillArgs {
 
 #[derive(Debug, Subcommand)]
 enum SkillCommand {
+    /// Store a GitHub token locally, read from standard input (an empty line clears it).
+    GithubToken,
     /// List skills already managed by Skills Hub.
     List,
 }
@@ -257,6 +259,16 @@ fn run(cli: Cli) -> Result<i32> {
             emit_default_preview(&preview, cli.json)?;
         }
         Command::Skill(args) => match args.command {
+            SkillCommand::GithubToken => {
+                use std::io::BufRead;
+                eprintln!("Paste the GitHub token and press Enter (stored only on this computer):");
+                let mut token = String::new();
+                std::io::stdin().lock().read_line(&mut token)?;
+                let store = ahm_runner::skill_store::SkillStore::new(db_path.clone());
+                store.ensure_schema()?;
+                store.set_setting("github_token", token.trim())?;
+                println!("GitHub credentials saved locally.");
+            }
             SkillCommand::List => {
                 let skills = service.list_skills()?;
                 if cli.json {
@@ -489,7 +501,7 @@ fn connect_runner(
             identity.device_id.as_str(),
             identity.server_url
         );
-        println!("Next: ahm project connect <project-id>");
+        println!("Next: ahm worker (skill library), or ahm project connect <project-id> (project Setups)");
     }
     Ok(())
 }

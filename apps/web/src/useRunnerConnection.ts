@@ -5,7 +5,7 @@ import type {
 } from '@ahm/contracts'
 import { useCallback, useEffect, useState } from 'react'
 
-import type { ControlPlaneClient } from './api'
+import { ControlPlaneApiError, type ControlPlaneClient } from './api'
 
 const STORAGE_KEY = 'ahm.runner-enrollment'
 const RUNNER_KEY = 'ahm.runner-device'
@@ -98,8 +98,15 @@ export function useRunnerConnection(client: ControlPlaneClient) {
         setRunner(await client.runner(nextStatus.deviceId))
       }
       setError(null)
-    } catch {
-      setError('refresh')
+    } catch (error) {
+      if (error instanceof ControlPlaneApiError && error.status === 404) {
+        sessionStorage.removeItem(STORAGE_KEY)
+        localStorage.removeItem(RUNNER_KEY)
+        setEnrollment(null)
+        setStatus(null)
+        setRunner(null)
+        setError(null)
+      } else setError('refresh')
     }
   }, [client, enrollment, restoredDeviceId])
 

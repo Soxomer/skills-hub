@@ -21,7 +21,7 @@ const capabilities: RunnerCapabilityReport = {
     scanProject: true,
     planSetup: false,
     applyPlan: false,
-    rollbackOperation: false,
+    rollbackOperation: false, library: true,
     supportedTools: ['codex'],
   },
 }
@@ -97,6 +97,31 @@ async function connect(app: ReturnType<typeof createControlPlaneApp>) {
   expect(status.json()).toMatchObject({ state: 'claimed', deviceId: identity.deviceId })
   return identity
 }
+
+it('delivers device library actions before any project is connected and isolates their results', async () => {
+  const { app } = harness()
+  const identity = await connect(app)
+  const authorization = { authorization: `Bearer ${identity.credential}` }
+  const payload = { command: 'list_directories', args: { parent: null }, expectedDigest: null }
+  const queued = await app.inject({ method: 'POST', url: `/api/v1/runners/${identity.deviceId}/library`, headers: actorHeaders, payload })
+  expect(queued.statusCode).toBe(200)
+  const { jobId } = queued.json<{ jobId: string }>()
+  const foreign = await app.inject({ method: 'POST', url: `/api/v1/runners/${identity.deviceId}/library`, headers: { ...actorHeaders, 'x-ahm-organization-id': 'foreign' }, payload })
+  expect([403, 404]).toContain(foreign.statusCode)
+  const claimed = await app.inject({ method: 'POST', url: '/runner/v1/jobs/claim', headers: authorization, payload: { capabilities, waitMs: 0 } })
+  expect(claimed.statusCode).toBe(200)
+  const lease = claimed.json<{ leaseId: string; job: { idempotencyKey: string; projectInstanceId: null } }>()
+  expect(lease.job.projectInstanceId).toBeNull()
+  await acknowledge(app, authorization, jobId, lease.leaseId)
+  const result = { protocolVersion: '1.0', jobId, idempotencyKey: lease.job.idempotencyKey, organizationId: identity.organizationId, deviceId: identity.deviceId, projectInstanceId: null, result: { kind: 'libraryResponse', payload: { value: { children: [] } } } }
+  const submitted = await app.inject({ method: 'POST', url: `/runner/v1/jobs/${jobId}/result`, headers: authorization, payload: { leaseId: lease.leaseId, result } })
+  expect(submitted.json()).toEqual({ accepted: true, duplicate: false })
+  const observed = await app.inject({ method: 'GET', url: `/api/v1/jobs/${jobId}`, headers: actorHeaders })
+  expect(observed.json().result.result.payload.value).toEqual({ children: [] })
+  const duplicate = await app.inject({ method: 'POST', url: `/runner/v1/jobs/${jobId}/result`, headers: authorization, payload: { leaseId: lease.leaseId, result } })
+  expect(duplicate.json()).toEqual({ accepted: true, duplicate: true })
+  await app.close()
+})
 
 async function acknowledge(
   app: ReturnType<typeof createControlPlaneApp>,

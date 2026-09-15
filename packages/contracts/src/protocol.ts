@@ -32,6 +32,7 @@ export interface PortableSetupRevision {
 }
 
 export interface RunnerCapabilities {
+  library: boolean
   scanProject: boolean
   planSetup: boolean
   applyPlan: boolean
@@ -92,6 +93,7 @@ export interface RollbackOperationJob {
 }
 
 export type RunnerJob =
+  | { kind: 'libraryAction'; payload: import('./library.js').LibraryRequest }
   | ScanProjectJob
   | PlanSetupJob
   | ApplyPlanJob
@@ -103,7 +105,7 @@ export interface JobEnvelope {
   idempotencyKey: string
   organizationId: OrganizationId
   deviceId: DeviceId
-  projectInstanceId: ProjectInstanceId
+  projectInstanceId: ProjectInstanceId | null
   issuedAt: IsoTimestamp
   expiresAt: IsoTimestamp
   job: RunnerJob
@@ -229,6 +231,7 @@ export interface ErrorResult {
 }
 
 export type RunnerResult =
+  | { kind: 'libraryResponse'; payload: import('./library.js').LibraryResponse }
   | ScanResult
   | PlanResult
   | ApplyReceipt
@@ -242,7 +245,7 @@ export interface ResultEnvelope {
   idempotencyKey: string
   organizationId: OrganizationId
   deviceId: DeviceId
-  projectInstanceId: ProjectInstanceId
+  projectInstanceId: ProjectInstanceId | null
   result: RunnerResult
 }
 
