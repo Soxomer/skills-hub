@@ -30,7 +30,7 @@ function dateTime(value: string | null): string | null {
   }).format(new Date(value))
 }
 
-export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connection }: { client: ControlPlaneClient; connection: ReturnType<typeof useRunnerConnection> }) {
+export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connection, onSignOut }: { client: ControlPlaneClient; connection: ReturnType<typeof useRunnerConnection>; onSignOut?: () => void }) {
   const { t } = useTranslation()
   const [page, setPage] = useState<'projects' | 'setups' | 'skills'>('projects')
   const effectiveStatus =
@@ -62,6 +62,7 @@ export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connect
               onClick={() => setPage(area)}>{t(`library.${area}`)}</button>
           ))}
         </nav>
+        {onSignOut && <button className="text-button" type="button" onClick={onSignOut}>{t('auth.signOut')}</button>}
       </header>
 
       <main id="main-content" className="workspace" data-page={page}>

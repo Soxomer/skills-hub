@@ -34,3 +34,7 @@ plans/
 .env
 
 bun.lock
+.vercel/
+.railway/
+
+.env.local

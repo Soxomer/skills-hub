@@ -204,6 +204,9 @@ export class ControlPlaneClient {
         'x-ahm-user-id': this.options.actor.userId,
         ...init.headers,
       },
+      cache: 'no-store',
+      credentials: 'same-origin',
+      redirect: 'error',
     })
     if (!response.ok) {
       let message = `Control-plane request failed (${response.status})`

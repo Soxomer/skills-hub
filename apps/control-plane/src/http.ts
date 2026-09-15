@@ -20,6 +20,7 @@ import {
 } from './runner-transport.js'
 import { SwitchingError, type SwitchingService } from './switching.js'
 import { SetupServiceError, type SetupService } from './setups.js'
+import type { BrowserAuthenticator } from './hosted-auth.js'
 
 function requiredHeader(request: FastifyRequest, name: string): string {
   const value = request.headers[name]
@@ -29,7 +30,7 @@ function requiredHeader(request: FastifyRequest, name: string): string {
   return value
 }
 
-function actor(request: FastifyRequest): RequestActor {
+function developmentActor(request: FastifyRequest): RequestActor {
   return {
     organizationId: requiredHeader(request, 'x-ahm-organization-id'),
     userId: requiredHeader(request, 'x-ahm-user-id'),
@@ -49,8 +50,22 @@ export function createControlPlaneApp(
   projects: ProjectService,
   switching?: SwitchingService,
   setups?: SetupService,
+  authenticateBrowser?: BrowserAuthenticator,
 ): FastifyInstance {
   const app = Fastify({ logger: false })
+  const actors = new WeakMap<FastifyRequest, RequestActor>()
+  app.addHook('onRequest', async (request, reply) => {
+    if (request.routeOptions.url?.startsWith('/runner/')) reply.header('cache-control', 'private, no-store')
+    if (!request.routeOptions.url?.startsWith('/api/')) return
+    reply.header('cache-control', 'private, no-store')
+    if (request.routeOptions.url === '/api/auth/*') return
+    actors.set(request, authenticateBrowser ? await authenticateBrowser(request) : developmentActor(request))
+  })
+  const actor = (request: FastifyRequest): RequestActor => {
+    const identity = actors.get(request)
+    if (!identity) throw new RunnerTransportError(401, 'Sign in to continue')
+    return identity
+  }
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof RunnerTransportError) {

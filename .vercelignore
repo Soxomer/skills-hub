@@ -1,0 +1,9 @@
+.env
+.env.*
+target
+crates
+node_modules
+**/node_modules
+.git
+.oma30-acceptance
+plans

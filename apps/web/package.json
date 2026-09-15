@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ahm/contracts": "0.9.1",
+    "better-auth": "1.7.5",
     "i18next": "^25.10.10",
     "lucide-react": "^0.562.0",
     "react": "^19.2.3",

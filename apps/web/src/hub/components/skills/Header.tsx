@@ -4,6 +4,7 @@ import {
   Compass,
   Download,
   Layers3,
+  LogOut,
   LoaderCircle,
   RefreshCw,
   Settings,
@@ -16,6 +17,7 @@ type ManagementTab = 'tags' | 'tools' | 'updates'
 
 type HeaderProps = {
   onOpenWorkspace: () => void
+  onSignOut?: () => void
   activeView: 'myskills' | 'explore' | 'detail' | 'settings' | 'manage'
   managementTab: ManagementTab
   skillCount: number
@@ -39,6 +41,7 @@ type HeaderProps = {
 
 const Header = ({
   onOpenWorkspace,
+  onSignOut,
   activeView,
   managementTab,
   skillCount,
@@ -163,6 +166,7 @@ const Header = ({
           <span>{t('addSkills')}</span>
         </button>
         <button type="button" onClick={onOpenWorkspace} title={t('runnerWorkspace')} aria-label={t('runnerWorkspace')}><Layers3 size={18} /><span>{t('runnerWorkspace')}</span></button>
+        {onSignOut && <button type="button" onClick={onSignOut} title={t('auth.signOut', { ns: 'translation' })} aria-label={t('auth.signOut', { ns: 'translation' })}><LogOut size={18} /><span>{t('auth.signOut', { ns: 'translation' })}</span></button>}
       </nav>
 
       <div className="sidebar-section-label">{t('navManageCenter')}</div>

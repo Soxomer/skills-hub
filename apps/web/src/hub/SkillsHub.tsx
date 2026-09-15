@@ -94,7 +94,7 @@ type SkillScopeState = Record<
 
 type ActiveView = 'myskills' | 'explore' | 'detail' | 'settings' | 'manage'
 type ManagementTab = 'tags' | 'tools' | 'updates'
-function SkillsHub({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
+function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void; onSignOut?: () => void }) {
   const narrowWindow = useNarrowWindow()
   const { invokeLibrary, runnerConnected, pickDirectory } = useLibrary()
   const { t, i18n } = useTranslation('hub')
@@ -3538,6 +3538,7 @@ function SkillsHub({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
 
       <Header
         onOpenWorkspace={onOpenWorkspace}
+        onSignOut={onSignOut}
         activeView={activeView}
         managementTab={managementTab}
         skillCount={managedSkills.length}
