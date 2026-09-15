@@ -12,7 +12,7 @@ import {
 import { memo, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { createBrowserClient } from './api'
+import { createBrowserClient, type ControlPlaneClient } from './api'
 import './App.css'
 import { CommandBlock } from './components/CommandBlock'
 import { ConnectionBadge } from './components/ConnectionBadge'
@@ -30,9 +30,11 @@ function dateTime(value: string | null): string | null {
   }).format(new Date(value))
 }
 
-export const App = memo(function App() {
+interface AppProps { client?: ControlPlaneClient; onSignOut?: () => void }
+
+export const App = memo(function App({ client: suppliedClient, onSignOut }: AppProps = {}) {
   const { t } = useTranslation()
-  const client = useMemo(() => createBrowserClient(), [])
+  const client = useMemo(() => suppliedClient ?? createBrowserClient(), [suppliedClient])
   const connection = useRunnerConnection(client)
   const [page, setPage] = useState<'projects' | 'setups' | 'skills'>('projects')
   const effectiveStatus =
@@ -64,6 +66,7 @@ export const App = memo(function App() {
               onClick={() => setPage(area)}>{t(`library.${area}`)}</button>
           ))}
         </nav>
+        {onSignOut && <button className="text-button" type="button" onClick={onSignOut}>{t('auth.signOut')}</button>}
       </header>
 
       <main id="main-content" className="workspace" data-page={page}>

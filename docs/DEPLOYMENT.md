@@ -1,30 +1,25 @@
 # Hosted Skill Manager
 
-The browser is hosted by the Vercel `skill-manager` project. The Fastify control
-plane and PostgreSQL are hosted by the Railway `skill-manager` project. The
-local `ahm` runner remains on each workstation.
+The browser runs on Vercel; Fastify and PostgreSQL run on Railway. Cloudflare
+provides the domain DNS. The local `ahm` runner remains on each workstation.
+Cloudflare Access / Zero Trust is not required and has not been activated.
 
 ## Vercel
 
 - Domain: `skill-manager.omarjetti.dev`.
-- Build from the repository root with the settings in `vercel.json`.
-- `/api`, `/runner`, and `/health` proxy to the Railway service.
-- Leave `VITE_AHM_API_BASE_URL` unset so the browser uses the same origin.
-- Keep preview deployment protection enabled. Deployment secrets belong in
-  provider settings, never in browser build variables.
+- Build from the repository root with `vercel.json`.
+- `/api` (including `/api/auth`), `/runner`, and `/health` proxy to Railway.
+- Leave `VITE_AHM_API_BASE_URL` unset for same-origin requests and cookies.
+- Keep preview deployment protection enabled; never put secrets in browser build variables.
 
 ## Railway
 
-- Repository: `Soxomer/skills-hub`, branch `main`, root directory `/`.
+- Repository: `Soxomer/skills-hub`, branch `main`, root `/`.
 - Builder: Dockerfile, path `Dockerfile`; no custom build command.
-- Start: the Docker image command (`npm run start --workspace @ahm/control-plane`).
-- Health check: `/health`. Set the generated domain's target port to `8080`.
+- Start: `npm run start --workspace @ahm/control-plane` (includes migrations).
+- Health check: `/health`; generated domain target port: `8080`.
 - PostgreSQL uses a persistent volume and Railway's private network.
-- Run migrations before starting the server (the existing start script does this).
-- New Railway services no longer accept legacy `railway.json` configuration;
-  these service settings are configured in the Railway dashboard.
-
-Set these backend variables:
+- Configure service settings in the dashboard, not legacy `railway.json`.
 
 | Variable | Value |
 | --- | --- |
@@ -32,44 +27,62 @@ Set these backend variables:
 | `NODE_ENV` | `production` |
 | `HOST` | `0.0.0.0` |
 | `PORT` | `8080` |
-| `AHM_AUTH_MODE` | `cloudflare` |
+| `AHM_AUTH_MODE` | `better-auth` |
 | `PUBLIC_SERVER_URL` | `https://skill-manager.omarjetti.dev` |
-| `CF_ACCESS_TEAM_URL` | The HTTPS team origin created in Cloudflare Access |
-| `CF_ACCESS_AUD` | The browser Access application's audience tag |
-| `AHM_OWNER_EMAIL` | The single owner email allowed by the Access policy |
+| `BETTER_AUTH_SECRET` | Generated session signing secret |
+| `AHM_OWNER_PASSWORD_HASH` | Initial Better Auth scrypt password hash |
+| `AHM_OWNER_EMAIL` | Owner sign-in email |
 
-On the first authenticated-mode startup, the API creates `org_private` and
-`user_owner` with an owner membership. Existing workspaces are not modified;
-removing a membership is not undone by a restart.
+## Better Auth
 
-## Cloudflare Access
+Better Auth runs inside the Railway backend, using dedicated `auth_*` tables in
+the existing PostgreSQL database. It provides email/password sign-in, secure
+HttpOnly cookies, 24-hour database sessions, sign-out, and database-backed
+sign-in rate limiting. Public sign-up is disabled; only the configured owner
+can access the control-plane API. No third-party login subscription is required.
 
-1. Activate Access and create a team with an email sign-in provider.
-2. Create a self-hosted application for `skill-manager.omarjetti.dev` allowing
-   only the configured owner email. Use a 24-hour session and an HttpOnly cookie.
-3. Create a more-specific application for `skill-manager.omarjetti.dev/runner/*`
-   with an Access bypass policy. Runner routes retain their existing bearer
-   credential checks; enrollment requires an expiring single-use code.
-4. Set the browser application's issuer and audience in Railway.
-5. DNS: proxied A record `skill-manager` pointing to Vercel's assigned target.
-   Keep TLS verification enabled from Cloudflare to Vercel.
+Generate the initial credentials into a private file outside the repository:
 
-The API verifies the Access token's signature, issuer, audience, expiration,
-application type, and owner email. It ignores browser actor headers in hosted
-mode and checks the request Origin for mutations. Direct Railway URLs therefore
-cannot bypass authentication. API and runner responses are marked `no-store`.
+```sh
+node scripts/create-hosted-password.mjs /private/path/skill-manager-login.json
+```
+
+The file contains `password`, `ownerPasswordHash`, and `authSecret`. Store the
+password in your password manager. Set `ownerPasswordHash` as
+`AHM_OWNER_PASSWORD_HASH` and `authSecret` as `BETTER_AUTH_SECRET` in Railway.
+Restrict access to the private file using your operating system. It must never
+be committed, included in builds, or put in browser environment variables.
+
+Sign in with the configured owner email and the generated password. Better Auth
+stores a scrypt password hash; the browser uses a secure HttpOnly session cookie
+and never stores the password in localStorage or sessionStorage. Signing out
+revokes the server session. Password reset emails are not configured; use Better
+Auth's authenticated change-password endpoint or an administrator-managed reset.
+
+Startup seeds `auth_owner` plus `org_private` / `user_owner` once. Restarts never
+reset an existing password or restore a removed organization membership. The
+bootstrap hash is used only when the owner is first created. Changing that
+variable later is not a password reset. Rotate the session signing secret to
+invalidate signed session cookies if necessary.
+
+The API resolves Better Auth sessions on every browser request, ignores
+client-supplied actor headers, and requires the configured Origin for mutations.
+Direct Railway requests cannot bypass authentication. Runner routes retain their
+separate bearer credentials; enrollment requires an expiring single-use code.
+
+## Cloudflare DNS
+
+Point `skill-manager` to Vercel's assigned DNS target. No Access application,
+team URL, audience tag, or paid Cloudflare add-on is needed. Keep HTTPS certificate
+verification enabled. Domain renewal and Vercel/Railway billing are separate.
 
 ## Verification
 
-Run `npm run check` before deploying. After deployment, verify:
+Run `npm run check` before deployment, then verify:
 
-- The public domain shows the Cloudflare login page when signed out.
-- Signed-in browser requests can list and create projects.
-- Direct Railway `/api/v1/projects` requests without an Access token return 401.
-- `/runner/v1/jobs/claim` remains accessible to the runner but rejects missing
-  bearer credentials with 401.
-- A generated enrollment command can connect a local runner through the custom
-  domain, and its inventory is visible in the browser.
-
-Private sign-in requires the owner's email verification step. Never bypass that
-step or disable Access to complete a deployment smoke test.
+- Public UI shows an email/password sign-in form when signed out.
+- Wrong credentials, expired sessions, and unsigned direct Railway API requests return 401.
+- Public registration is disabled and cross-origin mutations return 403.
+- Signed-in requests can list projects; sign-out revokes the session.
+- `/health` returns 200 and `/runner/v1/jobs/claim` without credentials returns 401.
+- Connect a local runner using a generated enrollment command and verify inventory.

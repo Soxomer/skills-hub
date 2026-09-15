@@ -1,6 +1,14 @@
 export const resources = {
   en: {
     translation: {
+      auth: {
+        description: 'Sign in to open your private workspace.',
+        email: 'Email', password: 'Password', signIn: 'Sign in', signingIn: 'Signing in…', signOut: 'Sign out',
+        connecting: 'Connecting to your workspace…',
+        invalid: 'The password was not accepted. Check it and try again.',
+        rateLimited: 'Too many sign-in attempts. Wait a minute and try again.',
+        unavailable: 'Your workspace could not be reached. Try again shortly.',
+      },
       skills: {
         title: 'My Skills', description: 'The managed skill library on your connected runner, separate from saved Setups.',
         refresh: 'Refresh report', refreshing: 'Refreshing…', error: 'The runner report could not be refreshed. Try Refresh report again.',

@@ -19,7 +19,7 @@ import {
 } from './runner-transport.js'
 import { SwitchingError, type SwitchingService } from './switching.js'
 import { SetupServiceError, type SetupService } from './setups.js'
-import type { BrowserAuthenticator } from './cloudflare-auth.js'
+import type { BrowserAuthenticator } from './hosted-auth.js'
 
 function requiredHeader(request: FastifyRequest, name: string): string {
   const value = request.headers[name]
@@ -57,6 +57,7 @@ export function createControlPlaneApp(
     if (request.routeOptions.url?.startsWith('/runner/')) reply.header('cache-control', 'private, no-store')
     if (!request.routeOptions.url?.startsWith('/api/')) return
     reply.header('cache-control', 'private, no-store')
+    if (request.routeOptions.url === '/api/auth/*') return
     actors.set(request, authenticateBrowser ? await authenticateBrowser(request) : developmentActor(request))
   })
   const actor = (request: FastifyRequest): RequestActor => {
