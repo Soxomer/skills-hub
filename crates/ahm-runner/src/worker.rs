@@ -75,6 +75,9 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
             .identity()?
             .ok_or_else(|| anyhow!("runner is not connected; run `ahm connect` first"))?;
         self.flush_outbox(&identity)?;
+        if let Err(error) = self.executor.maintenance() {
+            log::warn!("Library maintenance: {error:#}");
+        }
 
         let request = ClaimRunnerJobRequest {
             skill_library: match self.executor.skill_library() {
@@ -105,9 +108,13 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
             return Ok(WorkerOutcome::Idle);
         };
         let now = utc_now();
-        let project = self
-            .state
-            .project_instance(&lease.job.project_instance_id)?;
+        let project = lease
+            .job
+            .project_instance_id
+            .as_ref()
+            .map(|id| self.state.project_instance(id))
+            .transpose()?
+            .flatten();
         let request_json = serde_json::to_string(&lease.job)?;
         let request_digest = sha256(&request_json);
         let start = self
@@ -223,9 +230,14 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
                     result.result = artifact_failure_result(&error);
                 }
                 match &result.result {
-                    RunnerResult::ApplyReceipt(receipt) => self
-                        .state
-                        .record_materialization(&lease.job.project_instance_id, receipt)?,
+                    RunnerResult::ApplyReceipt(receipt) => self.state.record_materialization(
+                        lease
+                            .job
+                            .project_instance_id
+                            .as_ref()
+                            .context("Apply requires a project")?,
+                        receipt,
+                    )?,
                     RunnerResult::RollbackReceipt(receipt) => self
                         .state
                         .mark_materialization_rolled_back(receipt.operation_id.as_str())?,
@@ -255,7 +267,9 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
         let revision = match &lease.job.job {
             RunnerJob::PlanSetup(job) => Some(&job.revision),
             RunnerJob::ApplyPlan(job) => Some(&job.revision),
-            RunnerJob::ScanProject(_) | RunnerJob::RollbackOperation(_) => None,
+            RunnerJob::LibraryAction(_)
+            | RunnerJob::ScanProject(_)
+            | RunnerJob::RollbackOperation(_) => None,
         };
         let Some(revision) = revision else {
             return Ok(true);
@@ -481,6 +495,7 @@ mod tests {
                 plan_setup: false,
                 apply_plan: false,
                 rollback_operation: false,
+                library: true,
                 supported_tools: vec![Identifier::new("codex").unwrap()],
             }
         }
@@ -538,7 +553,7 @@ mod tests {
                 idempotency_key: identifier("scan_job_01"),
                 organization_id: OrganizationId::new("org_01").unwrap(),
                 device_id: DeviceId::new("device_01").unwrap(),
-                project_instance_id: ProjectInstanceId::new("instance_01").unwrap(),
+                project_instance_id: Some(ProjectInstanceId::new("instance_01").unwrap()),
                 issued_at: IsoTimestamp::new("2026-09-01T10:00:00Z").unwrap(),
                 expires_at: IsoTimestamp::new("2099-09-01T10:05:00Z").unwrap(),
                 job: RunnerJob::ScanProject(ScanProjectJob {

@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-15T00:22:36.4356321Z",
+  "title": "Design System: Agent Harness Manager",
+  "extensions": {
+    "shadows": [
+      {
+        "purpose": "Sidebar selection and skill card hover; dark binding is 0 1px 2px 0 rgb(0 0 0 / 0.35).",
+        "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+        "name": "hub-small"
+      },
+      {
+        "purpose": "Preview drawer and temporary layers; dark binding is 0 12px 24px -10px rgb(0 0 0 / 0.45).",
+        "value": "0 10px 20px -6px rgb(0 0 0 / 0.15)",
+        "name": "hub-overlay"
+      },
+      {
+        "purpose": "Focused decision dialogs.",
+        "value": "0 18px 48px rgb(0 0 0 / .24)",
+        "name": "hub-dialog"
+      }
+    ],
+    "motion": [
+      {
+        "name": "control-transition",
+        "value": "140ms ease",
+        "purpose": "Background, border, color, and transform changes on Projects and Setups buttons."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms",
+        "purpose": "Existing reduced-motion media query limits transitions and animations to a single iteration."
+      },
+      {
+        "purpose": "Restored Hub button states.",
+        "value": "200ms",
+        "name": "hub-control-transition"
+      },
+      {
+        "purpose": "Skill card border, shadow, position, and background states.",
+        "value": "150ms ease",
+        "name": "hub-card-transition"
+      },
+      {
+        "purpose": "Drawer enters from 24px right; disabled under reduced motion.",
+        "value": "180ms ease-out",
+        "name": "preview-entry"
+      }
+    ],
+    "breakpoints": [
+      {
+        "purpose": "Sidebar becomes 196px and content clearance reduces.",
+        "value": "1120px",
+        "name": "hub-compact-desktop"
+      },
+      {
+        "purpose": "Search takes a full row; settings and tag layouts reduce columns.",
+        "value": "960px",
+        "name": "hub-toolbar-wrap"
+      },
+      {
+        "purpose": "Drawer width becomes viewport minus 24px.",
+        "value": "820px",
+        "name": "preview-narrow"
+      },
+      {
+        "purpose": "Projects and Setups headings and workflow rows stack.",
+        "value": "720px",
+        "name": "stack-workspace"
+      },
+      {
+        "purpose": "Automatic 64px sidebar, preserved desktop preference, two-column stats, wrapped actions, and single-column cards.",
+        "value": "600px",
+        "name": "hub-mobile"
+      },
+      {
+        "purpose": "Projects and Setups forms and summaries further reduce columns.",
+        "value": "480px",
+        "name": "narrow-workspace"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Workflow primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Main forward action in the preserved Projects and Setups workspace.",
+      "html": "<button class=\"ds-primary\">Connect runner</button>",
+      "css": ".ds-primary{min-height:40px;padding:0 15px;border:0;border-radius:8px;background:var(--accent);color:var(--surface);font:650 14px Inter,system-ui,sans-serif;cursor:pointer;transition:background 140ms ease,transform 140ms ease}.ds-primary:hover:not(:disabled){background:var(--accent-hover);transform:translateY(-1px)}.ds-primary:active:not(:disabled){transform:translateY(0)}.ds-primary:disabled{opacity:.5;cursor:not-allowed}.ds-primary:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 34%,transparent);outline-offset:2px}@media(prefers-reduced-motion:reduce){.ds-primary{transition-duration:.01ms}}"
+    },
+    {
+      "name": "Workflow secondary button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Supporting action in the preserved Projects and Setups workspace.",
+      "html": "<button class=\"ds-secondary\">Refresh</button>",
+      "css": ".ds-secondary{min-height:34px;padding:0 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font:650 13px Inter,system-ui,sans-serif;cursor:pointer;transition:background 140ms ease,border-color 140ms ease,color 140ms ease}.ds-secondary:hover{border-color:var(--border-strong);background:var(--surface-subtle)}.ds-secondary:active:not(:disabled){transform:translateY(0)}.ds-secondary:disabled{opacity:.5;cursor:not-allowed}.ds-secondary:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 34%,transparent);outline-offset:2px}@media(prefers-reduced-motion:reduce){.ds-secondary{transition-duration:.01ms}}"
+    },
+    {
+      "name": "Standard field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Labeled operational field with accent focus.",
+      "html": "<label class=\"ds-field\"><span>Project name</span><input type=\"text\" /></label>",
+      "css": ".ds-field{display:grid;gap:7px;max-width:420px;color:var(--text);font:650 13px Inter,system-ui,sans-serif}.ds-field input{width:100%;min-height:40px;padding:0 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font:13px var(--mono)}.ds-field input:hover{border-color:var(--border-strong)}.ds-field input:focus{border-color:var(--accent)}.ds-field input:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 34%,transparent);outline-offset:2px}"
+    },
+    {
+      "name": "Skills Hub sidebar",
+      "refersTo": "navigation-active",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Skills Hub\"><button aria-current=\"page\" aria-label=\"My Skills\" title=\"My Skills\"><svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" aria-hidden=\"true\"><path d=\"m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5\"/></svg><span>My Skills</span><em>2</em></button><button aria-label=\"Add Skills\" title=\"Add Skills\"><svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"m16 8-3 5-5 3 3-5 5-3Z\"/></svg><span>Add Skills</span></button></nav>",
+      "description": "Vertical product navigation with neutral selected surface, blue icon, and a compact icon rail on mobile.",
+      "kind": "nav",
+      "css": ".ds-nav{display:flex;flex-direction:column;width:204px;gap:4px;padding:12px;background:var(--bg-app);font-family:var(--font-ui)}.ds-nav button{display:grid;grid-template-columns:20px 1fr auto;align-items:center;gap:8px;height:38px;padding:0 10px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--text-secondary);font:14px var(--font-ui);text-align:left;cursor:pointer}.ds-nav button:hover{background:var(--bg-element);color:var(--text-primary)}.ds-nav button[aria-current=page]{background:var(--bg-panel);border-color:var(--border-subtle);color:var(--text-primary);font-weight:600;box-shadow:var(--shadow-sm)}.ds-nav button[aria-current=page] svg{color:var(--accent-primary)}.ds-nav em{font:10px var(--font-ui);border-radius:999px;padding:2px 6px;background:var(--bg-element);color:var(--text-secondary)}.ds-nav button:focus-visible{outline:2px solid var(--accent-primary);outline-offset:2px}@media(max-width:600px){.ds-nav{width:64px;padding:8px}.ds-nav button{width:48px;height:44px;padding:0;grid-template-columns:1fr;justify-items:center}.ds-nav span,.ds-nav em{display:none}}"
+    },
+    {
+      "name": "Status chip",
+      "kind": "chip",
+      "refersTo": "status-chip",
+      "description": "Noninteractive compact state metadata.",
+      "html": "<span class=\"ds-chip\">Available</span>",
+      "css": ".ds-chip{display:inline-flex;align-items:center;gap:5px;min-height:25px;padding:0 8px;border-radius:999px;background:var(--success-soft);color:var(--success);font:700 11px Inter,system-ui,sans-serif;white-space:nowrap}"
+    },
+    {
+      "name": "Workflow panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Flat bordered grouping for an operational step.",
+      "html": "<section class=\"ds-panel\"><h2>Connect a project</h2><p>Select the project to inspect.</p></section>",
+      "css": ".ds-panel{padding:24px;border:1px solid var(--border);border-radius:14px;background:var(--surface);font-family:Inter,system-ui,sans-serif}.ds-panel h2{margin:0;color:var(--text);font-size:18px;line-height:1.3;letter-spacing:-.015em}.ds-panel p{margin:5px 0 0;color:var(--text-secondary);font-size:14px;line-height:1.55}@media(max-width:480px){.ds-panel{padding:18px}}"
+    },
+    {
+      "name": "Hub primary button",
+      "refersTo": "hub-button-primary",
+      "html": "<button class=\"ds-hub-primary\">Install</button>",
+      "description": "Explicit install or forward action in Skills Hub.",
+      "kind": "button",
+      "css": ".ds-hub-primary{height:36px;padding:0 16px;border:1px solid transparent;border-radius:8px;background:var(--accent-primary);color:var(--accent-primary-fg);font:600 13px var(--font-ui);cursor:pointer;box-shadow:0 4px 6px -1px rgba(37,99,235,.2);transition:background 200ms,transform 200ms,box-shadow 200ms}.ds-hub-primary:hover:not(:disabled){background:var(--accent-primary-hover);transform:translateY(-1px);box-shadow:0 6px 8px -1px rgba(37,99,235,.3)}.ds-hub-primary:active:not(:disabled){transform:translateY(0)}.ds-hub-primary:focus-visible{outline:3px solid var(--focus-ring);outline-offset:2px}.ds-hub-primary:disabled{opacity:.5;cursor:not-allowed}@media(prefers-reduced-motion:reduce){.ds-hub-primary{transition:none}}"
+    },
+    {
+      "kind": "button",
+      "css": ".ds-hub-secondary{height:36px;padding:0 16px;border:1px solid var(--border-subtle);border-radius:8px;background:transparent;color:var(--text-primary);font:600 13px var(--font-ui);cursor:pointer;transition:background 200ms,border-color 200ms}.ds-hub-secondary:hover:not(:disabled){background:var(--bg-element);border-color:var(--border-strong)}.ds-hub-secondary:focus-visible{outline:3px solid var(--focus-ring);outline-offset:2px}.ds-hub-secondary:disabled{opacity:.5;cursor:not-allowed}@media(prefers-reduced-motion:reduce){.ds-hub-secondary{transition:none}}",
+      "name": "Hub secondary button",
+      "html": "<button class=\"ds-hub-secondary\">Cancel</button>",
+      "description": "Lower-emphasis companion to a primary action."
+    },
+    {
+      "name": "Managed skill card",
+      "refersTo": "skill-card",
+      "html": "<article class=\"ds-skill\"><button class=\"ds-skill-name\">algorithmic-art</button><p>Creating algorithmic art using p5.js.</p><span class=\"ds-skill-meta\">Global · Updated 2m ago</span></article>",
+      "description": "Compact skill identity, description, and metadata; the real list also exposes sync and management actions.",
+      "kind": "card",
+      "css": ".ds-skill{display:flex;flex-direction:column;gap:12px;padding:14px;border:1px solid var(--border-subtle);border-radius:12px;background:var(--bg-panel);font-family:var(--font-ui);transition:border-color 150ms,box-shadow 150ms,transform 150ms}.ds-skill:hover{transform:translateY(-1px);border-color:var(--border-strong);box-shadow:var(--shadow-sm)}.ds-skill-name{align-self:flex-start;padding:0;border:0;background:transparent;color:var(--text-primary);font:600 14px var(--font-ui);cursor:pointer}.ds-skill-name:hover{color:var(--accent-primary)}.ds-skill-name:focus-visible{outline:2px solid var(--accent-primary);outline-offset:3px}.ds-skill p{margin:0;color:var(--text-secondary);font-size:12px}.ds-skill-meta{color:var(--text-secondary);font-size:11px}@media(prefers-reduced-motion:reduce){.ds-skill{transition:none}}"
+    },
+    {
+      "kind": "custom",
+      "css": ".ds-preview{display:flex;flex-direction:column;max-width:680px;min-height:320px;border-left:1px solid var(--border-subtle);background:var(--bg-app);box-shadow:var(--shadow-lg);color:var(--text-primary);font-family:var(--font-ui)}.ds-preview header{display:flex;justify-content:space-between;align-items:center;padding:20px 24px 0}.ds-preview header strong{color:var(--accent-primary);font-size:11px}.ds-preview h2{margin:12px 24px;font-size:24px}.ds-preview small{padding:12px 24px;border-block:1px solid var(--border-subtle);color:var(--text-secondary);font:11px var(--font-mono)}.ds-preview-content{flex:1;overflow:auto;padding:24px;font-size:14px;line-height:1.6}.ds-preview footer{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 24px;border-top:1px solid var(--border-subtle)}.ds-preview footer span{color:var(--text-tertiary);font-size:12px}.ds-preview button{height:36px;padding:0 12px;border:1px solid var(--border-subtle);border-radius:8px;background:var(--bg-panel);color:var(--text-primary);cursor:pointer}.ds-preview button:hover{background:var(--bg-element)}.ds-preview footer button{background:var(--accent-primary);color:var(--accent-primary-fg)}.ds-preview footer button:hover{background:var(--accent-primary-hover)}.ds-preview button:focus-visible{outline:3px solid var(--focus-ring);outline-offset:2px}",
+      "name": "Skill preview drawer",
+      "html": "<section class=\"ds-preview\" aria-label=\"Skill preview\"><header><strong>Skill preview</strong><button aria-label=\"Close preview\">×</button></header><h2>algorithmic-art</h2><small>SKILL.md</small><div class=\"ds-preview-content\">Creating algorithmic art using p5.js.</div><footer><span>Preview only — this skill has not been installed.</span><button>Install</button></footer></section>",
+      "description": "Inspect source and SKILL.md before an explicit Install; the narrow layout retains a 24px context strip."
+    }
+  ],
+  "narrative": {
+    "northStar": "The Compact Utility Workspace",
+    "overview": "The established interface is neutral, calm, and quietly confident. Alignment, readable task hierarchy, and compact controls carry the design; color identifies action or operational state. This name describes the existing implementation rather than introducing a brand direction.\n\nThis records the restored Skills Hub browser experience and the preserved Projects and Setups workspace. It is grounded in `PRODUCT.md`, `docs/UI-DESIGN-GUIDELINES.md`, the runtime styles, and the restored React components. The restoration follows the original compact sidebar and management interface, including preview before installation; it introduces no new visual direction.\n\nRuntime CSS remains the implementation authority. Frontmatter records the light baseline. Skills Hub uses the `App.css` semantic variables and its system/light/dark preference; the Projects and Setups workspace retains the `index.css` variables. The `hub-` entries capture observed differences between these existing component families. Existing headline, button, input, and panel tokens remain applicable to the Projects and Setups workspace.",
+    "keyCharacteristics": [
+      "Flat surfaces, subtle boundaries, and restrained rounding.",
+      "Compact sidebar navigation, structured skill lists, and optional card views.",
+      "One blue action accent and semantic status colors.",
+      "Visible prerequisites and honest operation states.",
+      "Contextual skill previews before an explicit installation action."
+    ],
+    "rules": [
+      {
+        "name": "The Semantic Color Rule",
+        "body": "Use runtime variables and their dark bindings; never add decorative colors where an existing semantic role applies.",
+        "section": "colors"
+      }
+    ],
+    "dos": [
+      "Do reuse semantic CSS variables in both themes.",
+      "Do preserve compact scanning, visible labels, and keyboard focus.",
+      "Do keep state explanations next to the data or action they qualify.",
+      "Do keep English product copy in the resource bundle and respect reduced motion."
+    ],
+    "donts": [
+      "Don't replace management density with oversized marketing cards.",
+      "Don't use status color as decoration or the sole state indicator.",
+      "Don't add containers without a meaningful grouping boundary.",
+      "Don't replace the managed library with a read-only report or conflate it with saved Setups.",
+      "Don't install a catalogue skill merely because its preview was opened.",
+      "Don't reintroduce Tauri window controls or browser filesystem mutation."
+    ]
+  }
+}

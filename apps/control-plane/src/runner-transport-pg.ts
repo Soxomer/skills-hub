@@ -69,7 +69,7 @@ interface JobRow extends QueryResultRow {
   id: string
   organization_id: string
   device_id: string
-  project_instance_id: string
+  project_instance_id: string | null
   protocol_version: ProtocolVersion
   idempotency_key: string
   job_kind: RunnerJob['kind']
@@ -146,6 +146,8 @@ function resultMatchesJob(job: JobEnvelope, result: ResultEnvelope): boolean {
     return false
   }
   if (result.result.kind === 'error') return true
+  if (job.job.kind === 'libraryAction') return result.result.kind === 'libraryResponse' && result.projectInstanceId === null
+  if (result.result.kind === 'libraryResponse') return false
   if (result.result.payload.projectId !== job.job.payload.projectId) return false
   if (result.result.kind === 'cancellationReceipt') {
     return job.job.kind === 'applyPlan' || job.job.kind === 'rollbackOperation'

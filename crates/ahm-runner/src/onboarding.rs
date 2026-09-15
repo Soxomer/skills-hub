@@ -13,6 +13,7 @@ const DISCOVERY_SCAN_CONFIG_SETTING: &str = "discovery_scan_config_v1";
 const CLAUDE_PLUGIN_SOURCE_KEY: &str = "claude_plugins";
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct DiscoveryScanConfig {
     #[serde(default)]
     pub disabled_source_keys: Vec<String>,

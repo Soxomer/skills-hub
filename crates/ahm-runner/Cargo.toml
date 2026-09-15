@@ -15,6 +15,7 @@ clap.workspace = true
 chrono.workspace = true
 dirs.workspace = true
 fs2.workspace = true
+git2 = { version = "0.19", features = ["vendored-openssl"] }
 hex.workspace = true
 junction.workspace = true
 log.workspace = true
@@ -25,6 +26,7 @@ serde_json.workspace = true
 sha2.workspace = true
 uuid.workspace = true
 walkdir.workspace = true
+urlencoding = "2.1"
 
 [dev-dependencies]
 mockito = "1"

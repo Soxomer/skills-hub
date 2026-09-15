@@ -1,10 +1,11 @@
+import { publicLibrary } from './library-catalog.js'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { artifactDigest } from './artifact-digest.js'
 import { isSkillLibrary } from './skill-library.js'
 import type { BrowserAccess } from './development-auth.js'
 
 import {
-  PROTOCOL_VERSION,
+  PROTOCOL_VERSION, isLibraryRequest, isLibraryMutation, type LibraryRequest,
   type ArtifactBundle,
   type ClaimRunnerJobRequest,
   type AcknowledgeRunnerJobRequest,
@@ -238,6 +239,7 @@ export type BrowserRunnerRepository = Pick<RunnerTransportRepository,
 
 function supportedJobKinds(report: RunnerCapabilityReport): string[] {
   const kinds: string[] = []
+  if (report.capabilities.library) kinds.push("libraryAction")
   if (report.capabilities.scanProject) kinds.push('scanProject')
   if (report.capabilities.planSetup) kinds.push('planSetup')
   if (report.capabilities.applyPlan) kinds.push('applyPlan')
@@ -420,6 +422,28 @@ export class RunnerTransportService {
     if (!registered) throw new RunnerTransportError(404, 'logical project not found')
   }
 
+  async catalogue(actor: RequestActor, request: LibraryRequest): Promise<unknown> {
+    if (!isLibraryRequest(request) || !['get_featured_skills','search_skills_online','preview_git_skill_cmd'].includes(request.command)) throw new RunnerTransportError(400, 'Invalid catalogue request')
+    await this.repository.withActor(actor, 'read', async () => undefined)
+    return publicLibrary(request)
+  }
+
+  async enqueueLibrary(actor: RequestActor, deviceId: string, request: LibraryRequest): Promise<{ jobId: string }> {
+    if (!isLibraryRequest(request) || request.command === 'set_github_token') throw new RunnerTransportError(400, 'Invalid library request')
+    const queued = await this.repository.withActor(actor, isLibraryMutation(request.command) ? 'write' : 'read', async (repository) => {
+      const runner = await repository.runnerStatus(actor.organizationId, deviceId)
+      if (!runner || runner.status !== 'active') throw new RunnerTransportError(404, 'Runner not found')
+      if (!runner.capabilities?.capabilities.library) throw new RunnerTransportError(409, 'Update the runner to use the skill library')
+      const now = this.now(), jobId = this.randomId()
+      await repository.enqueueJob({ protocolVersion: PROTOCOL_VERSION, jobId, idempotencyKey: 'library-' + jobId,
+        organizationId: actor.organizationId, deviceId, projectInstanceId: null, issuedAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + this.jobTtlMs).toISOString(), job: { kind: 'libraryAction', payload: request } })
+      return { jobId }
+    })
+    this.jobSignal.notify(deviceId)
+    return queued
+  }
+
   async enqueueScan(
     actor: RequestActor,
     projectInstanceId: string,
@@ -536,7 +560,7 @@ export class RunnerTransportService {
       request.result.jobId !== jobId ||
       request.result.organizationId !== runner.organizationId ||
       request.result.deviceId !== runner.deviceId ||
-      request.result.projectInstanceId.trim() === '' ||
+      (request.result.projectInstanceId !== null && request.result.projectInstanceId.trim() === '') ||
       request.result.idempotencyKey.trim() === ''
     ) {
       throw new RunnerTransportError(409, 'result identity does not match its lease')

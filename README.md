@@ -1,6 +1,8 @@
 # Agent Harness Manager
 
-Agent Harness Manager is a browser control plane plus a constrained local `ahm` runner for applying reusable AI-agent Setups to project checkouts.
+Agent Harness Manager brings the Skills Hub library to the browser and applies reusable AI-agent Setups to project checkouts through a local `ahm` runner.
+
+The default page restores My Skills, the online catalogue and search, **SKILL.md preview before installation**, Git/local imports, tags, tool synchronization, updates, and settings. **Projects & runner** opens the project and Setup workflows. No Tauri application is required.
 
 The browser owns the product experience and shared desired state. The runner owns machine paths, local caches, filesystem planning, linking/copying, rollback, and durable delivery. All runtime traffic is initiated by the runner over HTTP; the control plane sends versioned declarative jobs, never shell commands or absolute paths.
 
@@ -46,15 +48,22 @@ For a local source installation:
 cargo install --path crates/ahm-runner --locked
 ```
 
-In the web application, generate a single-use connection command and run it on the machine that contains the project. Then register the checkout and keep the worker running:
+In **Projects & runner**, generate a single-use connection command and run it on your computer. Keep the worker running to manage the library:
 
 ```bash
 ahm connect <single-use-code> --server https://hub.example.com
-ahm project connect <logical-project-id> --project /path/to/checkout
 ahm worker
 ```
 
-The connection code expires after ten minutes and is used only for enrollment. An approved filesystem change must be claimed by an online worker within 30 seconds, so interactive Apply and Rollback either start immediately or ask for a fresh plan.
+Browsing the public catalogue and previewing a skill do not require a connected runner. Importing, reading installed files, synchronizing, and updating skills use the runner; they do not require a registered project. The folder picker browses runner locations using opaque references, so machine paths stay on that computer.
+
+For project Setups, also register the checkout with `ahm project connect <logical-project-id> --project /path/to/checkout`.
+
+The connection code expires after ten minutes and is used only for enrollment. An approved Setup filesystem change must be claimed by an online worker within 30 seconds, so interactive Apply and Rollback either start immediately or ask for a fresh plan.
+
+Optional GitHub credentials stay on the runner: use `ahm skill github-token` and enter the token locally. Scheduled skill updates run while `ahm worker` is running. Web application updates reload the deployed web build.
+
+See [the restoration and verification record](docs/SKILLS-HUB-WEB-RESTORATION.md) for the restored baseline and runtime boundaries.
 
 For an unattended workstation, run `ahm worker` with the operating system's normal user-service manager. Restart it on failure and after login; do not run it as an elevated or system-wide service unless the managed projects require that ownership.
 

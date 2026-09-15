@@ -356,8 +356,7 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
     if (
       result.idempotencyKey !== job.envelope.idempotencyKey ||
       result.projectInstanceId !== job.envelope.projectInstanceId ||
-      (result.result.kind !== 'error' &&
-        result.result.payload.projectId !== job.envelope.job.payload.projectId)
+      (result.result.kind !== 'error' && (job.envelope.job.kind === 'libraryAction' ? result.result.kind !== 'libraryResponse' : result.result.kind === 'libraryResponse' || result.result.payload.projectId !== job.envelope.job.payload.projectId))
     ) {
       return { outcome: 'conflict' }
     }

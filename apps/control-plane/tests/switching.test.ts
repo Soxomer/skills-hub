@@ -29,7 +29,7 @@ const capabilities: RunnerCapabilityReport = {
     scanProject: true,
     planSetup: true,
     applyPlan: true,
-    rollbackOperation: true,
+    rollbackOperation: true, library: true,
     supportedTools: ['codex'],
   },
 }

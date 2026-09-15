@@ -1,5 +1,6 @@
 import type {
   ArtifactBundle,
+  LibraryRequest,
   SetupLibraryResponse,
   SetupDetail,
   PublishSetupRevisionRequest,
@@ -76,6 +77,14 @@ export class ControlPlaneClient {
 
   runner(deviceId: string): Promise<RunnerStatusResponse> {
     return this.send(`/api/v1/runners/${encodeURIComponent(deviceId)}`)
+  }
+
+  catalogue(request: LibraryRequest): Promise<unknown> {
+    return this.send('/api/v1/library/catalogue', this.jsonRequest('POST', request))
+  }
+
+  library(deviceId: string, request: LibraryRequest): Promise<{ jobId: string }> {
+    return this.send('/api/v1/runners/' + encodeURIComponent(deviceId) + '/library', this.jsonRequest('POST', request))
   }
 
   projects(): Promise<ProjectListResponse> {

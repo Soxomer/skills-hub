@@ -1,3 +1,4 @@
+import type { LibraryRequest } from '@ahm/contracts'
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
 
 import type {
@@ -171,6 +172,10 @@ export function createControlPlaneApp(
       switching.requestRollback(actor(request), request.params.projectInstanceId, request.body),
     )
   }
+
+  app.post<{ Params: { deviceId: string }; Body: LibraryRequest }>('/api/v1/runners/:deviceId/library', async (request) => transport.enqueueLibrary(actor(request), request.params.deviceId, request.body))
+
+  app.post<{ Body: LibraryRequest }>('/api/v1/library/catalogue', async request => transport.catalogue(actor(request), request.body))
 
   app.post('/api/v1/runner-enrollments', async (request) =>
     transport.createEnrollment(actor(request)),

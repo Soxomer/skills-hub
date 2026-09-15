@@ -44,6 +44,9 @@ describe('Better Auth hosted sessions', () => {
     const h = await harness()
     try {
       expect((await h.app.inject('/api/v1/projects')).statusCode).toBe(401)
+      const libraryPayload = { command: 'get_featured_skills', args: {}, expectedDigest: null }
+      expect((await h.app.inject({ method: 'POST', url: '/api/v1/library/catalogue', payload: libraryPayload })).statusCode).toBe(401)
+      expect((await h.app.inject({ method: 'POST', url: '/api/v1/runners/private-device/library', payload: libraryPayload })).statusCode).toBe(401)
       expect((await h.signIn('incorrect-password')).statusCode).toBe(401)
       const login = await h.signIn()
       expect(login.statusCode, login.body).toBe(200)
@@ -55,6 +58,7 @@ describe('Better Auth hosted sessions', () => {
       const projects = await h.app.inject({ url: '/api/v1/projects', headers: sessionHeaders })
       expect(projects.statusCode).toBe(200)
       expect(projects.headers['cache-control']).toBe('private, no-store')
+      expect((await h.app.inject({ method: 'POST', url: '/api/v1/library/catalogue', headers: { ...sessionHeaders, origin: 'https://attacker.example' }, payload: libraryPayload })).statusCode).toBe(403)
       expect((await h.app.inject({ method: 'POST', url: '/api/v1/projects', headers: { ...sessionHeaders, origin: 'https://attacker.example' }, payload: { name: 'Test' } })).statusCode).toBe(403)
       expect((await h.app.inject({ method: 'POST', url: '/api/auth/sign-out', headers: sessionHeaders, payload: {} })).statusCode).toBe(200)
       expect((await h.app.inject({ url: '/api/v1/projects', headers: sessionHeaders })).statusCode).toBe(401)

@@ -388,6 +388,10 @@ impl SetupService {
         })
     }
 
+    pub(crate) fn library_store(&self) -> SkillStore {
+        self.store.clone()
+    }
+
     pub fn from_store(store: SkillStore) -> Result<Self> {
         store.ensure_schema()?;
         Ok(Self {

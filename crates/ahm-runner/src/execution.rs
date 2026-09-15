@@ -34,6 +34,20 @@ impl RunnerExecutionService {
         &self.local_admin
     }
 
+    pub fn library(
+        &self,
+        home: &Path,
+        request: &ahm_domain::LibraryRequest,
+        should_cancel: &mut dyn FnMut() -> Result<bool>,
+    ) -> Result<serde_json::Value> {
+        crate::library::execute_checked(
+            home,
+            &self.local_admin.library_store(),
+            request,
+            should_cancel,
+        )
+    }
+
     pub fn scan(&self, home: &Path, project: &Path) -> Result<DefaultSetupPreview> {
         self.local_admin.preview_default_setup(home, project)
     }
