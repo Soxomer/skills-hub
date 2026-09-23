@@ -14,7 +14,7 @@ import { useTranslation } from 'react-i18next'
 
 import type { ControlPlaneClient } from './api'
 import './App.css'
-import { CommandBlock } from './components/CommandBlock'
+import { RunnerHelper } from './components/RunnerHelper'
 import { ConnectionBadge } from './components/ConnectionBadge'
 import { ProjectScanWorkspace } from './components/ProjectScanWorkspace'
 import { SetupLibrary } from './components/SetupLibrary'
@@ -133,7 +133,7 @@ export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connect
                 <p>{t('enrollment.description')}</p>
               </div>
             </div>
-            <CommandBlock command={connection.enrollment.command} name={t('enrollment.title')} />
+            <RunnerHelper command={connection.enrollment.command} />
             <div className="waiting-row" aria-live="polite">
               <span>
                 <LoaderCircle className="spin" aria-hidden="true" size={17} />

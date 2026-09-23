@@ -761,16 +761,16 @@ export const resources = {
         revoked: 'Access revoked',
       },
       intro: {
-        title: 'Connect this machine',
+        title: 'Connect this computer',
         description:
-          'Generate a single-use command, run it in your terminal, then keep the worker running.',
-        action: 'Generate connection command',
+          'Connect the local helper to manage skills on this computer from your browser.',
+        action: 'Connect this computer',
         creating: 'Generating command…',
       },
       enrollment: {
         step: 'Step 1',
-        title: 'Run the connection command',
-        description: 'Open a terminal on the machine that contains your projects and run:',
+        title: 'Connect the local helper',
+        description: 'Open the helper on the computer that contains your skills and confirm the connection.',
         waiting: 'Waiting for the runner to claim this command.',
         expires: 'Expires {{time}}',
         refresh: 'Check now',
@@ -791,7 +791,7 @@ export const resources = {
         tools: '{{count}} supported tools',
         offlineTitle: 'The runner is currently offline',
         offlineDescription:
-          'Check that the worker command is still running and that this machine can reach the control plane.',
+          'Open Skills Hub helper from the Windows Start menu, choose Start, and check your internet connection.',
         revokedTitle: 'This runner no longer has access',
         revokedDescription:
           'Generate a new connection command to enroll this machine with a fresh credential.',
@@ -1092,11 +1092,23 @@ export const resources = {
           recovery: 'Keep the worker running, resolve the issue, then prepare a fresh plan.',
         },
       },
+      helper: {
+        installHelp: 'Windows: install Skills Hub helper once, then open it from this page or the Start menu.',
+        download: 'Download Windows installer',
+        connect: 'Open helper to connect',
+        open: 'Open helper controls',
+        downloadUnavailable: 'The Windows installer is not available here yet. You can use an installed helper or the terminal option below.',
+        missing: 'Nothing opened? Install the helper, allow your browser to open it, then retry. The page confirms connection only after the helper reports back.',
+        expiry: 'Only this single-use pairing code expires after 10 minutes. An established connection stays paired and reconnects after network loss.',
+        manualLink: 'Copy connection link into the helper',
+        terminal: 'Terminal option',
+        terminalHelp: 'With ahm installed, connect once and run ahm worker. Keep that terminal open. Use ahm worker --stop for a graceful stop.',
+      },
       worker: {
         step: 'Step 3',
-        title: 'Start the worker',
+        title: 'Manage the local helper',
         description:
-          'Keep this process running. It polls outbound work and never accepts arbitrary commands or server-provided paths.',
+          'Start or stop the helper and choose whether it starts at Windows sign-in. Stop lets current work finish; closing its window keeps it in the notification area.',
         online: 'Worker is reporting normally.',
         offline: 'The worker has stopped reporting.',
         awaiting: 'Waiting for the worker to report for the first time.',

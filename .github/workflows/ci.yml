@@ -59,3 +59,19 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: cargo build --locked -p ahm-runner --bin ahm
+      - run: node scripts/test-worker-lifecycle.mjs
+      - name: Verify Windows helper and build installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./scripts/test-windows-helper.ps1
+          ./scripts/build-windows-helper.ps1 -Runner target/debug/ahm.exe
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: windows-helper-test-installer
+          path: target/release-assets/*.exe

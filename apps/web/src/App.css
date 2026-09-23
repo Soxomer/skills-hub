@@ -8879,3 +8879,8 @@ a {
   .add-source-card { grid-template-columns: minmax(0, 1fr); }
   .library-dialog-actions { flex-wrap: wrap; }
 }
+.runner-helper-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-block: 0.75rem; }
+.runner-helper details { margin-block: 0.75rem; }
+.runner-helper p { margin-block: 0.75rem; }
+.runner-helper summary { cursor: pointer; }
+.runner-helper summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
