@@ -70,6 +70,7 @@ jobs:
         run: |
           ./scripts/test-windows-helper.ps1
           ./scripts/build-windows-helper.ps1 -Runner target/debug/ahm.exe
+          ./scripts/test-windows-installer.ps1
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
         with:
