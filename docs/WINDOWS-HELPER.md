@@ -25,6 +25,7 @@ Skills, projects, library state and runner credentials remain outside the applic
 Build requirements: Windows x64, Rust, .NET Framework 4.8 reference assemblies and Inno Setup 6. Normal Windows 10/11 installations provide the .NET Framework runtime; the build does not require a separately deployed .NET SDK/runtime bundle.
 
 ```powershell
+$env:RUSTFLAGS = '-C target-feature=+crt-static'
 cargo build --locked --release -p ahm-runner --bin ahm
 ./scripts/test-windows-helper.ps1
 ./scripts/build-windows-helper.ps1
@@ -32,7 +33,7 @@ cargo build --locked --release -p ahm-runner --bin ahm
 
 Output: `target/release-assets/ahm-windows-x64-setup.exe`. Override `-Iscc` to select an existing compiler or `-Runner` to supply a target-specific CLI build. `-HelperOnly` compiles the launcher without building an installer.
 
-Windows CI builds a **test installer with a debug CLI** for acceptance, runs native pairing validation and the real CLI lifecycle test. Release CI packages an optimized CLI and publishes the installer alongside existing platform archives only for a version tag. Manual workflow dispatch builds artifacts without creating a release named after a branch.
+Windows CI builds a **test installer with a debug CLI** for acceptance, runs native pairing validation and the real CLI lifecycle test, and checks install/upgrade/uninstall and data preservation on its disposable account. Release CI packages an optimized CLI with the MSVC runtime linked statically (no separate Visual C++ redistributable required) and publishes the installer alongside existing platform archives only for a version tag. Manual workflow dispatch builds artifacts without creating a release named after a branch. The release binary still needs the same packaged acceptance checks; a CI worker with its developer PATH removed is not a fresh consumer Windows installation.
 
 After the release asset exists, set `VITE_RUNNER_INSTALLER_URL` to its HTTPS URL in the web deployment and rebuild. Until then the UI does not advertise a broken download. The installer is unsigned unless a release operator adds signing with a trusted certificate; do not claim publisher verification or bypass Windows warnings.
 

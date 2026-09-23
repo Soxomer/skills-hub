@@ -29,6 +29,8 @@ jobs:
       - run: npm run build:web
 
   runner-binaries:
+    env:
+      RUSTFLAGS: ${{ matrix.os == 'windows-2022' && '-C target-feature=+crt-static' || '' }}
     strategy:
       fail-fast: false
       matrix:
