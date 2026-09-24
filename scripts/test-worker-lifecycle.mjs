@@ -43,7 +43,11 @@ const waitFor = async (predicate, label) => {
 const status = async () => JSON.parse((await run(['worker', '--status'])).output)
 let worker
 try {
+  assert.equal((await status()).configured, false, 'fresh installation needs connection')
   assert.equal((await run(['connect', 'fixture-code', '--server', origin])).code, 0)
+  const enrolled = await status()
+  assert.equal(enrolled.configured, true, 'saved identity survives helper restarts')
+  assert.ok(!JSON.stringify(enrolled).includes('disposable-fixture-credential'), 'status never exposes credentials')
   worker = spawn(binary, [...prefix, 'worker', '--home', home, '--poll-seconds', '1'], { windowsHide: true, stdio: 'ignore' })
   await waitFor(async () => (await status()).report?.state === 'connected', 'connected')
   assert.notEqual((await run(['worker', '--once', '--home', home])).code, 0, 'second worker rejected')

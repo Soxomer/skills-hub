@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react'
 interface LibraryContextValue {
   runnerConnected: boolean
+  requestConnection?: () => Promise<boolean>
   invokeLibrary: <T>(command: string, args?: Record<string, unknown>) => Promise<T>
   pickDirectory: (options: { title?: string; directory?: boolean; multiple?: boolean }) => Promise<string | null>
 }

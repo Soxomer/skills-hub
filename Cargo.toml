@@ -2,6 +2,7 @@
 members = [
   "crates/ahm-domain",
   "crates/ahm-runner",
+  "apps/helper/src-tauri",
 ]
 resolver = "2"
 

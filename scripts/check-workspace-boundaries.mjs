@@ -83,6 +83,15 @@ rejectSourcePatterns('apps/web/src', legacyImportPatterns)
 rejectSourcePatterns('apps/control-plane/src', legacyImportPatterns)
 rejectSourcePatterns('packages/contracts/src', legacyImportPatterns)
 
+// Tauri belongs only to the helper; filesystem operations remain in the runner.
+rejectSourcePatterns('apps/helper/src', [
+  [/from\s+['"]@tauri-apps\/plugin-(?:shell|fs|sql)/, 'may not invoke generic shell, filesystem or SQL APIs'],
+])
+const helperManifest = readFileSync(join(repositoryRoot, 'apps/helper/src-tauri/Cargo.toml'), 'utf8')
+if (/^(?:ahm-runner|rusqlite|git2)\s*=/m.test(helperManifest)) {
+  violations.push('ahm-helper must delegate project operations to its bundled runner')
+}
+
 const domainManifest = readFileSync(
   join(repositoryRoot, 'crates/ahm-domain/Cargo.toml'),
   'utf8',

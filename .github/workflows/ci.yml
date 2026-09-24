@@ -43,19 +43,40 @@ jobs:
       - run: npm run test
       - run: npm run build:control-plane
       - run: npm run build:web
+      - run: npm run build --workspace @ahm/helper
 
   runner-and-cli:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-2022, macos-14]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            bundle: deb
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            bundle: nsis
+          - os: macos-14
+            target: aarch64-apple-darwin
+            bundle: dmg
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
+      - run: cargo build --locked -p ahm-runner --bin ahm
+      - run: node scripts/prepare-helper.mjs --local
+      - run: npm run build --workspace @ahm/helper
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace
@@ -64,15 +85,15 @@ jobs:
           node-version: 22
       - run: cargo build --locked -p ahm-runner --bin ahm
       - run: node scripts/test-worker-lifecycle.mjs
-      - name: Verify Windows helper and build installer
+      - name: Build desktop helper bundle
+        run: |
+          npm run tauri --workspace @ahm/helper -- build --debug --bundles ${{ matrix.bundle }}
+          node scripts/package-helper.mjs ${{ matrix.target }} debug
+      - name: Verify Windows install, upgrade and uninstall
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          ./scripts/test-windows-helper.ps1
-          ./scripts/build-windows-helper.ps1 -Runner target/debug/ahm.exe
-          ./scripts/test-windows-installer.ps1
+        run: ./scripts/test-windows-installer.ps1
       - uses: actions/upload-artifact@v4
-        if: runner.os == 'Windows'
         with:
-          name: windows-helper-test-installer
-          path: target/release-assets/*.exe
+          name: helper-test-${{ matrix.target }}
+          path: target/release-assets/*

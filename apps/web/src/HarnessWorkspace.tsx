@@ -30,7 +30,8 @@ function dateTime(value: string | null): string | null {
   }).format(new Date(value))
 }
 
-export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connection, onSignOut }: { client: ControlPlaneClient; connection: ReturnType<typeof useRunnerConnection>; onSignOut?: () => void }) {
+interface HarnessWorkspaceProps { client: ControlPlaneClient; connection: ReturnType<typeof useRunnerConnection>; onSignOut?: () => void; onConnect?: () => void }
+export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connection, onSignOut, onConnect }: HarnessWorkspaceProps) {
   const { t } = useTranslation()
   const [page, setPage] = useState<'projects' | 'setups' | 'skills'>('projects')
   const effectiveStatus =
@@ -98,7 +99,11 @@ export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connect
           </div>
         )}
 
-        {displayState === 'ready' && (
+        {onConnect && (displayState !== 'connected' || !connection.runner?.lastSeenAt) && <section className="intro-panel">
+          <div><h2>{t('onboarding.title')}</h2><p>{t('onboarding.description')}</p></div>
+          <button className="primary-button" type="button" onClick={onConnect}>{t('onboarding.setup')}</button>
+        </section>}
+        {!onConnect && displayState === 'ready' && (
           <section className="intro-panel" aria-labelledby="intro-title">
             <div className="intro-icon" aria-hidden="true">
               <Laptop size={30} />
@@ -123,7 +128,7 @@ export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connect
           </section>
         )}
 
-        {displayState === 'waiting' && connection.enrollment && (
+        {!onConnect && displayState === 'waiting' && connection.enrollment && (
           <section className="step-panel" aria-labelledby="enrollment-title">
             <div className="step-heading">
               <span className="step-number">1</span>
@@ -158,7 +163,7 @@ export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connect
           </section>
         )}
 
-        {displayState === 'expired' && (
+        {!onConnect && displayState === 'expired' && (
           <RecoveryPanel
             title={t('enrollment.expiredTitle')}
             description={t('enrollment.expiredDescription')}
@@ -170,7 +175,7 @@ export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connect
           />
         )}
 
-        {displayState === 'revoked' && (
+        {!onConnect && displayState === 'revoked' && (
           <RecoveryPanel
             title={t('runner.revokedTitle')}
             description={t('runner.revokedDescription')}

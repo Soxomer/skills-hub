@@ -1,0 +1,6 @@
+{
+  "identifier": "main",
+  "description": "Local helper window. No remote origins or generic shell/filesystem access.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

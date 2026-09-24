@@ -1,11 +1,12 @@
 import { useTranslation } from 'react-i18next'
-import { helperConnectionLink, helperInstallerUrl } from '../helper-connection'
+import { helperConnectionLink, installerFor, suggestedHelperPlatform } from '../helper-connection'
 import { CommandBlock } from './CommandBlock'
 
 interface RunnerHelperProps { command?: string }
 
 export function RunnerHelper({ command }: RunnerHelperProps) {
   const { t } = useTranslation()
+  const helperInstallerUrl = installerFor(suggestedHelperPlatform(navigator.userAgent))
   const link = command ? helperConnectionLink(command) : 'ahm://open'
   return <div className="runner-helper">
     <p>{t('helper.installHelp')}</p>

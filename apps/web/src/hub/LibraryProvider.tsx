@@ -6,8 +6,8 @@ import { LibraryContext } from './library-context'
 
 interface Directory { name: string; handle: string }
 interface DirectoryListing extends Directory { parent: string | null; children: Directory[]; roots: Directory[] }
-export function LibraryProvider({ client, deviceId, connected, children }: {
-  client: ControlPlaneClient; deviceId: string | null; connected: boolean; children: ReactNode
+export function LibraryProvider({ client, deviceId, connected, children, requestConnection }: {
+  client: ControlPlaneClient; deviceId: string | null; connected: boolean; children: ReactNode; requestConnection?: () => Promise<boolean>
 }) {
   const { t } = useTranslation('hub')
   const jobs = useRef(new Set<string>())
@@ -83,7 +83,7 @@ export function LibraryProvider({ client, deviceId, connected, children }: {
     if (picker) dialog.current?.showModal()
     else dialog.current?.close()
   }, [picker])
-  const context = useMemo(() => ({ runnerConnected: connected, invokeLibrary, pickDirectory }), [connected, invokeLibrary, pickDirectory])
+  const context = useMemo(() => ({ runnerConnected: connected, invokeLibrary, pickDirectory, requestConnection }), [connected, invokeLibrary, pickDirectory, requestConnection])
   return <LibraryContext.Provider value={context}>
     {children}
     <dialog ref={dialog} className="library-dialog" aria-labelledby="library-dialog-title" onCancel={event => { event.preventDefault(); close() }}>

@@ -540,7 +540,16 @@ fn run_worker(
             std::fs::read(worker_control::directory(runner_state_path).join("status.json"))
                 .ok()
                 .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
-        return print_json(&serde_json::json!({"running":running,"report":report}));
+        let configured = if runner_state_path.exists() {
+            RunnerStateStore::open(runner_state_path)?
+                .identity()?
+                .is_some()
+        } else {
+            false
+        };
+        return print_json(
+            &serde_json::json!({"running":running,"report":report,"configured":configured}),
+        );
     }
     let control = WorkerControl::acquire(runner_state_path)?;
     let state = RunnerStateStore::open(runner_state_path)?;

@@ -9,9 +9,21 @@ export function helperConnectionLink(command: string): string | null {
   } catch { return null }
 }
 
-// Set only once the installer release asset is published; never advertise a nonexistent download.
-export const helperInstallerUrl: string | null = (() => {
-  const value: unknown = import.meta.env.VITE_RUNNER_INSTALLER_URL
-  if (typeof value !== 'string' || !value) return null
-  try { const url = new URL(value); return url.protocol === 'https:' ? url.href : null } catch { return null }
-})()
+export type HelperPlatform = 'windows' | 'macArm' | 'macIntel' | 'linux'
+export function suggestedHelperPlatform(agent: string): HelperPlatform {
+  if (/Mac/i.test(agent)) return 'macArm'
+  if (/Linux/i.test(agent) && !/Android/i.test(agent)) return 'linux'
+  return 'windows'
+}
+export function installerFor(platform: HelperPlatform): string | null {
+  // Configure only after the corresponding release asset is published.
+  const values: Record<HelperPlatform, unknown> = {
+    windows: import.meta.env.VITE_HELPER_WINDOWS_URL ?? import.meta.env.VITE_RUNNER_INSTALLER_URL,
+    macArm: import.meta.env.VITE_HELPER_MAC_ARM_URL,
+    macIntel: import.meta.env.VITE_HELPER_MAC_INTEL_URL,
+    linux: import.meta.env.VITE_HELPER_LINUX_URL,
+  }
+  const value = values[platform]
+  if (typeof value !== 'string') return null
+  try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password ? url.href : null } catch { return null }
+}

@@ -7,10 +7,12 @@ const root = process.cwd()
 const jsonPackages = [
   'package.json',
   'apps/web/package.json',
+  'apps/helper/package.json',
+  'apps/helper/src-tauri/tauri.conf.json',
   'apps/control-plane/package.json',
   'packages/contracts/package.json',
 ]
-const cargoPackages = ['crates/ahm-domain/Cargo.toml', 'crates/ahm-runner/Cargo.toml']
+const cargoPackages = ['crates/ahm-domain/Cargo.toml', 'crates/ahm-runner/Cargo.toml', 'apps/helper/src-tauri/Cargo.toml']
 
 function read(filePath) {
   return fs.readFileSync(path.join(root, filePath), 'utf8')

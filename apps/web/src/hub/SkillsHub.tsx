@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { checkForWebUpdate, getWebVersion, type WebUpdate } from './web-update'
 import { useLibrary } from './library-context'
+import { useSkillInstallIntent } from './useSkillInstallIntent'
 import { useNarrowWindow } from './useNarrowWindow'
 
 
@@ -96,7 +97,7 @@ type ActiveView = 'myskills' | 'explore' | 'detail' | 'settings' | 'manage'
 type ManagementTab = 'tags' | 'tools' | 'updates'
 function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void; onSignOut?: () => void }) {
   const narrowWindow = useNarrowWindow()
-  const { invokeLibrary, runnerConnected, pickDirectory } = useLibrary()
+  const { invokeLibrary, runnerConnected, pickDirectory, requestConnection } = useLibrary()
   const { t, i18n } = useTranslation('hub')
   const language = i18n.resolvedLanguage ?? i18n.language ?? 'en'
   const languageStorageKey = 'skills-language'
@@ -1495,12 +1496,13 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
   }, [loadSkillPreview, skillPreviewTarget])
 
 
-  const handleOpenAdd = useCallback((tab: 'git' | 'local' = 'git') => {
+  const handleOpenAdd = useCallback(async (tab: 'git' | 'local' = 'git') => {
+    if (!runnerConnected && !await requestConnection?.()) return
     resetInstallScope()
     setAddModalTab(tab)
     setShowAddModal(true)
     setAddModalTagIds([])
-  }, [resetInstallScope])
+  }, [resetInstallScope, runnerConnected, requestConnection])
 
   const applySelectedAddModalTags = useCallback(
     async (skillId: string, skillName: string) => {
@@ -2795,7 +2797,7 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
   const [exploreInstallTrigger, setExploreInstallTrigger] = useState(0)
   const exploreInstallUrlRef = useRef<string | null>(null)
 
-  const handleExploreInstall = useCallback(
+  const beginExploreInstall = useCallback(
     (sourceUrl: string, skillName?: string) => {
       resetInstallScope()
       setGitUrl(sourceUrl)
@@ -2812,6 +2814,7 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
     },
     [resetInstallScope, toolStatus],
   )
+  const { pending: pendingInstall, install: handleExploreInstall, dismiss: dismissInstall } = useSkillInstallIntent(runnerConnected, requestConnection, beginExploreInstall)
 
   const handleInstallPreviewSkill = useCallback(() => {
     if (!skillPreviewTarget) return
@@ -3561,6 +3564,10 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
       />
 
       <main className="skills-main">
+        {pendingInstall && <div className="library-connection-notice" role="status">
+          <button type="button" onClick={() => void handleExploreInstall(pendingInstall.sourceUrl, pendingInstall.skillName)}>{t('onboarding.resume', { ns: 'translation', name: pendingInstall.skillName ?? pendingInstall.sourceUrl })}</button>
+          <button type="button" onClick={dismissInstall}>{t('cancel')}</button>
+        </div>}
         {activeView === 'detail' && detailSkill ? (
           <Suspense fallback={<p role="status">{t('loading')}</p>}><SkillDetailView
             skill={detailSkill}

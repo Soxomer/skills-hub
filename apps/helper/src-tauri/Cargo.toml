@@ -1,0 +1,21 @@
+[package]
+name = "ahm-helper"
+version = "0.9.1"
+edition.workspace = true
+rust-version.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-deep-link = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-opener = "2"
+serde.workspace = true
+serde_json.workspace = true
+url = "2"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
