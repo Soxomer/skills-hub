@@ -327,6 +327,12 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
         for record in self.state.pending_outbox(&now)? {
             let result: ResultEnvelope = serde_json::from_str(&record.result_json)
                 .context("decode durable runner result")?;
+            if result.organization_id != identity.organization_id
+                || result.device_id != identity.device_id
+            {
+                log::warn!("withholding queued result for a different runner identity");
+                continue;
+            }
             let request = SubmitRunnerResultRequest {
                 lease_id: record.lease_id,
                 result,
@@ -634,6 +640,87 @@ mod tests {
         assert_eq!(*worker.executor.executions.borrow(), 1);
         assert_eq!(worker.state.undelivered_outbox_count().unwrap(), 0);
         assert_eq!(worker.transport.submissions.borrow().len(), 1);
+    }
+
+    #[test]
+    fn reconnect_cannot_move_a_pending_result_to_another_connection() {
+        let mut worker = worker(VecDeque::from([lease("lease_01")]), true);
+        worker.run_once().unwrap();
+        // Not just currently due results: a delayed retry still belongs to this identity.
+        worker
+            .state
+            .mark_outbox_attempt(
+                "job_01",
+                &IsoTimestamp::new("2099-01-01T00:00:00Z").unwrap(),
+            )
+            .unwrap();
+        let original = worker.state.identity().unwrap().unwrap();
+        let mut alternatives = vec![original.clone(); 3];
+        alternatives[0].server_url = "https://another-workspace.example".into();
+        alternatives[1].organization_id = identifier("another_org");
+        alternatives[2].device_id = identifier("another_device");
+        for identity in &alternatives {
+            assert!(matches!(
+                worker.state.save_identity(identity),
+                Err(crate::state::RunnerStateError::PendingResults)
+            ));
+            assert_eq!(worker.state.identity().unwrap(), Some(original.clone()));
+            assert_eq!(worker.state.undelivered_outbox_count().unwrap(), 1);
+        }
+        assert!(worker.state.ensure_reconnect_ready().is_err());
+        *worker.transport.fail_submissions.borrow_mut() = false;
+        worker
+            .state
+            .mark_outbox_attempt("job_01", &utc_now())
+            .unwrap();
+        worker.run_once().unwrap();
+        assert_eq!(worker.transport.submissions.borrow().len(), 1);
+        worker.state.save_identity(&alternatives[0]).unwrap();
+        assert_eq!(
+            worker.state.identity().unwrap(),
+            Some(alternatives[0].clone())
+        );
+    }
+
+    #[test]
+    fn outbox_never_submits_a_result_for_a_different_organization_or_device() {
+        for foreign_organization in [false, true] {
+            let mut worker = worker(VecDeque::new(), false);
+            let mut foreign = lease("foreign_lease");
+            if foreign_organization {
+                foreign.job.organization_id = identifier("other_org");
+            } else {
+                foreign.job.device_id = identifier("other_device");
+            }
+            let result = ResultEnvelope {
+                protocol_version: PROTOCOL_VERSION,
+                job_id: foreign.job.job_id.clone(),
+                idempotency_key: foreign.job.idempotency_key.clone(),
+                organization_id: foreign.job.organization_id.clone(),
+                device_id: foreign.job.device_id.clone(),
+                project_instance_id: foreign.job.project_instance_id.clone(),
+                result: protocol_error(
+                    ProtocolErrorCode::Conflict,
+                    "private old-workspace result",
+                    false,
+                ),
+            };
+            let json = serde_json::to_string(&result).unwrap();
+            worker
+                .state
+                .finish_job(
+                    &foreign.job,
+                    &foreign.lease_id,
+                    &json,
+                    &sha256(&json),
+                    true,
+                    &utc_now(),
+                )
+                .unwrap();
+            assert_eq!(worker.run_once().unwrap(), WorkerOutcome::Idle);
+            assert!(worker.transport.submissions.borrow().is_empty());
+            assert_eq!(worker.state.undelivered_outbox_count().unwrap(), 1);
+        }
     }
 
     #[test]

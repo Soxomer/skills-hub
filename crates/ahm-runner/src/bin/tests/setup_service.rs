@@ -7,6 +7,46 @@ use ahm_runner::tool_adapters::{save_tool_config, CustomToolConfig, ToolConfig};
 use tempfile::TempDir;
 
 #[test]
+fn reconnect_rejects_pending_work_before_consuming_an_enrollment_code() {
+    let root = TempDir::new().unwrap();
+    let path = root.path().join("runner.db");
+    let mut state = ahm_runner::state::RunnerStateStore::open(&path).unwrap();
+    let result: ahm_domain::ResultEnvelope = serde_json::from_str(include_str!(
+        "../../../../../packages/contracts/fixtures/v1/result-library.json"
+    ))
+    .unwrap();
+    let job: ahm_domain::JobEnvelope = serde_json::from_str(include_str!(
+        "../../../../../packages/contracts/fixtures/v1/job-library.json"
+    ))
+    .unwrap();
+    state
+        .finish_job(
+            &job,
+            "fixture_lease",
+            &serde_json::to_string(&result).unwrap(),
+            "fixture_digest",
+            false,
+            &super::utc_now(),
+        )
+        .unwrap();
+    let mut server = mockito::Server::new();
+    let enrollment = server.mock("POST", "/runner/v1/enroll").expect(0).create();
+    let error = super::connect_runner(
+        super::ConnectArgs {
+            code: "fixture-code".into(),
+            server: server.url(),
+            label: "Fixture".into(),
+        },
+        &path,
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(super::classify_error(&error), 6);
+    assert_eq!(state.undelivered_outbox_count().unwrap(), 1);
+    enrollment.assert();
+}
+
+#[test]
 fn worker_accepts_an_isolated_home_without_changing_the_process_home() {
     use clap::Parser;
     let fixture = TempDir::new().unwrap();

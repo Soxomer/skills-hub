@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 /target
+/apps/helper/src-tauri/binaries/
+/apps/helper/src-tauri/gen/
 *.local
 *.tsbuildinfo
 .cursor

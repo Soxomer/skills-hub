@@ -28,6 +28,7 @@ pub mod sync_engine;
 pub mod tool_adapters;
 pub mod transport;
 pub mod worker;
+pub mod worker_control;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RunnerBoundary {

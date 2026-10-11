@@ -10,9 +10,10 @@ Do not assume that an OpenAI API key, Vercel AI Gateway, OpenRouter, a custom OA
 
 ## Product boundary
 
-Agent Harness Manager has three supported runtime boundaries:
+Agent Harness Manager has four supported runtime boundaries:
 
 - `apps/web`: React browser product experience.
+- `apps/helper`: Tauri tray application for pairing and local worker lifecycle; ships the runner as a sidecar. It does not implement skill or project operations.
 - `apps/control-plane`: Fastify API and shared PostgreSQL state.
 - `crates/ahm-runner`: local `ahm` worker/CLI, SQLite state, adapters, and filesystem effects.
 

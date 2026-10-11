@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { checkForWebUpdate, getWebVersion, type WebUpdate } from './web-update'
 import { useLibrary } from './library-context'
+import { useSkillInstallIntent } from './useSkillInstallIntent'
 import { useNarrowWindow } from './useNarrowWindow'
 
 
@@ -96,7 +97,7 @@ type ActiveView = 'myskills' | 'explore' | 'detail' | 'settings' | 'manage'
 type ManagementTab = 'tags' | 'tools' | 'updates'
 function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void; onSignOut?: () => void }) {
   const narrowWindow = useNarrowWindow()
-  const { invokeLibrary, runnerConnected, pickDirectory } = useLibrary()
+  const { invokeLibrary, runnerConnected, pickDirectory, requestConnection } = useLibrary()
   const { t, i18n } = useTranslation('hub')
   const language = i18n.resolvedLanguage ?? i18n.language ?? 'en'
   const languageStorageKey = 'skills-language'
@@ -146,6 +147,8 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
   >({})
   const [loadingStartAt, setLoadingStartAt] = useState<number | null>(null)
   const [toolStatus, setToolStatus] = useState<ToolStatusDto | null>(null)
+  const [toolStatusFailed, setToolStatusFailed] = useState(false)
+  const [toolStatusAttempt, setToolStatusAttempt] = useState(0)
   const [toolConfig, setToolConfig] = useState<ToolConfigDto | null>(null)
   const [discoveryScanSettings, setDiscoveryScanSettings] =
     useState<DiscoveryScanSettingsDto | null>(null)
@@ -1495,12 +1498,13 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
   }, [loadSkillPreview, skillPreviewTarget])
 
 
-  const handleOpenAdd = useCallback((tab: 'git' | 'local' = 'git') => {
+  const handleOpenAdd = useCallback(async (tab: 'git' | 'local' = 'git') => {
+    if (!runnerConnected && !await requestConnection?.()) return
     resetInstallScope()
     setAddModalTab(tab)
     setShowAddModal(true)
     setAddModalTagIds([])
-  }, [resetInstallScope])
+  }, [resetInstallScope, runnerConnected, requestConnection])
 
   const applySelectedAddModalTags = useCallback(
     async (skillId: string, skillName: string) => {
@@ -2434,10 +2438,14 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
   }, [loadPlan, plan])
 
   useEffect(() => {
+    let active = true
     const load = async () => {
+      setToolStatus(null)
+      setToolStatusFailed(false)
       if (!runnerConnected) return
       try {
         const status = await invokeLibrary<ToolStatusDto>('get_tool_status')
+        if (!active) return
         setToolStatus(status)
 
         // Default-select installed tools for sync targets if user hasn't toggled yet.
@@ -2454,13 +2462,15 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
           setShowNewToolsModal(true)
         }
       } catch (err) {
+        if (!active) return
+        setToolStatusFailed(true)
         // Non-fatal; app can still work without detection.
         console.warn(err)
       }
     }
     void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runnerConnected])
+    return () => { active = false }
+  }, [runnerConnected, invokeLibrary, toolStatusAttempt])
 
   const handleImport = async () => {
     if (!plan) return
@@ -2795,7 +2805,7 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
   const [exploreInstallTrigger, setExploreInstallTrigger] = useState(0)
   const exploreInstallUrlRef = useRef<string | null>(null)
 
-  const handleExploreInstall = useCallback(
+  const beginExploreInstall = useCallback(
     (sourceUrl: string, skillName?: string) => {
       resetInstallScope()
       setGitUrl(sourceUrl)
@@ -2812,6 +2822,7 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
     },
     [resetInstallScope, toolStatus],
   )
+  const { pending: pendingInstall, install: handleExploreInstall, dismiss: dismissInstall, preparing: preparingInstall } = useSkillInstallIntent(runnerConnected, requestConnection, beginExploreInstall, toolStatus !== null)
 
   const handleInstallPreviewSkill = useCallback(() => {
     if (!skillPreviewTarget) return
@@ -3561,6 +3572,13 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
       />
 
       <main className="skills-main">
+        {pendingInstall && <div className="library-connection-notice" role="status">
+          <button type="button" disabled={preparingInstall && !toolStatusFailed} onClick={() => {
+            if (toolStatusFailed) setToolStatusAttempt(value => value + 1)
+            void handleExploreInstall(pendingInstall.sourceUrl, pendingInstall.skillName)
+          }}>{t(toolStatusFailed ? 'onboarding.retryTools' : preparingInstall ? 'onboarding.detectingTools' : 'onboarding.resume', { ns: 'translation', name: pendingInstall.skillName ?? pendingInstall.sourceUrl })}</button>
+          <button type="button" onClick={dismissInstall}>{t('cancel')}</button>
+        </div>}
         {activeView === 'detail' && detailSkill ? (
           <Suspense fallback={<p role="status">{t('loading')}</p>}><SkillDetailView
             skill={detailSkill}

@@ -19,6 +19,7 @@ import type { ControlPlaneClient } from '../api'
 import { groupDiscoveriesByTool } from '../scan-state'
 import { useProjectScan } from '../useProjectScan'
 import { CommandBlock } from './CommandBlock'
+import { RunnerHelper } from './RunnerHelper'
 import { ProjectSwitchWorkspace } from './ProjectSwitchWorkspace'
 
 interface ProjectScanWorkspaceProps {
@@ -225,7 +226,7 @@ export const ProjectScanWorkspace = memo(function ProjectScanWorkspace({
             <p>{t('worker.description')}</p>
           </div>
         </div>
-        <CommandBlock command="ahm worker" name={t('worker.title')} />
+        <RunnerHelper />
         <p className={`worker-state ${workerReady ? 'is-online' : ''}`}>
           <span aria-hidden="true" />
           {!runnerOnline

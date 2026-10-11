@@ -81,6 +81,15 @@ struct ConnectArgs {
 
 #[derive(Debug, Args)]
 struct WorkerArgs {
+    /// Request a graceful stop after the current poll/job cycle (never kills a job).
+    #[arg(long, conflicts_with_all = ["once", "status"])]
+    stop: bool,
+    /// Wait up to 60 seconds for --stop; a timeout leaves the worker intact.
+    #[arg(long, requires = "stop")]
+    wait: bool,
+    /// Report local worker lifecycle without exposing credentials.
+    #[arg(long, conflicts_with = "once")]
+    status: bool,
     /// Home directory used for discovery and the artifact cache.
     #[arg(long)]
     home: Option<PathBuf>,
@@ -240,6 +249,7 @@ fn run(cli: Cli) -> Result<i32> {
         .unwrap_or_else(default_runner_state_path)?;
     let command = match cli.command {
         Command::Connect(args) => {
+            let _control = ahm_runner::worker_control::WorkerControl::acquire(&runner_state_path)?;
             connect_runner(args, &runner_state_path, cli.json)?;
             return Ok(0);
         }
@@ -470,6 +480,9 @@ fn connect_runner(
     runner_state_path: &std::path::Path,
     json: bool,
 ) -> Result<()> {
+    let state = RunnerStateStore::open(runner_state_path)?;
+    // Check before contacting the server: do not consume a code we cannot safely save.
+    state.ensure_reconnect_ready()?;
     let transport = HttpRunnerTransport::new(&args.server)?;
     let enrolled = transport.enroll(&EnrollRunnerRequest {
         code: args.code,
@@ -488,7 +501,7 @@ fn connect_runner(
         credential_secret: enrolled.credential,
         enrolled_at: utc_now(),
     };
-    RunnerStateStore::open(runner_state_path)?.save_identity(&identity)?;
+    state.save_identity(&identity)?;
     if json {
         print_json(&serde_json::json!({
             "organizationId": identity.organization_id.as_str(),
@@ -512,6 +525,38 @@ fn run_worker(
     db_path: PathBuf,
     json: bool,
 ) -> Result<()> {
+    use ahm_runner::worker_control::{self, WorkerControl};
+    if args.stop {
+        worker_control::request_stop(runner_state_path)?;
+        if args.wait {
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            while worker_control::is_running(runner_state_path)? {
+                anyhow::ensure!(std::time::Instant::now() < deadline, "Worker is still finishing. No process was killed; retry after the operation finishes.");
+                thread::sleep(Duration::from_millis(200));
+            }
+        }
+        return Ok(());
+    }
+    if args.status {
+        let running = worker_control::is_running(runner_state_path)?;
+        let report =
+            std::fs::read(worker_control::directory(runner_state_path).join("status.json"))
+                .ok()
+                .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+        let (configured, pending_results) = if runner_state_path.exists() {
+            let state = RunnerStateStore::open(runner_state_path)?;
+            (
+                state.identity()?.is_some(),
+                state.undelivered_outbox_count()?,
+            )
+        } else {
+            (false, 0)
+        };
+        return print_json(
+            &serde_json::json!({"running":running,"report":report,"configured":configured,"pendingResults":pending_results}),
+        );
+    }
+    let control = WorkerControl::acquire(runner_state_path)?;
     let state = RunnerStateStore::open(runner_state_path)?;
     let identity = state
         .identity()?
@@ -539,9 +584,13 @@ fn run_worker(
         );
     }
     loop {
+        if control.stop_requested() {
+            return Ok(());
+        }
         let mut retry_after_error = false;
         match worker.run_once() {
             Ok(outcome) => {
+                control.report("connected")?;
                 if json && outcome != WorkerOutcome::Idle {
                     print_json(&serde_json::json!({ "outcome": format!("{outcome:?}") }))?;
                 } else if !json && outcome == WorkerOutcome::Processed {
@@ -551,6 +600,7 @@ fn run_worker(
                 }
             }
             Err(error) if !args.once => {
+                control.report("offline")?;
                 eprintln!("worker cycle failed: {error:#}");
                 retry_after_error = true;
             }
@@ -560,7 +610,12 @@ fn run_worker(
             return Ok(());
         }
         if retry_after_error {
-            thread::sleep(Duration::from_secs(args.poll_seconds));
+            for _ in 0..args.poll_seconds.min(60) * 10 {
+                if control.stop_requested() {
+                    return Ok(());
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
         }
     }
 }
@@ -769,6 +824,13 @@ fn print_plan(plan: &ApplyPlan) {
 }
 
 fn classify_error(error: &anyhow::Error) -> i32 {
+    // Local CLI lifecycle code consumed by the bundled helper (not a remote protocol).
+    if matches!(
+        error.downcast_ref::<ahm_runner::state::RunnerStateError>(),
+        Some(ahm_runner::state::RunnerStateError::PendingResults)
+    ) {
+        return 6;
+    }
     let message = format!("{error:#}");
     if message.contains("sync conflicts")
         || message.contains("will not be touched")
