@@ -144,6 +144,7 @@ pub enum RunnerStateError {
     Contract(ContractValueError),
     Io(std::io::Error),
     UnsupportedSchema(i64),
+    PendingResults,
 }
 
 impl fmt::Display for RunnerStateError {
@@ -152,6 +153,7 @@ impl fmt::Display for RunnerStateError {
             Self::Database(error) => write!(formatter, "runner state database error: {error}"),
             Self::Contract(error) => write!(formatter, "invalid runner state value: {error}"),
             Self::Io(error) => write!(formatter, "runner state filesystem error: {error}"),
+            Self::PendingResults => write!(formatter, "Previous work still needs to reach the current workspace. Run ahm worker and wait for delivery before reconnecting."),
             Self::UnsupportedSchema(version) => {
                 write!(
                     formatter,
@@ -211,6 +213,13 @@ impl RunnerStateStore {
     }
 
     pub fn save_identity(&self, record: &RunnerIdentityRecord) -> Result<(), RunnerStateError> {
+        if self.identity()?.is_some_and(|current| {
+            current.server_url != record.server_url
+                || current.organization_id != record.organization_id
+                || current.device_id != record.device_id
+        }) {
+            self.ensure_reconnect_ready()?;
+        }
         self.connection.execute(
             "INSERT INTO runner_identity
                (singleton, server_url, organization_id, device_id, credential_secret, enrolled_at)
@@ -229,6 +238,14 @@ impl RunnerStateStore {
                 record.enrolled_at.as_str(),
             ],
         )?;
+        Ok(())
+    }
+
+    /// An outbox belongs to the connection that produced it, not the next enrollment.
+    pub fn ensure_reconnect_ready(&self) -> Result<(), RunnerStateError> {
+        if self.undelivered_outbox_count()? > 0 {
+            return Err(RunnerStateError::PendingResults);
+        }
         Ok(())
     }
 

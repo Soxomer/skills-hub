@@ -42,7 +42,8 @@ struct Snapshot {
     pending_server: Option<String>,
     pending_id: Option<u64>,
     busy: bool,
-    startup: bool,
+    startup: Option<bool>,
+    startup_error: Option<String>,
     error: Option<String>,
 }
 
@@ -66,13 +67,11 @@ fn runner() -> Result<Command> {
 }
 
 fn execute(args: &[&str]) -> Result<()> {
-    if runner()?
-        .args(args)
-        .status()
-        .map_err(|_| "unavailable")?
-        .success()
-    {
+    let status = runner()?.args(args).status().map_err(|_| "unavailable")?;
+    if status.success() {
         Ok(())
+    } else if status.code() == Some(6) {
+        Err("pendingResults".into())
     } else {
         Err("operationFailed".into())
     }
@@ -168,16 +167,28 @@ fn perform(app: &AppHandle, action: &str, pending_id: Option<u64>) -> Result<()>
             Ok(())
         }
         "connect" => {
+            if worker_status()?["pendingResults"].as_u64().unwrap_or(0) > 0 {
+                start()?;
+                return Err("pendingResults".into());
+            }
             let pairing = {
-                let mut pending = helper.pending.lock().unwrap();
+                let pending = helper.pending.lock().unwrap();
                 if pending.as_ref().map(|(id, _)| *id) != pending_id || pending_id.is_none() {
                     return Err("changedLink".into());
                 }
-                pending.take().unwrap().1
+                pending.as_ref().unwrap().1.clone()
             };
             execute(&["worker", "--stop", "--wait"]).map_err(|_| "stillFinishing")?;
-            execute(&["connect", &pairing.code, "--server", &pairing.server])
-                .map_err(|_| "pairFailed")?;
+            if let Err(error) = execute(&["connect", &pairing.code, "--server", &pairing.server]) {
+                // A cycle can enqueue a result while stopping. Restore the old worker
+                // so delivery can finish; never replace its credential or delete its queue.
+                if error == "pendingResults" {
+                    let _ = start();
+                    return Err(error);
+                }
+                return Err("pairFailed".into());
+            }
+            *helper.pending.lock().unwrap() = None;
             start()
         }
         _ => Err("invalidAction".into()),
@@ -197,24 +208,39 @@ async fn snapshot(app: AppHandle) -> Result<Snapshot> {
     tauri::async_runtime::spawn_blocking(move || {
         let status = worker_status()?;
         let helper = app.state::<Helper>();
-        let pending = helper.pending.lock().unwrap();
-        let error = helper.error.lock().unwrap().clone();
-        Ok(Snapshot {
-            running: status["running"] == true,
-            configured: status["configured"] == true,
-            connection: status["report"]["state"]
-                .as_str()
-                .unwrap_or("starting")
-                .into(),
-            pending_server: pending.as_ref().map(|(_, pairing)| pairing.server.clone()),
-            pending_id: pending.as_ref().map(|(id, _)| *id),
-            busy: helper.busy.load(Ordering::SeqCst),
-            startup: app.autolaunch().is_enabled().map_err(|_| "startupFailed")?,
-            error,
-        })
+        Ok(snapshot_state(
+            status,
+            &helper,
+            app.autolaunch()
+                .is_enabled()
+                .map_err(|_| "startupFailed".into()),
+        ))
     })
     .await
     .map_err(|_| "unavailable")?
+}
+
+fn snapshot_state(status: serde_json::Value, helper: &Helper, startup: Result<bool>) -> Snapshot {
+    let pending = helper.pending.lock().unwrap();
+    let error = helper.error.lock().unwrap().clone();
+    let (startup, startup_error) = match startup {
+        Ok(enabled) => (Some(enabled), None),
+        Err(error) => (None, Some(error)),
+    };
+    Snapshot {
+        running: status["running"] == true,
+        configured: status["configured"] == true,
+        connection: status["report"]["state"]
+            .as_str()
+            .unwrap_or("starting")
+            .into(),
+        pending_server: pending.as_ref().map(|(_, pairing)| pairing.server.clone()),
+        pending_id: pending.as_ref().map(|(id, _)| *id),
+        busy: helper.busy.load(Ordering::SeqCst),
+        startup,
+        startup_error,
+        error,
+    }
 }
 
 #[tauri::command]
@@ -369,4 +395,37 @@ fn main() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_failure_does_not_hide_pending_pairing_or_core_worker_status() {
+        let helper = Helper::default();
+        *helper.pending.lock().unwrap() = Some((
+            7,
+            pairing::parse(
+                "ahm://connect?code=abcdefghijklmnop&server=https%3A%2F%2Ftrusted.example",
+            )
+            .unwrap(),
+        ));
+        let status =
+            serde_json::json!({"configured":true,"running":true,"report":{"state":"connected"}});
+        let snapshot = snapshot_state(status.clone(), &helper, Err("startupFailed".into()));
+        assert!(snapshot.running && snapshot.configured);
+        assert_eq!(snapshot.pending_id, Some(7));
+        assert_eq!(
+            snapshot.pending_server.as_deref(),
+            Some("https://trusted.example")
+        );
+        assert_eq!(snapshot.startup, None);
+        assert_eq!(snapshot.startup_error.as_deref(), Some("startupFailed"));
+        assert!(snapshot.error.is_none());
+        let recovered = snapshot_state(status, &helper, Ok(true));
+        assert_eq!(recovered.startup, Some(true));
+        assert!(recovered.startup_error.is_none());
+        assert_eq!(recovered.pending_id, Some(7));
+    }
 }

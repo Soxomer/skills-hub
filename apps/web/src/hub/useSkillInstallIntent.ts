@@ -15,21 +15,34 @@ function save(intent: SkillInstallIntent | null) {
   try { if (intent) sessionStorage.setItem(KEY, JSON.stringify(intent)); else sessionStorage.removeItem(KEY) } catch { /* Still retained in this page when browser storage is disabled. */ }
 }
 
-export function useSkillInstallIntent(connected: boolean, requestConnection: (() => Promise<boolean>) | undefined, onInstall: (url: string, name?: string) => void) {
+export function useSkillInstallIntent(connected: boolean, requestConnection: (() => Promise<boolean>) | undefined, onInstall: (url: string, name?: string) => void, ready: boolean) {
   const [pending, setPending] = useState(read)
+  const [preparing, setPreparing] = useState(false)
   const latestInstall = useRef(onInstall)
   const generation = useRef(0)
-  useEffect(() => { latestInstall.current = onInstall }, [onInstall])
+  const available = useRef(connected && ready)
+  const waiting = useRef<(() => void) | null>(null)
+  useEffect(() => {
+    latestInstall.current = onInstall
+    available.current = connected && ready
+    if (available.current) waiting.current?.()
+  }, [connected, onInstall, ready])
+  useEffect(() => () => { generation.current += 1; waiting.current?.() }, [])
   const install = useCallback(async (sourceUrl: string, skillName?: string) => {
     const intent = { sourceUrl, skillName }
     const current = ++generation.current
-    setPending(intent); save(intent)
+    waiting.current?.(); waiting.current = null
+    setPreparing(false); setPending(intent); save(intent)
     if (!connected && !await requestConnection?.()) return
     if (generation.current !== current) return
-    setPending(null); save(null)
-    // Use the post-connection render's tool selection and API client, not the disconnected closure.
+    setPreparing(true)
+    if (!available.current) await new Promise<void>(resolve => { waiting.current = resolve })
+    if (generation.current !== current || !available.current) return
+    waiting.current = null
+    setPending(null); save(null); setPreparing(false)
+    // Resume only from the render containing the detected tools and their sync targets.
     latestInstall.current(sourceUrl, skillName)
   }, [connected, requestConnection])
-  const dismiss = useCallback(() => { generation.current += 1; setPending(null); save(null) }, [])
-  return { pending, install, dismiss }
+  const dismiss = useCallback(() => { generation.current += 1; waiting.current?.(); waiting.current = null; setPreparing(false); setPending(null); save(null) }, [])
+  return { pending, install, dismiss, preparing }
 }

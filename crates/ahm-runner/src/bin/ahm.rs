@@ -480,6 +480,9 @@ fn connect_runner(
     runner_state_path: &std::path::Path,
     json: bool,
 ) -> Result<()> {
+    let state = RunnerStateStore::open(runner_state_path)?;
+    // Check before contacting the server: do not consume a code we cannot safely save.
+    state.ensure_reconnect_ready()?;
     let transport = HttpRunnerTransport::new(&args.server)?;
     let enrolled = transport.enroll(&EnrollRunnerRequest {
         code: args.code,
@@ -498,7 +501,7 @@ fn connect_runner(
         credential_secret: enrolled.credential,
         enrolled_at: utc_now(),
     };
-    RunnerStateStore::open(runner_state_path)?.save_identity(&identity)?;
+    state.save_identity(&identity)?;
     if json {
         print_json(&serde_json::json!({
             "organizationId": identity.organization_id.as_str(),
@@ -540,15 +543,17 @@ fn run_worker(
             std::fs::read(worker_control::directory(runner_state_path).join("status.json"))
                 .ok()
                 .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
-        let configured = if runner_state_path.exists() {
-            RunnerStateStore::open(runner_state_path)?
-                .identity()?
-                .is_some()
+        let (configured, pending_results) = if runner_state_path.exists() {
+            let state = RunnerStateStore::open(runner_state_path)?;
+            (
+                state.identity()?.is_some(),
+                state.undelivered_outbox_count()?,
+            )
         } else {
-            false
+            (false, 0)
         };
         return print_json(
-            &serde_json::json!({"running":running,"report":report,"configured":configured}),
+            &serde_json::json!({"running":running,"report":report,"configured":configured,"pendingResults":pending_results}),
         );
     }
     let control = WorkerControl::acquire(runner_state_path)?;
@@ -819,6 +824,13 @@ fn print_plan(plan: &ApplyPlan) {
 }
 
 fn classify_error(error: &anyhow::Error) -> i32 {
+    // Local CLI lifecycle code consumed by the bundled helper (not a remote protocol).
+    if matches!(
+        error.downcast_ref::<ahm_runner::state::RunnerStateError>(),
+        Some(ahm_runner::state::RunnerStateError::PendingResults)
+    ) {
+        return 6;
+    }
     let message = format!("{error:#}");
     if message.contains("sync conflicts")
         || message.contains("will not be touched")

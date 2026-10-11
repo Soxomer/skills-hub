@@ -65,7 +65,7 @@ it('retains the exact selected source across setup and resumes using the connect
   const request = vi.fn(() => new Promise<boolean>(resolve => { resolveConnection = resolve }))
   const oldInstall = vi.fn(), newInstall = vi.fn()
   function Fixture({ connected, install }: { connected: boolean; install: (url: string, name?: string) => void }) {
-    const intent = useSkillInstallIntent(connected, request, install)
+    const intent = useSkillInstallIntent(connected, request, install, true)
     return <><button onClick={() => void intent.install('https://github.com/example/skills/tree/abc123/review', 'Review')}>Install</button><span>{intent.pending?.skillName}</span></>
   }
   await act(async () => root.render(<Fixture connected={false} install={oldInstall} />))
@@ -77,4 +77,44 @@ it('retains the exact selected source across setup and resumes using the connect
   expect(oldInstall).not.toHaveBeenCalled()
   expect(newInstall).toHaveBeenCalledExactlyOnceWith('https://github.com/example/skills/tree/abc123/review', 'Review')
   expect(sessionStorage.getItem('ahm.pending-skill-install')).toBeNull()
+})
+
+it('waits for tool readiness after connection and resumes once with the latest tool callback', async () => {
+  let resolveConnection: (value: boolean) => void = () => {}
+  const request = vi.fn(() => new Promise<boolean>(resolve => { resolveConnection = resolve }))
+  const earlyInstall = vi.fn(), readyInstall = vi.fn()
+  function Fixture({ connected, ready, install }: { connected: boolean; ready: boolean; install: (url: string, name?: string) => void }) {
+    const intent = useSkillInstallIntent(connected, request, install, ready)
+    return <><button onClick={() => void intent.install('https://github.com/example/skills/tree/pinned/review', 'Review')}>Install</button><span>{intent.pending?.skillName}</span><button onClick={intent.dismiss}>Cancel</button></>
+  }
+  await act(async () => root.render(<Fixture connected={false} ready={false} install={earlyInstall} />))
+  await click('Install')
+  await act(async () => root.render(<Fixture connected ready={false} install={earlyInstall} />))
+  await act(async () => resolveConnection(true))
+  expect(earlyInstall).not.toHaveBeenCalled()
+  expect(sessionStorage.getItem('ahm.pending-skill-install')).toContain('pinned/review')
+  await act(async () => root.render(<Fixture connected ready install={readyInstall} />))
+  expect(readyInstall).toHaveBeenCalledExactlyOnceWith('https://github.com/example/skills/tree/pinned/review', 'Review')
+  expect(sessionStorage.getItem('ahm.pending-skill-install')).toBeNull()
+  await act(async () => root.render(<Fixture connected ready install={readyInstall} />))
+  expect(readyInstall).toHaveBeenCalledOnce()
+})
+
+it('cancels a confirmed selection while detecting tools and does not auto-run a restored selection', async () => {
+  const install = vi.fn()
+  function Fixture({ ready }: { ready: boolean }) {
+    const intent = useSkillInstallIntent(true, undefined, install, ready)
+    return <><button onClick={() => void intent.install('https://github.com/example/skills', 'Review')}>Install</button><button onClick={intent.dismiss}>Cancel</button><span>{intent.pending?.skillName}</span></>
+  }
+  await act(async () => root.render(<Fixture ready={false} />))
+  await click('Install')
+  await click('Cancel')
+  await act(async () => root.render(<Fixture ready />))
+  expect(install).not.toHaveBeenCalled()
+  await act(async () => root.unmount())
+  sessionStorage.setItem('ahm.pending-skill-install', JSON.stringify({ sourceUrl: 'https://github.com/example/skills', skillName: 'Restored' }))
+  root = createRoot(container)
+  await act(async () => root.render(<Fixture ready />))
+  expect(container.textContent).toContain('Restored')
+  expect(install).not.toHaveBeenCalled()
 })
