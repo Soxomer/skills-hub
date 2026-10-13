@@ -1,4 +1,4 @@
-import { LIBRARY_COMMANDS, type LibraryCommand } from '@ahm/contracts'
+import { LIBRARY_COMMANDS, isLibrarySetupSnapshot, type LibraryCommand } from '@ahm/contracts'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ControlPlaneClient } from '../api'
@@ -21,7 +21,7 @@ export function LibraryProvider({ client, deviceId, connected, children, request
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
-  const request = useCallback(async (command: LibraryCommand, args: Record<string, unknown>, expectedDigest: string | null): Promise<unknown> => {
+  const request = useCallback(async (command: LibraryCommand, args: Record<string, unknown>, expectedDigest: string | null, queued?: (jobId: string) => void): Promise<unknown> => {
     if (['get_featured_skills','search_skills_online','preview_git_skill_cmd'].includes(command)) {
       const value = await client.catalogue({ command, args, expectedDigest: null })
       if (command === 'preview_git_skill_cmd' && value && typeof value === 'object' && 'source_url' in value && typeof value.source_url === 'string' && typeof args.repoUrl === 'string') trackingSources.current.set(value.source_url, args.repoUrl)
@@ -29,6 +29,7 @@ export function LibraryProvider({ client, deviceId, connected, children, request
     }
     if (!deviceId || !connected) throw new Error(t('errors.runnerRequired'))
     const { jobId } = await client.library(deviceId, { command, args, expectedDigest })
+    queued?.(jobId)
     jobs.current.add(jobId)
     try {
       const deadline = Date.now() + 10 * 60_000
@@ -83,7 +84,18 @@ export function LibraryProvider({ client, deviceId, connected, children, request
     if (picker) dialog.current?.showModal()
     else dialog.current?.close()
   }, [picker])
-  const context = useMemo(() => ({ runnerConnected: connected, invokeLibrary, pickDirectory, requestConnection }), [connected, invokeLibrary, pickDirectory, requestConnection])
+  const previewSetupSkill = useCallback(async (skillId: string) => {
+    const value = await request('preview_setup_skill', { skillId }, null)
+    if (!isLibrarySetupSnapshot(value)) throw new Error(t('libraryTransport.invalidResult'))
+    return value
+  }, [request, t])
+  const snapshotSetupSkill = useCallback(async (skillId: string, contentDigest: string) => {
+    let jobId = ''
+    const value = await request('snapshot_setup_skill', { skillId }, contentDigest, id => { jobId = id })
+    if (!isLibrarySetupSnapshot(value) || value.contentDigest !== contentDigest) throw new Error(t('libraryTransport.invalidResult'))
+    return jobId
+  }, [request, t])
+  const context = useMemo(() => ({ client, deviceId, previewSetupSkill, snapshotSetupSkill, runnerConnected: connected, invokeLibrary, pickDirectory, requestConnection }), [client, deviceId, previewSetupSkill, snapshotSetupSkill, connected, invokeLibrary, pickDirectory, requestConnection])
   return <LibraryContext.Provider value={context}>
     {children}
     <dialog ref={dialog} className="library-dialog" aria-labelledby="library-dialog-title" onCancel={event => { event.preventDefault(); close() }}>

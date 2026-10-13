@@ -1,7 +1,8 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
 import type {
   ArtifactBundle,
+  AddLibrarySkillRequest,
   PublishSetupRevisionRequest,
   SetupDetail,
   SetupLibraryResponse,
@@ -43,6 +44,7 @@ export type PublishSetupRevisionOutcome =
   | { outcome: 'itemUnavailable' }
 
 export interface SetupRepository {
+  addLibrarySkill(record: AddLibrarySkillRecord): Promise<AddLibrarySkillOutcome>
   listComposerItems(organizationId: string): Promise<SetupComposerItem[]>
   createSetup(record: CreateSetupRecord): Promise<CreateSetupOutcome>
   listSetups(organizationId: string): Promise<SetupLibrarySummary[]>
@@ -50,6 +52,17 @@ export interface SetupRepository {
   publishRevision(record: PublishSetupRevisionRecord): Promise<PublishSetupRevisionOutcome>
   revisionArtifact(organizationId: string, setupId: string, revisionId: string, contentDigest: string): Promise<ArtifactBundle | null>
 }
+
+export interface AddLibrarySkillRecord extends AddLibrarySkillRequest {
+  organizationId: string
+  createdBy: string
+  createdAt: string
+  setupId: string
+  setupRevisionId: string
+  auditEventId: string
+  requestDigest: string
+}
+export type AddLibrarySkillOutcome = { outcome: 'created'; revision: SetupRevisionSummary } | { outcome: 'error'; code: SetupServiceErrorCode }
 
 export type SetupServiceErrorCode =
   | 'invalidSetupName'
@@ -60,6 +73,10 @@ export type SetupServiceErrorCode =
   | 'setupRevisionConflict'
   | 'invalidSetupRevision'
   | 'setupArtifactUnavailable'
+  | 'setupSnapshotUnavailable'
+  | 'setupTargetConflict'
+  | 'setupPublicationConflict'
+  | 'setupForbidden'
 
 export class SetupServiceError extends Error {
   constructor(
@@ -149,6 +166,34 @@ export class SetupService {
       if (!items.has(key)) items.set(key, item)
     }
     return { items: [...items.values()] }
+  }
+
+  async addLibrarySkill(actor: RequestActor, request: AddLibrarySkillRequest): Promise<SetupRevisionSummary> {
+    const key = (v: unknown): v is string => typeof v === 'string' && /^[a-zA-Z0-9_-]{1,200}$/.test(v)
+    if (!request || !key(request.snapshotJobId) || !/^sha256:[a-f0-9]{64}$/.test(request.contentDigest ?? '')
+      || !Array.isArray(request.targets) || request.targets.length < 1 || request.targets.length > 100
+      || request.targets.some(t => !t || !key(t.toolId) || !key(t.targetName))
+      || new Set(request.targets.map(t => `${t.toolId}\0${t.targetName}`)).size !== request.targets.length) {
+      throw new SetupServiceError(400, 'invalidSetupItems', 'Select a complete snapshot and unique supported targets')
+    }
+    const destination = request.destination
+    if (!destination || typeof destination !== 'object') throw new SetupServiceError(400, 'invalidSetupName', 'Choose a Setup')
+    let normalized: AddLibrarySkillRequest['destination']
+    if ('name' in destination && !('setupId' in destination)) {
+      const name = typeof destination.name === 'string' ? destination.name.trim() : ''
+      if (!name || name.length > 120 || name.toLowerCase().startsWith('default /')) throw new SetupServiceError(400, 'invalidSetupName', 'Choose a valid Setup name')
+      normalized = { name }
+    } else if ('setupId' in destination && !('name' in destination) && 'expectedRevisionNumber' in destination && key(destination.setupId) && Number.isSafeInteger(destination.expectedRevisionNumber) && destination.expectedRevisionNumber >= 1) {
+      normalized = { setupId: destination.setupId, expectedRevisionNumber: destination.expectedRevisionNumber }
+    } else throw new SetupServiceError(400, 'invalidSetupRevision', 'Choose a current Setup version')
+    const input = { snapshotJobId: request.snapshotJobId, contentDigest: request.contentDigest, destination: normalized,
+      targets: request.targets.map(({toolId, targetName}) => ({toolId, targetName})).sort((a,b) => `${a.toolId}\0${a.targetName}`.localeCompare(`${b.toolId}\0${b.targetName}`)) }
+    const suffix = this.randomId()
+    const result = await this.repository.addLibrarySkill({ ...input, organizationId: actor.organizationId, createdBy: actor.userId,
+      createdAt: this.now().toISOString(), setupId: 'setupId' in normalized ? normalized.setupId : `setup_${suffix}`,
+      setupRevisionId: `revision_${suffix}`, auditEventId: `audit_${suffix}`, requestDigest: createHash('sha256').update(JSON.stringify(input)).digest('hex') })
+    if (result.outcome === 'error') throw new SetupServiceError(result.code === 'setupForbidden' ? 403 : result.code === 'setupNotFound' ? 404 : 409, result.code, 'Setup publication could not finish; review the current selection')
+    return result.revision
   }
 
   async listSetups(actor: RequestActor): Promise<SetupLibraryResponse> {

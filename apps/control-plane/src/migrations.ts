@@ -11,6 +11,7 @@ export const migrationFiles = [
   '0007_custom_setup_name_uniqueness.sql',
   '0008_better_auth.sql',
   '0009_runner_skill_library.sql',
+  '0010_setup_library_publications.sql',
 ] as const
 
 export async function applyMigrations(pool: Pool): Promise<void> {

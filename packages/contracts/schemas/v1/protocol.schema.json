@@ -899,6 +899,24 @@
     "libraryRequest": {
       "oneOf": [
         {
+          "type": "object", "additionalProperties": false,
+          "required": ["command", "args", "expectedDigest"],
+          "properties": {
+            "command": { "const": "preview_setup_skill" },
+            "args": { "type": "object", "additionalProperties": false, "required": ["skillId"], "properties": { "skillId": { "type": "string", "minLength": 1, "maxLength": 200 } } },
+            "expectedDigest": { "type": "null" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["command", "args", "expectedDigest"],
+          "properties": {
+            "command": { "const": "snapshot_setup_skill" },
+            "args": { "type": "object", "additionalProperties": false, "required": ["skillId"], "properties": { "skillId": { "type": "string", "minLength": 1, "maxLength": 200 } } },
+            "expectedDigest": { "$ref": "#/$defs/digest" }
+          }
+        },
+        {
           "type": "object",
           "additionalProperties": false,
           "required": [

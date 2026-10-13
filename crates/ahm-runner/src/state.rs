@@ -125,6 +125,7 @@ pub struct ProjectInstanceRecord {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum JournalStartOutcome {
     Execute,
+    ArtifactPending { result_json: String },
     Completed { result_json: String },
     IdempotencyMismatch,
 }
@@ -241,9 +242,14 @@ impl RunnerStateStore {
         Ok(())
     }
 
-    /// An outbox belongs to the connection that produced it, not the next enrollment.
+    /// Pending uploads and results belong to the connection that produced them.
     pub fn ensure_reconnect_ready(&self) -> Result<(), RunnerStateError> {
-        if self.undelivered_outbox_count()? > 0 {
+        let pending_artifacts: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM operation_journal WHERE status = 'started' AND result_json IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        if self.undelivered_outbox_count()? > 0 || pending_artifacts > 0 {
             return Err(RunnerStateError::PendingResults);
         }
         Ok(())
@@ -392,7 +398,7 @@ impl RunnerStateStore {
         let transaction = self.connection.transaction()?;
         let existing = transaction
             .query_row(
-                "SELECT job_id, idempotency_key, request_digest, result_json
+                "SELECT job_id, idempotency_key, request_digest, result_json, status
                  FROM operation_journal
                  WHERE job_id = ?1 OR idempotency_key = ?2",
                 params![job.job_id.as_str(), job.idempotency_key.as_str()],
@@ -402,11 +408,12 @@ impl RunnerStateStore {
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
                     ))
                 },
             )
             .optional()?;
-        if let Some((job_id, idempotency_key, stored_digest, result_json)) = existing {
+        if let Some((job_id, idempotency_key, stored_digest, result_json, status)) = existing {
             if job_id != job.job_id.as_str()
                 || idempotency_key != job.idempotency_key.as_str()
                 || stored_digest != request_digest
@@ -414,6 +421,10 @@ impl RunnerStateStore {
                 return Ok(JournalStartOutcome::IdempotencyMismatch);
             }
             if let Some(result_json) = result_json {
+                if status == "started" {
+                    transaction.commit()?;
+                    return Ok(JournalStartOutcome::ArtifactPending { result_json });
+                }
                 transaction.execute(
                     "INSERT INTO result_outbox
                        (job_id, idempotency_key, lease_id, result_json, next_attempt_at)
@@ -457,6 +468,32 @@ impl RunnerStateStore {
         )?;
         transaction.commit()?;
         Ok(JournalStartOutcome::Execute)
+    }
+
+    /// Capture is durable, but success must stay out of the outbox until upload finishes.
+    pub(crate) fn checkpoint_artifact_result(
+        &self,
+        job: &JobEnvelope,
+        request_digest: &str,
+        result_json: &str,
+        result_digest: &str,
+    ) -> Result<(), RunnerStateError> {
+        let changed = self.connection.execute(
+            "UPDATE operation_journal SET result_json = ?1, result_digest = ?2
+             WHERE job_id = ?3 AND idempotency_key = ?4 AND request_digest = ?5
+               AND status = 'started' AND result_json IS NULL",
+            params![
+                result_json,
+                result_digest,
+                job.job_id.as_str(),
+                job.idempotency_key.as_str(),
+                request_digest
+            ],
+        )?;
+        if changed != 1 {
+            return Err(rusqlite::Error::QueryReturnedNoRows.into());
+        }
+        Ok(())
     }
 
     pub fn finish_job(

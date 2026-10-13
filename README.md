@@ -65,6 +65,8 @@ Optional GitHub credentials stay on the runner: use `ahm skill github-token` and
 
 See [the restoration and verification record](docs/SKILLS-HUB-WEB-RESTORATION.md) for the restored baseline and runtime boundaries.
 
+Managed skills can be saved to an existing or new Setup with helper/CLI 0.10.0 or later. [Add a managed skill to a Setup](docs/LIBRARY-TO-SETUP.md) covers file review, sharing consent, immutable versions, and the separate project Apply step.
+
 For an unattended workstation, run `ahm worker` with the operating system's normal user-service manager. Restart it on failure and after login; do not run it as an elevated or system-wide service unless the managed projects require that ownership.
 
 For isolated acceptance testing, use explicit `--db` and `--runner-state` paths and `ahm worker --home <fixture-home>`. The home override controls discovery and the artifact cache; it does not change the process home or relocate registered project paths. Omit it for normal use.

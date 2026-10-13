@@ -58,3 +58,4 @@ mod tests {
         );
     }
 }
+mod library_snapshot;

@@ -1,0 +1,6 @@
+{
+  "protocolVersion": "1.0", "jobId": "job_preview", "idempotencyKey": "library-job_preview",
+  "organizationId": "org_01", "deviceId": "device_01", "projectInstanceId": null,
+  "issuedAt": "2026-10-11T10:00:00Z", "expiresAt": "2026-10-11T10:10:00Z",
+  "job": { "kind": "libraryAction", "payload": { "command": "preview_setup_skill", "args": { "skillId": "skill_pdf" }, "expectedDigest": null } }
+}

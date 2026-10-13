@@ -1,5 +1,7 @@
 import type { ArtifactBundle, DiscoveryKind, SetupComposerItem, SetupDetail, SetupLibrarySummary, SetupRevisionDetail } from '@ahm/contracts'
 import type { Pool, PoolClient, QueryResultRow } from 'pg'
+import { addLibrarySkill } from './library-setups-pg.js'
+import type { AddLibrarySkillRecord, AddLibrarySkillOutcome } from './setups.js'
 
 import type {
   CreateSetupOutcome,
@@ -92,6 +94,8 @@ const COMPOSER_ITEMS = `
 
 export class PostgresSetupRepository implements SetupRepository {
   constructor(private readonly pool: Pool) {}
+
+  addLibrarySkill(record: AddLibrarySkillRecord): Promise<AddLibrarySkillOutcome> { return addLibrarySkill(this.pool, record) }
 
   async listSetups(organizationId: string): Promise<SetupLibrarySummary[]> {
     const [revisions, usage, itemCounts] = await Promise.all([

@@ -684,7 +684,22 @@ const originalResources = {
 
 export const resources = {
   en: {
-    hub: { ...originalResources.en.translation, loading: "Loading…", runnerWorkspace: "Projects & runner", libraryTransport: {
+    hub: { ...originalResources.en.translation, addToSetup: {
+      action: 'Add to Setup', title: 'Add {{name}} to a Setup', description: 'Save an exact copy of this skill. This does not install it or change a project.',
+      loading: 'Reviewing skill files on your computer…', destination: 'Destination Setup', existing: 'Existing Setup', new: 'New Setup', choose: 'Choose a Setup', name: 'Setup name', version: 'Version {{number}}',
+      create: 'Create Setup', createHelp: 'Created only when you confirm below.', noSetups: 'No saved Setups yet. Choose New Setup to create one.', digest: 'Snapshot digest',
+      targetName: 'Skill folder name', targetHelp: 'Use letters, numbers, hyphens or underscores. Targets are project-scoped; nothing is synchronized now.', tools: 'Tool targets',
+      loadingDestination: 'Loading the current Setup version…', keepItems: 'Keep all {{count}} existing items and add this skill to a new version.',
+      files: '{{count}} files to share', bytes: '{{count}} bytes', consent: 'Share these files with my hosted workspace and save them in this Setup.',
+      immutable: 'Future library updates will not change this saved content. Applying it to a project requires a separate reviewed plan.',
+      publishing: 'Publishing the reviewed snapshot…', saved: 'Setup version saved', savedVersion: '{{name}} · Version {{number}}',
+      savedHelp: 'Find this version under Projects & runner → Setups. No project assignment or local synchronization changed.', done: 'Done', reviewAgain: 'Review again',
+      runnerRequired: 'Connect the original computer to review and save this skill.', previewFailed: 'Could not review this skill. Check the runner connection, then review again. An older runner may need an update.',
+      destinationFailed: 'Could not load this Setup. Review again before publishing.', publishFailed: 'Publication did not finish. The skill may have changed since review. Review again, or retry if only the connection failed.',
+      setupNameTaken: 'A Setup with this name already exists. Choose it above or use another name.', setupRevisionConflict: 'A newer Setup version exists. Review again before adding this skill.',
+      setupTargetConflict: 'This tool and folder name already exist in the Setup. Choose another folder name or destination; existing items will not be overwritten.',
+      setupPublicationConflict: 'This snapshot was already published with a different selection. Review again to start a new publication.', setupSnapshotUnavailable: 'The reviewed snapshot is unavailable or unsupported. Review again with an updated runner.'
+    }, loading: "Loading…", runnerWorkspace: "Projects & runner", libraryTransport: {
     cancelling: "Cancelling — waiting for the runner to finish safely…",
     locations: "Runner locations",
   localCredentials: "GitHub credentials are stored only on your computer. Configure them in the runner terminal with:", invalidResult: "The runner returned an unexpected result.", incomplete: "The operation did not complete.", timeout: "The runner has not completed this operation. Check its status before retrying.", invalidCommand: "This action is not supported.", chooseFolder: "Choose a folder", review: "Review changes", confirmAction: "Confirm this action on your runner: {{action}}", apply: "Apply changes", onRunner: "Folders on your connected computer", parentFolder: "Parent folder", useFolder: "Use this folder", connect: "Connect runner", back: "Back to Skills Hub"

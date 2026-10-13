@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "ahm-domain"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "ahm-helper"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -45,7 +45,7 @@ dependencies = [
 
 [[package]]
 name = "ahm-runner"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "ahm-domain",
  "anyhow",
