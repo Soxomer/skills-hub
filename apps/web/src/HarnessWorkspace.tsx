@@ -67,7 +67,7 @@ export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connect
       </header>
 
       <main id="main-content" className="workspace" data-page={page}>
-        {page === 'skills' ? <SkillLibrary key={connection.runner?.deviceId ?? 'unconnected'} runner={connection.runner} online={displayState === 'connected'} error={Boolean(connection.error)} onRefresh={connection.refresh} onProjects={() => setPage('projects')} /> : page === 'setups' ? <SetupLibrary client={client} onProjects={() => setPage('projects')} /> : <>
+        {page === 'skills' ? <SkillLibrary key={connection.runner?.deviceId ?? 'unconnected'} runner={connection.runner} online={displayState === 'connected'} error={Boolean(connection.error)} onRefresh={connection.refresh} onProjects={() => setPage('projects')} /> : page === 'setups' ? <SetupLibrary client={client} onProjects={() => setPage('projects')} runner={connection.runner} runnerOnline={displayState === 'connected'} /> : <>
         <div className="page-heading">
           <div>
             <p className="eyebrow">{t('brand.eyebrow')}</p>

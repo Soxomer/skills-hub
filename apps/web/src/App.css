@@ -8938,3 +8938,6 @@ a {
 .add-to-setup-dialog summary { cursor: pointer; }
 .add-to-setup-dialog :focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
 @media (max-width: 480px) { .add-to-setup-dialog .add-to-setup-tools { flex-direction: column; } }
+.harness-workspace .use-setup-form { display: grid; gap: 16px; max-width: 640px; margin: 24px 0; }
+.harness-workspace .use-setup-form select { width: 100%; min-width: 0; }
+.harness-workspace .use-setup-destination { overflow-wrap: anywhere; margin: 20px 0; }

@@ -1,11 +1,12 @@
-import type { ArtifactBundle, SetupComposerItem, SetupDetail, SetupLibrarySummary, SetupRevisionDetail } from '@ahm/contracts'
+import type { ArtifactBundle, RunnerStatusResponse, SetupComposerItem, SetupDetail, SetupLibrarySummary, SetupRevisionDetail } from '@ahm/contracts'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ControlPlaneApiError, type ControlPlaneClient } from '../api'
+import { UseSetupOnProject } from './UseSetupOnProject'
 
-interface SetupLibraryProps { client: ControlPlaneClient; onProjects: () => void }
+interface SetupLibraryProps { client: ControlPlaneClient; onProjects: () => void; runner?: RunnerStatusResponse | null; runnerOnline?: boolean }
 
-export function SetupLibrary({ client, onProjects }: SetupLibraryProps) {
+export function SetupLibrary({ client, onProjects, runner = null, runnerOnline = false }: SetupLibraryProps) {
   const { t } = useTranslation()
   const [setups, setSetups] = useState<SetupLibrarySummary[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -22,7 +23,7 @@ export function SetupLibrary({ client, onProjects }: SetupLibraryProps) {
   function saved(setupId: string) { setCreating(false); setSelected(setupId); setReload((n) => n + 1) }
   if (creating) return <SetupEditor client={client} onCancel={() => setCreating(false)} onSaved={saved} />
   if (selected) return <SetupDetails key={selected} client={client} setupId={selected}
-    onBack={() => { setSelected(null); setReload((n) => n + 1) }} onSaved={saved} />
+    onBack={() => { setSelected(null); setReload((n) => n + 1) }} onSaved={saved} runner={runner} runnerOnline={runnerOnline} onProjects={onProjects} />
   return <>
     <div className="page-heading">
       <div><h1>{t('library.setups')}</h1><p>{t('library.description')}</p></div>
@@ -46,13 +47,13 @@ export function SetupLibrary({ client, onProjects }: SetupLibraryProps) {
   </>
 }
 
-interface SetupDetailsProps { client: ControlPlaneClient; setupId: string; onBack: () => void; onSaved: (id: string) => void }
+interface SetupDetailsProps { client: ControlPlaneClient; setupId: string; onBack: () => void; onSaved: (id: string) => void; runner: RunnerStatusResponse | null; runnerOnline: boolean; onProjects: () => void }
 
-function SetupDetails({ client, setupId, onBack, onSaved }: SetupDetailsProps) {
+function SetupDetails({ client, setupId, onBack, onSaved, runner, runnerOnline, onProjects }: SetupDetailsProps) {
   const { t } = useTranslation()
   const [detail, setDetail] = useState<SetupDetail | null>(null)
   const [revisionId, setRevisionId] = useState<string | null>(null)
-  const [mode, setMode] = useState<'edit' | 'clone' | null>(null)
+  const [mode, setMode] = useState<'edit' | 'clone' | 'use' | null>(null)
   const [error, setError] = useState(false)
   const [reload, setReload] = useState(0)
   useEffect(() => {
@@ -63,7 +64,10 @@ function SetupDetails({ client, setupId, onBack, onSaved }: SetupDetailsProps) {
   }, [client, setupId, reload])
   const revisions = detail?.revisions.toSorted((a, b) => b.revisionNumber - a.revisionNumber) ?? []
   const revision = revisions.find((entry) => entry.setupRevisionId === revisionId) ?? revisions[0]
-  if (mode && detail && revision) return <SetupEditor key={`${mode}-${revision.setupRevisionId}`} client={client}
+  if (mode === 'use' && detail && revision) return <UseSetupOnProject client={client} revision={revision}
+    defaultProjectId={detail.defaultProjectId} runner={runner} runnerOnline={runnerOnline}
+    onBack={() => setMode(null)} onProjects={onProjects} />
+  if (mode && mode !== 'use' && detail && revision) return <SetupEditor key={`${mode}-${revision.setupRevisionId}`} client={client}
     base={revision} detail={mode === 'edit' ? detail : undefined} onCancel={() => { setMode(null); setDetail(null); setReload((n) => n + 1) }}
     onSaved={(id) => { setMode(null); setDetail(null); setRevisionId(null); setReload((n) => n + 1); onSaved(id) }} />
   const previous = revisions.find((entry) => entry.revisionNumber === (revision?.revisionNumber ?? 0) - 1)
@@ -75,7 +79,8 @@ function SetupDetails({ client, setupId, onBack, onSaved }: SetupDetailsProps) {
     {detail && revision && <>
       <div className="page-heading"><div><h1>{detail.name}</h1><p>{t('library.publishSafety')}</p></div>
         <div className="library-actions"><button type="button" className="secondary-button" onClick={() => setMode('clone')}>{t('library.clone')}</button>
-          <button type="button" className="primary-button" onClick={() => setMode('edit')}>{t('library.edit')}</button></div></div>
+          <button type="button" className="secondary-button" onClick={() => setMode('edit')}>{t('library.edit')}</button>
+          <button type="button" className="primary-button" onClick={() => setMode('use')}>{t('useSetup.action')}</button></div></div>
       <label className="library-field">{t('library.history')}<select value={revision.setupRevisionId} onChange={(event) => setRevisionId(event.target.value)}>
         {revisions.map((entry) => <option key={entry.setupRevisionId} value={entry.setupRevisionId}>{t('library.version', { number: entry.revisionNumber })}{entry.setupRevisionId === detail.initialSetupRevisionId && detail.kind === 'default' ? ` — ${t('library.initialDefault')}` : ''}</option>)}
       </select></label>

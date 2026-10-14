@@ -14,6 +14,14 @@
 
 Future library changes do not change the saved snapshot. Changing the destination mode, new Setup name, selected Setup, folder name, or tool selection clears sharing consent. Publication errors retain the draft; a failed publication response can be retried with the completed snapshot job. **Review again** refreshes the source review and destination's latest revision, retains the destination mode and selected Setup while it remains available, and requires consent again. The name, folder name, and tool selections remain in the draft. A changed skill, newer destination revision, or unavailable snapshot requires a fresh review.
 
+## Use a saved Setup on a project
+
+Open **Projects & runner → Setups**, inspect the exact version you want, and choose **Use this Setup**. Select a project and a specific checkout on the connected computer, then choose **Continue to review**. This only opens the existing review workflow; it does not request a plan, assign a version, or change files.
+
+Choose **Prepare plan**, inspect the proposed changes, then explicitly approve and Apply. The selected version stays exact, including historical versions. A project's Default is available only to its original project; clone it for reuse elsewhere. Existing operations are respected, and stale plans require a fresh explicit Prepare action. **Back to this Setup** retains the selected version.
+
+The computer must be connected, its checkout registered, and the project's starting Default captured. Missing prerequisites link to Projects; select the intended project there before completing its onboarding. Offline saved-Setup inspection remains available. Replacing the connected computer or removing the selected checkout invalidates the destination and requires a fresh choice. This feature does not add graphical checkout registration, automatic rollout, or automatic Apply.
+
 ## Implementation boundaries
 
 - `preview_setup_skill` returns portable metadata only. `snapshot_setup_skill` requires the reviewed `expectedDigest`; the runner reads bounded bytes once per capture and hashes those same bytes for the artifact. A source digest that changed after preview is rejected before upload.

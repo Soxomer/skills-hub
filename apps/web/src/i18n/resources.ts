@@ -755,6 +755,20 @@ export const resources = {
         previewUnavailable: 'Preview is available for UTF-8 text files up to 256 KB. This file cannot be displayed.',
         noFiles: 'This captured artifact contains no files.',
       },
+      useSetup: {
+        action: 'Use this Setup', title: 'Use a Setup on a project', back: 'Back to this Setup',
+        version: '{{name}} · Version {{number}}', safety: 'Choose where to use this exact version. Continue opens the review workflow; it does not plan, assign, or apply changes.',
+        project: 'Project', chooseProject: 'Choose a project', checkout: 'Connected checkout', chooseCheckout: 'Choose a checkout',
+        continue: 'Continue to review', changeDestination: 'Choose another destination', goProjects: 'Open Projects & connection',
+        loading: 'Loading your projects…', loadError: 'Projects could not be loaded. Retry to choose a destination.', empty: 'No eligible projects yet. Open Projects to create or connect one.',
+        defaultOnly: 'A project Default can only be used on its original project. Clone it to create a reusable Setup for other projects.',
+        connect: 'Connect the computer that owns the project checkout before continuing.', offline: '{{name}} is offline. Reconnect it before preparing or applying changes.',
+        revoked: '{{name}} is disconnected. Open Projects to connect a computer again.',
+        noDefault: 'Open Projects, select this project, and capture its starting Default before using another Setup.',
+        noCheckout: 'This project has no checkout on the connected computer. Open Projects for checkout connection instructions.',
+        destination: '{{project}} · {{runner}} · Checkout {{checkout}}',
+        destinationChanged: 'This computer or checkout is no longer the selected destination. Choose a destination again; no new work will be started.',
+      },
       brand: {
         name: 'Agent Harness Manager',
         eyebrow: 'Local runner',
@@ -908,6 +922,10 @@ export const resources = {
         },
       },
       switchFlow: {
+        requested: {
+          unavailable: 'This exact Setup version is not available for this project. Return to the Setup and choose an eligible project.',
+          waiting: 'Another operation is running on this checkout. Your selected Setup version is kept; review it after that operation finishes.',
+        },
         title: 'Choose and apply a Setup',
         description:
           'Prepare missing files, review the exact local change, then approve and apply it immediately.',

@@ -38,6 +38,7 @@ interface ProjectSwitchWorkspaceProps {
   projectId: string
   projectInstanceId: string
   runnerOnline: boolean
+  requestedRevisionId?: string
 }
 
 const inFlightJobStates = ['pending', 'leased', 'acknowledged'] as const
@@ -63,9 +64,10 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
   projectId,
   projectInstanceId,
   runnerOnline,
+  requestedRevisionId,
 }: ProjectSwitchWorkspaceProps) {
   const { t } = useTranslation()
-  const workflow = useSetupSwitch(client, projectId, projectInstanceId)
+  const workflow = useSetupSwitch(client, projectId, projectInstanceId, requestedRevisionId)
   const trackedActiveKind =
     workflow.activeJob?.kind ?? activeKindFromOperation(workflow.operations?.activeOperation)
   const trackedState =
@@ -117,6 +119,9 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
           </div>
         </div>
       )}
+
+      {workflow.requestedRevisionUnavailable && <p className="notice notice--error" role="alert">{t('switchFlow.requested.unavailable')}</p>}
+      {requestedRevisionId && operationInProgress && <p className="notice notice--warning" role="status">{t('switchFlow.requested.waiting')}</p>}
 
       {workflow.error && (
         <div className="notice notice--error switch-notice" role="alert">
@@ -273,7 +278,7 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
             </div>
           )}
 
-          <SetupPicker
+          {!requestedRevisionId && <><SetupPicker
             state={workflow.state}
             selectedRevisionId={workflow.selectedRevisionId}
             disabled={isWorking || workflow.operations?.health === 'attention'}
@@ -287,7 +292,7 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
               await workflow.refreshState()
               workflow.selectRevision(setupRevisionId)
             }}
-          />
+          /></>}
 
           <div className="setup-actions">
             <div>
@@ -302,7 +307,7 @@ export const ProjectSwitchWorkspace = memo(function ProjectSwitchWorkspace({
               </p>
             </div>
             <div className="setup-action-buttons">
-              {workflow.state?.defaultSetupRevisionId &&
+              {!requestedRevisionId && workflow.state?.defaultSetupRevisionId &&
                 workflow.state.defaultSetupRevisionId !== workflow.selectedRevisionId && (
                   <button
                     className="secondary-button"

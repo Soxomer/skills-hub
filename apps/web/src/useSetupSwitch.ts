@@ -62,8 +62,9 @@ export function useSetupSwitch(
   client: ControlPlaneClient,
   projectId: string,
   projectInstanceId: string,
+  requestedRevisionId?: string,
 ) {
-  const contextKey = `${projectId}:${projectInstanceId}`
+  const contextKey = JSON.stringify([projectId, projectInstanceId, requestedRevisionId ?? null])
   const contextKeyRef = useRef(contextKey)
   contextKeyRef.current = contextKey
   const [loadedContextKey, setLoadedContextKey] = useState(contextKey)
@@ -98,17 +99,18 @@ export function useSetupSwitch(
     const serverJob = mapActiveOperation(next.activeOperation)
     if (serverJob) {
       setActiveJob((current) => (current?.jobId === serverJob.jobId ? current : serverJob))
-      if (serverJob.setupRevisionId) setSelectedRevisionId(serverJob.setupRevisionId)
+      if (!requestedRevisionId && serverJob.setupRevisionId) setSelectedRevisionId(serverJob.setupRevisionId)
       return
     }
     if (
       next.reviewedPlan &&
+      (!requestedRevisionId || next.reviewedPlan.plan.setupRevisionId === requestedRevisionId) &&
       next.reviewedPlan.jobId !== dismissedReviewedPlanJobId.current
     ) {
       setPlan(next.reviewedPlan.plan)
       setPlanJobId(next.reviewedPlan.jobId)
       if (adoptedReviewedPlanJobId.current !== next.reviewedPlan.jobId) {
-        setSelectedRevisionId(next.reviewedPlan.plan.setupRevisionId)
+        if (!requestedRevisionId) setSelectedRevisionId(next.reviewedPlan.plan.setupRevisionId)
         adoptedReviewedPlanJobId.current = next.reviewedPlan.jobId
       }
     } else {
@@ -116,7 +118,7 @@ export function useSetupSwitch(
       setPlanJobId(null)
       if (!next.reviewedPlan) adoptedReviewedPlanJobId.current = null
     }
-  }, [])
+  }, [requestedRevisionId])
 
   const adoptOperationConflict = useCallback((nextError: unknown): boolean => {
     if (!(nextError instanceof ControlPlaneApiError) || !nextError.activeOperation) return false
@@ -127,10 +129,10 @@ export function useSetupSwitch(
       current ? { ...current, activeOperation: nextError.activeOperation } : current,
     )
     setActiveJob(serverJob)
-    if (serverJob?.setupRevisionId) setSelectedRevisionId(serverJob.setupRevisionId)
+    if (!requestedRevisionId && serverJob?.setupRevisionId) setSelectedRevisionId(serverJob.setupRevisionId)
     setError(null)
     return true
-  }, [])
+  }, [requestedRevisionId])
 
   const refreshState = useCallback(async () => {
     if (!projectId || !projectInstanceId) return
@@ -146,7 +148,9 @@ export function useSetupSwitch(
       setState(next)
       if (operationsRequestSequence.current === requestSequence) adoptOperations(nextOperations)
       setSelectedRevisionId((current) =>
-        current && next.revisions.some((revision) => revision.setupRevisionId === current)
+        requestedRevisionId
+          ? (next.revisions.some((revision) => revision.setupRevisionId === requestedRevisionId) ? requestedRevisionId : '')
+          : current && next.revisions.some((revision) => revision.setupRevisionId === current)
           ? current
           : (next.assignedSetupRevisionId ?? next.defaultSetupRevisionId ?? next.revisions[0]?.setupRevisionId ?? ''),
       )
@@ -158,9 +162,10 @@ export function useSetupSwitch(
     } finally {
       if (contextKeyRef.current === requestContext) setLoading(false)
     }
-  }, [adoptOperations, client, contextKey, projectId, projectInstanceId])
+  }, [adoptOperations, client, contextKey, projectId, projectInstanceId, requestedRevisionId])
 
   useEffect(() => {
+    contextKeyRef.current = contextKey
     setLoadedContextKey(contextKey)
     setState(null)
     setOperations(null)
@@ -184,7 +189,11 @@ export function useSetupSwitch(
     adoptedReviewedPlanJobId.current = null
     dismissedReviewedPlanJobId.current = null
     void refreshState()
-  }, [contextKey, refreshState])
+    return () => {
+      // A keyed handoff may unmount while an old job response is still pending.
+      if (requestedRevisionId && contextKeyRef.current === contextKey) contextKeyRef.current = ''
+    }
+  }, [contextKey, refreshState, requestedRevisionId])
 
   const refreshOperations = useCallback(async () => {
     if (!projectInstanceId) return
@@ -238,26 +247,27 @@ export function useSetupSwitch(
       const nextSafeCancellation = cancelledWithoutMutation(status)
       const nextReceipt = applyReceipt(status)
       const nextRestored = rollbackReceipt(status)
-      if (nextPlan) {
+      const requestedJob = !requestedRevisionId || trackedJob.setupRevisionId === requestedRevisionId
+      if (nextPlan && (!requestedRevisionId || nextPlan.setupRevisionId === requestedRevisionId)) {
         setPlan(nextPlan)
         setPlanJobId(trackedJob.jobId)
       }
-      if (nextReceipt) {
+      if (nextReceipt && (!requestedRevisionId || nextReceipt.setupRevisionId === requestedRevisionId)) {
         setCancelledSafely(false)
         setCancellation(null)
         setReceipt(nextReceipt)
         setRestored(null)
-      } else if (nextRestored) {
+      } else if (nextRestored && !requestedRevisionId) {
         setCancelledSafely(false)
         setCancellation(null)
         setReceipt(null)
         setRestored(nextRestored)
-      } else if (nextCancellation) {
+      } else if (nextCancellation && requestedJob) {
         setCancelledSafely(false)
         setCancellation(nextCancellation)
         setReceipt(null)
         setRestored(null)
-      } else if (nextSafeCancellation) {
+      } else if (nextSafeCancellation && requestedJob) {
         setCancellation(null)
         setCancelledSafely(true)
         setReceipt(null)
@@ -275,6 +285,7 @@ export function useSetupSwitch(
       }
       if (
         trackedJob.kind === 'apply' &&
+        !requestedRevisionId &&
         status.state === 'failed' &&
         status.result?.result.kind === 'error' &&
         status.result.result.payload.code === 'planDigestMismatch' &&
@@ -328,6 +339,7 @@ export function useSetupSwitch(
     operations?.activeOperation,
     projectInstanceId,
     refreshState,
+    requestedRevisionId,
   ])
 
   useEffect(() => {
@@ -353,6 +365,7 @@ export function useSetupSwitch(
 
   const selectRevision = useCallback((revisionId: string) => {
     if (!contextReady) return
+    if (requestedRevisionId) return
     dismissedReviewedPlanJobId.current = planJobIdRef.current
     setSelectedRevisionId(revisionId)
     setActiveJob(null)
@@ -366,10 +379,13 @@ export function useSetupSwitch(
     setPlanWasStale(false)
     setCancelledSafely(false)
     setError(null)
-  }, [contextReady])
+  }, [contextReady, requestedRevisionId])
 
   const preparePlan = useCallback(async (revisionId = selectedRevisionId) => {
     if (!contextReady || !revisionId || !projectInstanceId) return false
+    if (requestedRevisionId && (loading || !state || !operations || revisionId !== requestedRevisionId
+      || !state.revisions.some(revision => revision.setupRevisionId === requestedRevisionId)
+      || activeJob || operations.activeOperation)) return false
     setSubmitting(true)
     setError(null)
     try {
@@ -402,10 +418,12 @@ export function useSetupSwitch(
     } finally {
       if (contextKeyRef.current === contextKey) setSubmitting(false)
     }
-  }, [adoptOperationConflict, client, contextKey, contextReady, projectInstanceId, selectedRevisionId])
+  }, [activeJob, adoptOperationConflict, client, contextKey, contextReady, loading, operations, projectInstanceId, requestedRevisionId, selectedRevisionId, state])
 
   const applyPlan = useCallback(async () => {
     if (!contextReady || !plan || !planJobId) return false
+    if (requestedRevisionId && (loading || plan.setupRevisionId !== requestedRevisionId
+      || selectedRevisionId !== requestedRevisionId || submitting || activeJob || operations?.activeOperation)) return false
     setSubmitting(true)
     setError(null)
     try {
@@ -440,10 +458,15 @@ export function useSetupSwitch(
         return false
       }
       if (nextError instanceof ControlPlaneApiError && nextError.code === 'planDigestMismatch') {
-        setPlanWasStale(true)
+        if (requestedRevisionId) dismissedReviewedPlanJobId.current = planJobId
+        setPlanWasStale(!requestedRevisionId)
         setPlan(null)
         setPlanJobId(null)
         setSubmitting(false)
+        if (requestedRevisionId) {
+          setError(workflowError('apply', nextError))
+          return false
+        }
         return preparePlan(plan.setupRevisionId)
       }
       setError(workflowError('apply', nextError))
@@ -452,15 +475,21 @@ export function useSetupSwitch(
       if (contextKeyRef.current === contextKey) setSubmitting(false)
     }
   }, [
+    activeJob,
     adoptOperationConflict,
     client,
     contextKey,
     contextReady,
     plan,
     planJobId,
+    loading,
+    operations,
     preparePlan,
     projectInstanceId,
     refreshState,
+    requestedRevisionId,
+    selectedRevisionId,
+    submitting,
   ])
 
   const rollbackOperationId = contextReady ? recoverableOperationId(operations) : null
@@ -529,9 +558,9 @@ export function useSetupSwitch(
   }, [activeJob, client, contextKey, contextReady, operations?.activeOperation])
 
   const retryRecovery = useCallback(() => {
-    const revisionId = state?.assignedSetupRevisionId ?? selectedRevisionId
+    const revisionId = requestedRevisionId ?? state?.assignedSetupRevisionId ?? selectedRevisionId
     return preparePlan(revisionId)
-  }, [preparePlan, selectedRevisionId, state?.assignedSetupRevisionId])
+  }, [preparePlan, requestedRevisionId, selectedRevisionId, state?.assignedSetupRevisionId])
 
   return {
     state: contextReady ? state : null,
@@ -554,6 +583,8 @@ export function useSetupSwitch(
     loading: !contextReady || loading,
     submitting: contextReady && submitting,
     error: contextReady ? error : null,
+    requestedRevisionUnavailable: Boolean(requestedRevisionId && contextReady && !loading && state && operations
+      && !state.revisions.some(revision => revision.setupRevisionId === requestedRevisionId)),
     refreshState,
     refreshJob,
     selectRevision,
