@@ -34,6 +34,15 @@ impl RunnerExecutionService {
         &self.local_admin
     }
 
+    pub fn evaluate(
+        &self,
+        home: &Path,
+        request: &ahm_domain::EvaluateSetupsJob,
+        should_cancel: &mut dyn FnMut() -> Result<bool>,
+    ) -> ahm_domain::EvaluationResult {
+        crate::evaluation::execute(home, request, should_cancel)
+    }
+
     pub fn library(
         &self,
         home: &Path,

@@ -52,6 +52,21 @@ describe('protocol v1 golden fixtures', () => {
     expect(validate(fixture)).toBe(false)
   })
 
+  it('rejects evaluation execution expansion and native activation claims', () => {
+    const job = loadFixture('job-evaluation.json') as { job: { payload: { profile: { timeoutSeconds: number; sandbox: string }; repetitions: number } } }
+    job.job.payload.profile.sandbox = 'danger-full-access'
+    expect(validate(job)).toBe(false)
+    job.job.payload.profile.sandbox = 'read-only'
+    job.job.payload.repetitions = 2
+    expect(validate(job)).toBe(false)
+    job.job.payload.repetitions = 1
+    job.job.payload.profile.timeoutSeconds = 121
+    expect(validate(job)).toBe(false)
+    const result = loadFixture('result-evaluation.json') as { result: { payload: { observed: { nativeSkillActivation: boolean } } } }
+    result.result.payload.observed.nativeSkillActivation = true
+    expect(validate(result)).toBe(false)
+  })
+
   it('preserves ownership-only plan actions', () => {
     const fixture = loadFixture('result-plan.json') as ResultEnvelope
     if (fixture.result.kind !== 'planResult') throw new Error('expected plan fixture')

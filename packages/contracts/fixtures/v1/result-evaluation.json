@@ -1,0 +1,35 @@
+{
+  "protocolVersion": "1.0",
+  "jobId": "evaluation_01",
+  "idempotencyKey": "evaluation_request_01",
+  "organizationId": "org_01",
+  "deviceId": "device_01",
+  "projectInstanceId": null,
+  "result": {
+    "kind": "evaluationResult",
+    "payload": {
+      "suiteId": "code-review-v1",
+      "profile": {
+        "harness": "codex", "profileVersion": 1, "model": "fixture-model",
+        "reasoningEffort": "medium", "sandbox": "read-only", "timeoutSeconds": 120,
+        "contextMode": "skillInstructions"
+      },
+      "observed": {
+        "harnessVersion": "codex-cli fixture", "model": null,
+        "contextMode": "skillInstructions", "nativeSkillActivation": false,
+        "inheritedInstructionsDigest": null, "ambientContextVerified": false
+      },
+      "baseline": {
+        "setupRevisionId": "revision_01", "status": "completed", "durationMs": 1500,
+        "checks": [{"id": "fixture-check", "label": "Fixture expectation", "passed": false}],
+        "summary": "One fixture check failed.", "error": null
+      },
+      "candidate": {
+        "setupRevisionId": "revision_02", "status": "completed", "durationMs": 1700,
+        "checks": [{"id": "fixture-check", "label": "Fixture expectation", "passed": true}],
+        "summary": "One fixture check passed.", "error": null
+      },
+      "completedAt": "2026-10-15T08:11:00Z"
+    }
+  }
+}

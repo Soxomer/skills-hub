@@ -57,6 +57,7 @@ dependencies = [
  "git2",
  "hex",
  "junction",
+ "libc",
  "log",
  "mockito",
  "reqwest 0.12.28",
@@ -68,6 +69,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "walkdir",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

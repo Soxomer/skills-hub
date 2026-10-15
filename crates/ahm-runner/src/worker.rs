@@ -129,6 +129,33 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
             },
         )?;
         match start {
+            JournalStartOutcome::InterruptedEvaluation => {
+                let RunnerJob::EvaluateSetups(request) = &lease.job.job else {
+                    unreachable!(
+                        "only evaluation jobs can have an interrupted evaluation checkpoint"
+                    );
+                };
+                let result = ResultEnvelope {
+                    protocol_version: PROTOCOL_VERSION,
+                    job_id: lease.job.job_id.clone(), idempotency_key: lease.job.idempotency_key.clone(),
+                    organization_id: lease.job.organization_id.clone(), device_id: lease.job.device_id.clone(),
+                    project_instance_id: lease.job.project_instance_id.clone(),
+                    result: RunnerResult::EvaluationResult(Box::new(crate::evaluation::incomplete(request,
+                        ahm_domain::EvaluationVariantStatus::Interrupted,
+                        "The previous attempt was interrupted. It was not restarted automatically; start a new comparison explicitly."))),
+                };
+                let json = serde_json::to_string(&result)?;
+                self.state.finish_job(
+                    &lease.job,
+                    &lease.lease_id,
+                    &json,
+                    &sha256(&json),
+                    true,
+                    &utc_now(),
+                )?;
+                self.flush_outbox(&identity)?;
+                Ok(WorkerOutcome::Replayed)
+            }
             JournalStartOutcome::Completed { .. } => {
                 self.flush_outbox(&identity)?;
                 Ok(WorkerOutcome::Replayed)
@@ -317,18 +344,16 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
         identity: &crate::state::RunnerIdentityRecord,
         lease: &ahm_domain::LeasedRunnerJob,
     ) -> Result<bool> {
-        let revision = match &lease.job.job {
-            RunnerJob::PlanSetup(job) => Some(&job.revision),
-            RunnerJob::ApplyPlan(job) => Some(&job.revision),
+        let revisions = match &lease.job.job {
+            RunnerJob::EvaluateSetups(job) => vec![&job.baseline, &job.candidate],
+            RunnerJob::PlanSetup(job) => vec![&job.revision],
+            RunnerJob::ApplyPlan(job) => vec![&job.revision],
             RunnerJob::LibraryAction(_)
             | RunnerJob::ScanProject(_)
-            | RunnerJob::RollbackOperation(_) => None,
-        };
-        let Some(revision) = revision else {
-            return Ok(true);
+            | RunnerJob::RollbackOperation(_) => vec![],
         };
         let mut seen = std::collections::HashSet::new();
-        for item in &revision.items {
+        for item in revisions.iter().flat_map(|revision| &revision.items) {
             if !seen.insert(item.content_digest.as_str().to_owned())
                 || self
                     .executor
@@ -569,6 +594,7 @@ mod tests {
     impl JobExecutor for FakeExecutor {
         fn capabilities(&self) -> RunnerCapabilities {
             RunnerCapabilities {
+                evaluate_setups: true,
                 scan_project: true,
                 plan_setup: false,
                 apply_plan: false,

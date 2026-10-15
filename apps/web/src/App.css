@@ -8941,3 +8941,9 @@ a {
 .harness-workspace .use-setup-form { display: grid; gap: 16px; max-width: 640px; margin: 24px 0; }
 .harness-workspace .use-setup-form select { width: 100%; min-width: 0; }
 .harness-workspace .use-setup-destination { overflow-wrap: anywhere; margin: 20px 0; }
+.evaluation-form { display: grid; gap: 12px; max-width: 680px; }
+.evaluation-form select, .evaluation-form input:not([type="checkbox"]) { width: 100%; min-width: 0; }
+.evaluation-form > .primary-button { justify-self: start; }
+.evaluation-run { padding: 16px 0; border-top: 1px solid var(--border-subtle); overflow-wrap: anywhere; }
+.evaluation-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 24px; }
+.evaluation-fixture { max-width: 100%; overflow-x: auto; }

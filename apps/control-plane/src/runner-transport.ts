@@ -151,6 +151,7 @@ export class RunnerTransportError extends Error {
   constructor(
     readonly statusCode: number,
     message: string,
+    readonly code?: string,
   ) {
     super(message)
     this.name = 'RunnerTransportError'
@@ -240,6 +241,7 @@ export type BrowserRunnerRepository = Pick<RunnerTransportRepository,
 function supportedJobKinds(report: RunnerCapabilityReport): string[] {
   const kinds: string[] = []
   if (report.capabilities.library) kinds.push("libraryAction")
+  if (report.capabilities.evaluateSetups) kinds.push('evaluateSetups')
   if (report.capabilities.scanProject) kinds.push('scanProject')
   if (report.capabilities.planSetup) kinds.push('planSetup')
   if (report.capabilities.applyPlan) kinds.push('applyPlan')

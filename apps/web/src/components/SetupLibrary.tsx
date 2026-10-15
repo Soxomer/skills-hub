@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ControlPlaneApiError, type ControlPlaneClient } from '../api'
 import { UseSetupOnProject } from './UseSetupOnProject'
+import { SetupEvaluation } from './SetupEvaluation'
 
 interface SetupLibraryProps { client: ControlPlaneClient; onProjects: () => void; runner?: RunnerStatusResponse | null; runnerOnline?: boolean }
 
@@ -53,7 +54,7 @@ function SetupDetails({ client, setupId, onBack, onSaved, runner, runnerOnline, 
   const { t } = useTranslation()
   const [detail, setDetail] = useState<SetupDetail | null>(null)
   const [revisionId, setRevisionId] = useState<string | null>(null)
-  const [mode, setMode] = useState<'edit' | 'clone' | 'use' | null>(null)
+  const [mode, setMode] = useState<'edit' | 'clone' | 'use' | 'evaluate' | null>(null)
   const [error, setError] = useState(false)
   const [reload, setReload] = useState(0)
   useEffect(() => {
@@ -64,10 +65,12 @@ function SetupDetails({ client, setupId, onBack, onSaved, runner, runnerOnline, 
   }, [client, setupId, reload])
   const revisions = detail?.revisions.toSorted((a, b) => b.revisionNumber - a.revisionNumber) ?? []
   const revision = revisions.find((entry) => entry.setupRevisionId === revisionId) ?? revisions[0]
+  if (mode === 'evaluate' && revision) return <SetupEvaluation key={revision.setupRevisionId} client={client}
+    candidate={revision} runner={runner} runnerOnline={runnerOnline} onBack={() => setMode(null)} onProjects={onProjects} />
   if (mode === 'use' && detail && revision) return <UseSetupOnProject client={client} revision={revision}
     defaultProjectId={detail.defaultProjectId} runner={runner} runnerOnline={runnerOnline}
     onBack={() => setMode(null)} onProjects={onProjects} />
-  if (mode && mode !== 'use' && detail && revision) return <SetupEditor key={`${mode}-${revision.setupRevisionId}`} client={client}
+  if (mode && mode !== 'use' && mode !== 'evaluate' && detail && revision) return <SetupEditor key={`${mode}-${revision.setupRevisionId}`} client={client}
     base={revision} detail={mode === 'edit' ? detail : undefined} onCancel={() => { setMode(null); setDetail(null); setReload((n) => n + 1) }}
     onSaved={(id) => { setMode(null); setDetail(null); setRevisionId(null); setReload((n) => n + 1); onSaved(id) }} />
   const previous = revisions.find((entry) => entry.revisionNumber === (revision?.revisionNumber ?? 0) - 1)
@@ -80,6 +83,7 @@ function SetupDetails({ client, setupId, onBack, onSaved, runner, runnerOnline, 
       <div className="page-heading"><div><h1>{detail.name}</h1><p>{t('library.publishSafety')}</p></div>
         <div className="library-actions"><button type="button" className="secondary-button" onClick={() => setMode('clone')}>{t('library.clone')}</button>
           <button type="button" className="secondary-button" onClick={() => setMode('edit')}>{t('library.edit')}</button>
+          <button type="button" className="secondary-button" onClick={() => setMode('evaluate')}>{t('evaluation.action')}</button>
           <button type="button" className="primary-button" onClick={() => setMode('use')}>{t('useSetup.action')}</button></div></div>
       <label className="library-field">{t('library.history')}<select value={revision.setupRevisionId} onChange={(event) => setRevisionId(event.target.value)}>
         {revisions.map((entry) => <option key={entry.setupRevisionId} value={entry.setupRevisionId}>{t('library.version', { number: entry.revisionNumber })}{entry.setupRevisionId === detail.initialSetupRevisionId && detail.kind === 'default' ? ` — ${t('library.initialDefault')}` : ''}</option>)}

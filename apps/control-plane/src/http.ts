@@ -22,6 +22,8 @@ import {
 import { SwitchingError, type SwitchingService } from './switching.js'
 import { SetupServiceError, type SetupService } from './setups.js'
 import type { BrowserAuthenticator } from './hosted-auth.js'
+import type { EvaluationService } from './evaluations.js'
+import type { CreateEvaluationRequest } from '@ahm/contracts'
 
 // 10 MiB of artifact bytes become about 14 MiB of base64. Up to 5,000
 // 500-character paths need under 8 MiB including UTF-8/JSON escaping;
@@ -57,6 +59,7 @@ export function createControlPlaneApp(
   switching?: SwitchingService,
   setups?: SetupService,
   authenticateBrowser?: BrowserAuthenticator,
+  evaluations?: EvaluationService,
 ): FastifyInstance {
   const app = Fastify({ logger: false })
   const actors = new WeakMap<FastifyRequest, RequestActor>()
@@ -79,7 +82,7 @@ export function createControlPlaneApp(
       return
     }
     if (error instanceof RunnerTransportError) {
-      void reply.code(error.statusCode).send({ error: error.message })
+      void reply.code(error.statusCode).send({ error: error.message, ...(error.code ? { code: error.code } : {}) })
       return
     }
     if (error instanceof ProjectServiceError) {
@@ -106,6 +109,13 @@ export function createControlPlaneApp(
   })
 
   app.get('/health', async () => ({ status: 'ok' }))
+
+  if (evaluations) {
+    app.post<{ Body: CreateEvaluationRequest }>('/api/v1/evaluations', async (request, reply) =>
+      reply.code(201).send(await evaluations.create(actor(request), request.body)))
+    app.get<{ Querystring: { candidateRevisionId: string } }>('/api/v1/evaluations', async (request) =>
+      evaluations.list(actor(request), request.query.candidateRevisionId))
+  }
 
   app.get('/api/v1/projects', async (request) => projects.listProjects(actor(request)))
 

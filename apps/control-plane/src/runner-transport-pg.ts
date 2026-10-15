@@ -1,4 +1,5 @@
 import { PROTOCOL_VERSION } from '@ahm/contracts'
+import { evaluationResultMatches } from './evaluation-results.js'
 import type {
   ArtifactBundle,
   JobEnvelope,
@@ -146,6 +147,8 @@ function resultMatchesJob(job: JobEnvelope, result: ResultEnvelope): boolean {
     return false
   }
   if (result.result.kind === 'error') return true
+  if (job.job.kind === 'evaluateSetups') return result.result.kind === 'evaluationResult' && result.projectInstanceId === null && evaluationResultMatches(job.job.payload, result.result.payload)
+  if (result.result.kind === 'evaluationResult') return false
   if (job.job.kind === 'libraryAction') return result.result.kind === 'libraryResponse' && result.projectInstanceId === null
   if (result.result.kind === 'libraryResponse') return false
   if (result.result.payload.projectId !== job.job.payload.projectId) return false

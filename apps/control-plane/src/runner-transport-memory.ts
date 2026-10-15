@@ -1,3 +1,4 @@
+import { evaluationResultMatches } from './evaluation-results.js'
 import type {
   ArtifactBundle,
   JobEnvelope,
@@ -356,7 +357,9 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
     if (
       result.idempotencyKey !== job.envelope.idempotencyKey ||
       result.projectInstanceId !== job.envelope.projectInstanceId ||
-      (result.result.kind !== 'error' && (job.envelope.job.kind === 'libraryAction' ? result.result.kind !== 'libraryResponse' : result.result.kind === 'libraryResponse' || result.result.payload.projectId !== job.envelope.job.payload.projectId))
+      (result.result.kind !== 'error' && (job.envelope.job.kind === 'evaluateSetups'
+        ? result.result.kind !== 'evaluationResult' || !evaluationResultMatches(job.envelope.job.payload, result.result.payload)
+        : result.result.kind === 'evaluationResult' || (job.envelope.job.kind === 'libraryAction' ? result.result.kind !== 'libraryResponse' : result.result.kind === 'libraryResponse' || result.result.payload.projectId !== job.envelope.job.payload.projectId)))
     ) {
       return { outcome: 'conflict' }
     }

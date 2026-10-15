@@ -23,7 +23,7 @@ it.skipIf(!databaseUrl).each(['fresh', 'existing version 8'])('runs production s
     await applyMigrations(pool)
     await pool.query('SELECT skill_library FROM runner_devices LIMIT 0')
     const before = await pool.query('SELECT version, applied_at FROM control_plane_schema_migrations ORDER BY version')
-    expect(before.rows.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    expect(before.rows.map(row => row.version)).toEqual(migrationFiles.map(name => Number(name.slice(0, 4))))
     await applyMigrations(pool)
     expect((await pool.query('SELECT version, applied_at FROM control_plane_schema_migrations ORDER BY version')).rows).toEqual(before.rows)
   } finally { await pool.end(); await admin.end() }

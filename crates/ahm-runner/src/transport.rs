@@ -258,6 +258,7 @@ mod tests {
             supported_protocol_versions: vec![PROTOCOL_VERSION],
             runner_version: "0.1.0".to_owned(),
             capabilities: RunnerCapabilities {
+                evaluate_setups: false,
                 scan_project: true,
                 plan_setup: false,
                 apply_plan: false,

@@ -7,8 +7,8 @@ use ahm_domain::{
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
-const RUNNER_SCHEMA_VERSION: i64 = 3;
-const RUNNER_SCHEMA_V3: &str = r#"
+const RUNNER_SCHEMA_VERSION: i64 = 4;
+const RUNNER_SCHEMA_V4: &str = r#"
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS runner_schema_migrations (
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS operation_journal (
   idempotency_key TEXT NOT NULL UNIQUE,
   request_digest TEXT NOT NULL,
   project_instance_id TEXT NULL REFERENCES project_instances(id) ON DELETE CASCADE,
-  operation_kind TEXT NOT NULL CHECK (operation_kind IN ('scanProject', 'planSetup', 'applyPlan', 'rollbackOperation', 'libraryAction')),
+  operation_kind TEXT NOT NULL CHECK (operation_kind IN ('scanProject', 'planSetup', 'applyPlan', 'rollbackOperation', 'libraryAction', 'evaluateSetups')),
   status TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'rolledBack')),
   plan_digest TEXT NULL,
   recoverability TEXT NOT NULL CHECK (recoverability IN ('notNeeded', 'rollbackAvailable', 'manualIntervention')),
@@ -101,7 +101,10 @@ VALUES (1, '2026-08-31T00:00:00Z');
 INSERT OR IGNORE INTO runner_schema_migrations (version, applied_at)
 VALUES (3, '2026-09-01T00:00:00Z');
 
-PRAGMA user_version = 3;
+INSERT OR IGNORE INTO runner_schema_migrations (version, applied_at)
+VALUES (4, '2026-10-15T00:00:00Z');
+
+PRAGMA user_version = 4;
 "#;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -125,6 +128,7 @@ pub struct ProjectInstanceRecord {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum JournalStartOutcome {
     Execute,
+    InterruptedEvaluation,
     ArtifactPending { result_json: String },
     Completed { result_json: String },
     IdempotencyMismatch,
@@ -448,6 +452,9 @@ impl RunnerStateStore {
                 return Ok(JournalStartOutcome::Completed { result_json });
             }
             transaction.commit()?;
+            if matches!(job.job, ahm_domain::RunnerJob::EvaluateSetups(_)) {
+                return Ok(JournalStartOutcome::InterruptedEvaluation);
+            }
             return Ok(JournalStartOutcome::Execute);
         }
 
@@ -673,7 +680,7 @@ impl RunnerStateStore {
             .connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
         match version {
-            0 => self.connection.execute_batch(RUNNER_SCHEMA_V3)?,
+            0 => self.connection.execute_batch(RUNNER_SCHEMA_V4)?,
             RUNNER_SCHEMA_VERSION => {}
             other => return Err(RunnerStateError::UnsupportedSchema(other)),
         }
@@ -683,6 +690,7 @@ impl RunnerStateStore {
 
 fn job_kind(job: &JobEnvelope) -> &'static str {
     match job.job {
+        ahm_domain::RunnerJob::EvaluateSetups(_) => "evaluateSetups",
         ahm_domain::RunnerJob::LibraryAction(_) => "libraryAction",
         ahm_domain::RunnerJob::ScanProject(_) => "scanProject",
         ahm_domain::RunnerJob::PlanSetup(_) => "planSetup",
@@ -868,7 +876,7 @@ mod tests {
 
     #[test]
     fn old_poc_runner_state_requires_a_clean_database() {
-        for version in [1, 2] {
+        for version in [1, 2, 3] {
             let connection = Connection::open_in_memory().unwrap();
             connection
                 .pragma_update(None, "user_version", version)
@@ -877,5 +885,67 @@ mod tests {
                 matches!(RunnerStateStore::from_connection(connection), Err(RunnerStateError::UnsupportedSchema(v)) if v == version)
             );
         }
+    }
+
+    #[test]
+    fn interrupted_evaluation_is_not_executed_again() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("runner.db");
+        let job: ahm_domain::JobEnvelope = serde_json::from_str(include_str!(
+            "../../../packages/contracts/fixtures/v1/job-evaluation.json"
+        ))
+        .unwrap();
+        let mut store = open_file(&path);
+        assert_eq!(
+            store
+                .begin_job(&job, "lease_1", "request_digest", &timestamp())
+                .unwrap(),
+            JournalStartOutcome::Execute
+        );
+        drop(store);
+        let mut store = open_file(&path);
+        assert_eq!(
+            store
+                .begin_job(&job, "lease_2", "request_digest", &timestamp())
+                .unwrap(),
+            JournalStartOutcome::InterruptedEvaluation
+        );
+        assert_eq!(
+            store
+                .begin_job(&job, "lease_2", "different_digest", &timestamp())
+                .unwrap(),
+            JournalStartOutcome::IdempotencyMismatch
+        );
+    }
+
+    #[test]
+    fn completed_evaluation_replays_durable_result_without_execution() {
+        let mut store = RunnerStateStore::open_in_memory().unwrap();
+        let job: ahm_domain::JobEnvelope = serde_json::from_str(include_str!(
+            "../../../packages/contracts/fixtures/v1/job-evaluation.json"
+        ))
+        .unwrap();
+        let result = include_str!("../../../packages/contracts/fixtures/v1/result-evaluation.json");
+        store
+            .begin_job(&job, "lease_1", "request_digest", &timestamp())
+            .unwrap();
+        store
+            .finish_job(
+                &job,
+                "lease_1",
+                result,
+                "result_digest",
+                false,
+                &timestamp(),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .begin_job(&job, "lease_2", "request_digest", &timestamp())
+                .unwrap(),
+            JournalStartOutcome::Completed {
+                result_json: result.to_owned()
+            }
+        );
     }
 }
