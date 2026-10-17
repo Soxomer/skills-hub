@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ControlPlaneApiError, type ControlPlaneClient } from './api'
 import { SetupLibrary } from './components/SetupLibrary'
+import { SetupEvaluation } from './components/SetupEvaluation'
 import './i18n'
 
 const date = '2026-10-15T10:00:00Z'
@@ -27,7 +28,7 @@ function mockClient() {
 let root: Root
 let container: HTMLDivElement
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container) })
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.useRealTimers(); vi.unstubAllGlobals() })
 async function mount(client = mockClient(), device: RunnerStatusResponse | null = runner, online = true) {
   await act(async () => root.render(<SetupLibrary client={client as unknown as ControlPlaneClient} runner={device} runnerOnline={online} onProjects={vi.fn()} />))
   return client
@@ -128,4 +129,79 @@ it('rejects unsupported Setup content without silently dropping it', async () =>
   await mount(client); await openHistorical(); await configure()
   expect(container.textContent).toContain('nothing is silently omitted')
   expect(button('Start comparison').disabled).toBe(true)
+})
+
+it('keeps missing prerequisites beside Start and clears them as the form becomes ready', async () => {
+  await mount(); await openHistorical()
+  const prerequisites = () => container.querySelector('#evaluation-prerequisites')!
+  expect(button('Start comparison').getAttribute('aria-describedby')).toBe(prerequisites().id)
+  expect(prerequisites().textContent).toContain('Choose a baseline version.')
+  expect(prerequisites().textContent).toContain('Enter a valid Codex model identifier.')
+  expect(prerequisites().textContent).toContain('Confirm use of your Codex allowance.')
+  await field('Baseline Setup version', 'v2')
+  expect(prerequisites().textContent).not.toContain('Choose a baseline version.')
+  await field('Codex model identifier', 'invalid model')
+  expect(prerequisites().textContent).toContain('Enter a valid Codex model identifier.')
+  await field('Codex model identifier', 'test-model')
+  expect(prerequisites().textContent).not.toContain('Enter a valid Codex model identifier.')
+  await act(async () => container.querySelector<HTMLInputElement>('input[type=checkbox]')!.click())
+  expect(prerequisites().textContent).toContain('Ready to run both versions on Computer.')
+  expect(button('Start comparison').disabled).toBe(false)
+  await field('Reasoning effort', 'high')
+  expect(prerequisites().textContent).toContain('Confirm use of your Codex allowance.')
+  expect(button('Start comparison').disabled).toBe(true)
+})
+
+it('shows fixed shared Codex settings and keeps result diagnostics collapsed', async () => {
+  const client = mockClient(); client.evaluations.mockResolvedValue({ evaluations: [saved] })
+  await mount(client); await openHistorical()
+  const settings = container.querySelector('.evaluation-fixed-settings')!
+  expect(settings.textContent).toContain('Codex · fixed for this pilot')
+  expect(settings.textContent).toContain('Read-only · tools restricted')
+  expect(settings.textContent).toContain('One per version · 120 seconds each')
+  const diagnostics = container.querySelector<HTMLDetailsElement>('.evaluation-run-details')!
+  expect(diagnostics.open).toBe(false)
+  expect(diagnostics.textContent).toContain('Reported model: Not reported')
+  expect(diagnostics.textContent).toContain('Baseline: v2 · Candidate: v1')
+  const resultSides = container.querySelectorAll('.evaluation-result-side')
+  expect(resultSides[0].textContent).toContain('Daily · Version 2')
+  expect(resultSides[0].textContent).toContain('0 of 1 task checks passed')
+  expect(resultSides[1].textContent).toContain('Daily · Version 1')
+  expect(resultSides[1].textContent).toContain('No task checks were recorded.')
+  expect(resultSides[1].textContent).not.toContain('0 of')
+})
+
+it('refreshes retained evaluation data on reentry and stops polling while inactive without losing the form', async () => {
+  vi.useFakeTimers()
+  const client = mockClient()
+  client.evaluations.mockResolvedValue({ evaluations: [{ ...saved, state: 'pending', result: null }] })
+  const renderEvaluation = async (active: boolean) => {
+    await act(async () => root.render(<SetupEvaluation client={client as unknown as ControlPlaneClient} candidate={old} runner={runner} runnerOnline active={active} onBack={vi.fn()} onProjects={vi.fn()} />))
+  }
+  await renderEvaluation(false)
+  expect(client.setups).not.toHaveBeenCalled()
+  expect(client.evaluations).not.toHaveBeenCalled()
+  await renderEvaluation(true)
+  await configure()
+  expect(client.evaluations).toHaveBeenCalledTimes(1)
+  await renderEvaluation(false)
+  await act(async () => vi.advanceTimersByTimeAsync(6000))
+  expect(client.evaluations).toHaveBeenCalledTimes(1)
+
+  client.evaluations.mockResolvedValue({ evaluations: [saved] })
+  await renderEvaluation(true)
+  expect(client.setups).toHaveBeenCalledTimes(2)
+  expect(client.evaluations).toHaveBeenCalledTimes(2)
+  expect(container.textContent).toContain('Baseline evidence')
+  expect(container.querySelector<HTMLSelectElement>('select')!.value).toBe('v2')
+  expect(container.querySelector<HTMLInputElement>('input:not([type=checkbox])')!.value).toBe('test-model')
+  expect(container.querySelector<HTMLInputElement>('input[type=checkbox]')!.checked).toBe(true)
+  expect(button('Start comparison').disabled).toBe(false)
+
+  await renderEvaluation(false)
+  await renderEvaluation(true)
+  expect(client.setups).toHaveBeenCalledTimes(3)
+  expect(client.evaluations).toHaveBeenCalledTimes(3)
+  await act(async () => vi.advanceTimersByTimeAsync(6000))
+  expect(client.evaluations).toHaveBeenCalledTimes(3)
 })

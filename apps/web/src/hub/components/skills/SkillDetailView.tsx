@@ -433,7 +433,7 @@ const SkillDetailView = ({
   projects,
   t,
 }: SkillDetailViewProps) => {
-  const { runnerConnected } = useLibrary()
+  const { runnerConnected, setupSnapshotsSupported } = useLibrary()
   const [addingToSetup, setAddingToSetup] = useState(false)
   const [files, setFiles] = useState<SkillFileEntry[]>([])
   const [activeFile, setActiveFile] = useState<string | null>(null)
@@ -577,8 +577,9 @@ const SkillDetailView = ({
               <i aria-hidden="true" />
               {syncStatus}
             </span>
-            <button className="btn btn-secondary detail-setup-action" type="button" disabled={!runnerConnected} title={!runnerConnected ? t('addToSetup.runnerRequired') : undefined} onClick={() => setAddingToSetup(true)}>{t('addToSetup.action')}</button>
+            <button className="btn btn-secondary detail-setup-action" type="button" disabled={!runnerConnected || !setupSnapshotsSupported} aria-describedby={runnerConnected && !setupSnapshotsSupported ? 'setup-runner-prerequisite' : undefined} title={!runnerConnected ? t('addToSetup.runnerRequired') : undefined} onClick={() => setAddingToSetup(true)}>{t('addToSetup.action')}</button>
           </div>
+          {runnerConnected && !setupSnapshotsSupported && <p id="setup-runner-prerequisite" className="detail-desc" role="status">{t('addToSetup.runnerUpdateRequired')}</p>}
           {skill.description ? (
             <p className="detail-desc">{skill.description}</p>
           ) : null}

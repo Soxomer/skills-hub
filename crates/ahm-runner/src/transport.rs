@@ -259,6 +259,7 @@ mod tests {
             runner_version: "0.1.0".to_owned(),
             capabilities: RunnerCapabilities {
                 evaluate_setups: false,
+                setup_snapshots: false,
                 scan_project: true,
                 plan_setup: false,
                 apply_plan: false,

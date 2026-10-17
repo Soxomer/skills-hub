@@ -2,12 +2,14 @@ import { LIBRARY_COMMANDS, isLibrarySetupSnapshot, type LibraryCommand } from '@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ControlPlaneClient } from '../api'
-import { LibraryContext } from './library-context'
+import { LibraryContext, type SavedSetupSelection } from './library-context'
 
 interface Directory { name: string; handle: string }
 interface DirectoryListing extends Directory { parent: string | null; children: Directory[]; roots: Directory[] }
-export function LibraryProvider({ client, deviceId, connected, children, requestConnection }: {
+export function LibraryProvider({ client, deviceId, connected, setupSnapshotsSupported = false, children, requestConnection, onOpenSetup }: {
   client: ControlPlaneClient; deviceId: string | null; connected: boolean; children: ReactNode; requestConnection?: () => Promise<boolean>
+  setupSnapshotsSupported?: boolean
+  onOpenSetup?: (selection: SavedSetupSelection) => void
 }) {
   const { t } = useTranslation('hub')
   const jobs = useRef(new Set<string>())
@@ -28,6 +30,7 @@ export function LibraryProvider({ client, deviceId, connected, children, request
       return value
     }
     if (!deviceId || !connected) throw new Error(t('errors.runnerRequired'))
+    if (['preview_setup_skill', 'snapshot_setup_skill'].includes(command) && !setupSnapshotsSupported) throw new Error(t('addToSetup.runnerUpdateRequired'))
     const { jobId } = await client.library(deviceId, { command, args, expectedDigest })
     queued?.(jobId)
     jobs.current.add(jobId)
@@ -45,7 +48,7 @@ export function LibraryProvider({ client, deviceId, connected, children, request
       }
       throw new Error(t('libraryTransport.timeout'))
     } finally { jobs.current.delete(jobId) }
-  }, [client, connected, deviceId, t])
+  }, [client, connected, deviceId, setupSnapshotsSupported, t])
 
   const invokeLibrary = useCallback(async <T,>(command: string, args: Record<string, unknown> = {}): Promise<T> => {
     if (command === 'cancel_current_operation') {
@@ -95,7 +98,7 @@ export function LibraryProvider({ client, deviceId, connected, children, request
     if (!isLibrarySetupSnapshot(value) || value.contentDigest !== contentDigest) throw new Error(t('libraryTransport.invalidResult'))
     return jobId
   }, [request, t])
-  const context = useMemo(() => ({ client, deviceId, previewSetupSkill, snapshotSetupSkill, runnerConnected: connected, invokeLibrary, pickDirectory, requestConnection }), [client, deviceId, previewSetupSkill, snapshotSetupSkill, connected, invokeLibrary, pickDirectory, requestConnection])
+  const context = useMemo(() => ({ client, deviceId, previewSetupSkill, snapshotSetupSkill, runnerConnected: connected, setupSnapshotsSupported, invokeLibrary, pickDirectory, requestConnection, onOpenSetup }), [client, deviceId, previewSetupSkill, snapshotSetupSkill, connected, setupSnapshotsSupported, invokeLibrary, pickDirectory, requestConnection, onOpenSetup])
   return <LibraryContext.Provider value={context}>
     {children}
     <dialog ref={dialog} className="library-dialog" aria-labelledby="library-dialog-title" onCancel={event => { event.preventDefault(); close() }}>

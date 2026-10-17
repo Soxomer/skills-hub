@@ -9,7 +9,7 @@ interface AddToSetupDialogProps { skill: ManagedSkill; tools: ToolOption[]; onCl
 
 export function AddToSetupDialog({ skill, tools, onClose }: AddToSetupDialogProps) {
   const { t } = useTranslation('hub')
-  const { client, deviceId, runnerConnected, previewSetupSkill, snapshotSetupSkill } = useLibrary()
+  const { client, deviceId, runnerConnected, setupSnapshotsSupported, previewSetupSkill, snapshotSetupSkill, onOpenSetup } = useLibrary()
   const dialog = useRef<HTMLDialogElement>(null)
   const originalDevice = useRef(deviceId)
   const [snapshot, setSnapshot] = useState<LibrarySetupSnapshot | null>(null)
@@ -37,6 +37,7 @@ export function AddToSetupDialog({ skill, tools, onClose }: AddToSetupDialogProp
   useEffect(() => {
     let active = true
     setLoading(true); setError(null); setSnapshot(null); setSnapshotJobId(null); setConsent(false)
+    if (!runnerConnected || deviceId !== originalDevice.current || !setupSnapshotsSupported) { setLoading(false); return }
     Promise.all([previewSetupSkill(skill.id), client.setups()]).then(([value, list]) => {
       if (active) {
         setSnapshot(value); setSetups(list.setups)
@@ -46,7 +47,7 @@ export function AddToSetupDialog({ skill, tools, onClose }: AddToSetupDialogProp
     }).catch(() => { if (active) setError(t('addToSetup.previewFailed')) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [client, previewSetupSkill, skill.id, attempt, t])
+  }, [client, previewSetupSkill, skill.id, attempt, t, deviceId, runnerConnected, setupSnapshotsSupported])
   useEffect(() => {
     let active = true
     setDetail(null)
@@ -61,7 +62,7 @@ export function AddToSetupDialog({ skill, tools, onClose }: AddToSetupDialogProp
   const conflict = destinationMode === 'existing' && current?.items.some(i => selected.includes(i.toolId) && i.targetName === targetName)
   const connected = runnerConnected && deviceId === originalDevice.current
   const valid = snapshot && selected.length > 0 && /^[a-zA-Z0-9_-]{1,200}$/.test(targetName)
-    && consent && !conflict && connected && !loadingDetail && (destinationMode === 'new' ? name.trim().length > 0 && name.trim().length <= 120 : !!current && detail?.setupId === destination)
+    && consent && !conflict && connected && setupSnapshotsSupported && !loadingDetail && (destinationMode === 'new' ? name.trim().length > 0 && name.trim().length <= 120 : !!current && detail?.setupId === destination)
   const publish = async () => {
     if (!valid || !snapshot || busy) return
     setBusy(true); setError(null)
@@ -82,12 +83,16 @@ export function AddToSetupDialog({ skill, tools, onClose }: AddToSetupDialogProp
     {saved ? <>
       <p role="status">{t('addToSetup.savedVersion', { name: saved.name, number: saved.revisionNumber })}</p>
       <p>{t('addToSetup.savedHelp')}</p>
-      <div className="library-dialog-actions"><button className="btn btn-primary" onClick={onClose}>{t('addToSetup.done')}</button></div>
+      <div className="library-dialog-actions">
+        <button className={onOpenSetup ? 'btn btn-secondary' : 'btn btn-primary'} onClick={onClose}>{t('addToSetup.done')}</button>
+        {onOpenSetup && <button className="btn btn-primary" onClick={() => { onClose(); onOpenSetup({ setupId: saved.setupId, setupRevisionId: saved.setupRevisionId }) }}>{t('addToSetup.openSaved')}</button>}
+      </div>
     </> : <>
       <p>{t('addToSetup.description')}</p>
       {loading && <p role="status">{t('addToSetup.loading')}</p>}
       {error && <p role="alert" className="add-to-setup-error">{error}</p>}
       {!loading && !connected && <p role="alert">{t('addToSetup.runnerRequired')}</p>}
+      {!loading && connected && !setupSnapshotsSupported && <p role="alert">{t('addToSetup.runnerUpdateRequired')}</p>}
       {snapshot && !loading && <fieldset disabled={busy}>
         <fieldset className="add-to-setup-destination" aria-label={t('addToSetup.destination')}>
           {(['existing', 'new'] as const).map(mode => <label key={mode}>
@@ -120,7 +125,7 @@ export function AddToSetupDialog({ skill, tools, onClose }: AddToSetupDialogProp
       </fieldset>}
       <div className="library-dialog-actions">
         <button className="btn btn-secondary" disabled={busy} onClick={onClose}>{t('cancel')}</button>
-        {error && <button className="btn btn-secondary" disabled={busy || !connected} onClick={() => setAttempt(v => v + 1)}>{t('addToSetup.reviewAgain')}</button>}
+        {error && <button className="btn btn-secondary" disabled={busy || !connected || !setupSnapshotsSupported} onClick={() => setAttempt(v => v + 1)}>{t('addToSetup.reviewAgain')}</button>}
         <button className="btn btn-primary" disabled={!valid || busy || loading} onClick={() => void publish()}>{t(busy ? 'addToSetup.publishing' : destinationMode === 'new' ? 'addToSetup.create' : 'addToSetup.action')}</button>
       </div>
     </>}

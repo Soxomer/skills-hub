@@ -42,6 +42,26 @@ fn unknown_fields_are_rejected() {
 }
 
 #[test]
+fn setup_snapshot_capability_is_explicit_and_defaults_to_false() {
+    let mut value = fixture("capabilities.json");
+    let supported: ahm_domain::CapabilityEnvelope = serde_json::from_value(value.clone()).unwrap();
+    assert!(supported.capabilities.setup_snapshots);
+    value["capabilities"]
+        .as_object_mut()
+        .unwrap()
+        .remove("setupSnapshots");
+    let legacy: ahm_domain::CapabilityEnvelope = serde_json::from_value(value.clone()).unwrap();
+    assert!(!legacy.capabilities.setup_snapshots);
+    value["capabilities"]["setupSnapshots"] = false.into();
+    let disabled: ahm_domain::CapabilityEnvelope = serde_json::from_value(value.clone()).unwrap();
+    assert!(!disabled.capabilities.setup_snapshots);
+    for invalid in [Value::Null, "true".into(), 1.into()] {
+        value["capabilities"]["setupSnapshots"] = invalid;
+        assert!(serde_json::from_value::<ahm_domain::CapabilityEnvelope>(value.clone()).is_err());
+    }
+}
+
+#[test]
 fn evaluation_profile_and_repetition_limits_are_validated() {
     let value = fixture("job-evaluation.json");
     let envelope: ahm_domain::JobEnvelope = serde_json::from_value(value.clone()).unwrap();

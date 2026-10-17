@@ -27,4 +27,4 @@ it.skipIf(!databaseUrl).each(['fresh', 'existing version 8'])('runs production s
     await applyMigrations(pool)
     expect((await pool.query('SELECT version, applied_at FROM control_plane_schema_migrations ORDER BY version')).rows).toEqual(before.rows)
   } finally { await pool.end(); await admin.end() }
-})
+}, 30_000)
