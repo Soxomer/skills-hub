@@ -595,6 +595,7 @@ mod tests {
         fn capabilities(&self) -> RunnerCapabilities {
             RunnerCapabilities {
                 evaluate_setups: true,
+                setup_snapshots: true,
                 scan_project: true,
                 plan_setup: false,
                 apply_plan: false,

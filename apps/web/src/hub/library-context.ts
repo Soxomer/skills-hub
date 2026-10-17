@@ -8,6 +8,7 @@ interface LibraryContextValue {
   previewSetupSkill: (skillId: string) => Promise<LibrarySetupSnapshot>
   snapshotSetupSkill: (skillId: string, contentDigest: string) => Promise<string>
   runnerConnected: boolean
+  setupSnapshotsSupported: boolean
   requestConnection?: () => Promise<boolean>
   onOpenSetup?: (selection: SavedSetupSelection) => void
   invokeLibrary: <T>(command: string, args?: Record<string, unknown>) => Promise<T>

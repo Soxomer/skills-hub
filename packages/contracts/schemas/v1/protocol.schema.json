@@ -52,6 +52,9 @@
         "evaluateSetups": {
           "type": "boolean"
         },
+        "setupSnapshots": {
+          "type": "boolean"
+        },
         "scanProject": {
           "type": "boolean"
         },

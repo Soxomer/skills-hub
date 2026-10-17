@@ -22,7 +22,7 @@ import type {
   RunnerEnrollmentRecord,
   RunnerTransportRepository,
 } from './runner-transport.js'
-import { RunnerTransportError } from './runner-transport.js'
+import { isSetupSnapshotCommand, RunnerTransportError } from './runner-transport.js'
 import { membershipAllows, type BrowserAccess, type MembershipRole } from './development-auth.js'
 
 interface MemoryDevice extends RunnerAuthentication {
@@ -258,13 +258,17 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
       device.lastSeenAt = now
       if (skillLibrary !== undefined) device.skillLibrary = { reportedAt: now, skills: structuredClone(skillLibrary) }
     }
+    const supportsJob = (job: MemoryJob) => supportedKinds.includes(job.envelope.job.kind)
+      && (job.envelope.job.kind !== 'libraryAction'
+        || !isSetupSnapshotCommand(job.envelope.job.payload.command)
+        || capabilities.capabilities.setupSnapshots === true)
     for (const job of this.jobs.values()) {
       if (
         job.envelope.deviceId === runner.deviceId &&
         (job.state === 'leased' || job.state === 'acknowledged') &&
         job.leaseExpiresAt !== null &&
         job.leaseExpiresAt > now &&
-        supportedKinds.includes(job.envelope.job.kind)
+        supportsJob(job)
       ) {
         return this.leasedJob(job)
       }
@@ -288,7 +292,7 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
       if (
         !available ||
         job.envelope.deviceId !== runner.deviceId ||
-        !supportedKinds.includes(job.envelope.job.kind)
+        !supportsJob(job)
       ) {
         continue
       }

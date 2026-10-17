@@ -569,6 +569,7 @@ fn is_expired(expires_at: &IsoTimestamp, now: &IsoTimestamp) -> bool {
 pub fn runner_capabilities() -> RunnerCapabilities {
     RunnerCapabilities {
         evaluate_setups: cfg!(any(windows, target_os = "linux")),
+        setup_snapshots: true,
         library: true,
         scan_project: true,
         plan_setup: true,
@@ -877,6 +878,17 @@ mod tests {
 
     fn identifier(value: &str) -> Identifier {
         Identifier::new(value).unwrap()
+    }
+
+    #[test]
+    fn runner_advertises_setup_snapshot_support() {
+        let capabilities = runner_capabilities();
+        assert!(capabilities.library);
+        assert!(capabilities.setup_snapshots);
+        assert_eq!(
+            serde_json::to_value(capabilities).unwrap()["setupSnapshots"],
+            true
+        );
     }
 
     #[test]

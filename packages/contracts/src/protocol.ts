@@ -33,6 +33,8 @@ export interface PortableSetupRevision {
 
 export interface RunnerCapabilities {
   evaluateSetups?: boolean
+  /** Missing or false means preview/snapshot Setup skill commands are unsupported. */
+  setupSnapshots?: boolean
   library: boolean
   scanProject: boolean
   planSetup: boolean

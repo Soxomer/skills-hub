@@ -52,6 +52,20 @@ describe('protocol v1 golden fixtures', () => {
     expect(validate(fixture)).toBe(false)
   })
 
+  it('accepts missing or boolean Setup snapshot support and rejects other capability values', () => {
+    const fixture = loadFixture('capabilities.json') as { capabilities: Record<string, unknown> }
+    delete fixture.capabilities.setupSnapshots
+    expect(validate(fixture)).toBe(true)
+    for (const value of [false, true]) {
+      fixture.capabilities.setupSnapshots = value
+      expect(validate(fixture)).toBe(true)
+    }
+    for (const value of [null, 'true', 1]) {
+      fixture.capabilities.setupSnapshots = value
+      expect(validate(fixture)).toBe(false)
+    }
+  })
+
   it('rejects evaluation execution expansion and native activation claims', () => {
     const job = loadFixture('job-evaluation.json') as { job: { payload: { profile: { timeoutSeconds: number; sandbox: string }; repetitions: number } } }
     job.job.payload.profile.sandbox = 'danger-full-access'

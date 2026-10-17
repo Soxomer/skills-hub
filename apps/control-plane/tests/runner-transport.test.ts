@@ -1,5 +1,5 @@
 import { isLibrarySetupSnapshot, type ArtifactBundleEntry, type LibrarySetupSnapshot, type ResultEnvelope, type RunnerCapabilityReport } from '@ahm/contracts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { createControlPlaneApp } from '../src/http.js'
 import { InMemoryProjectRepository } from '../src/projects-memory.js'
@@ -42,6 +42,8 @@ function harness() {
   const app = createControlPlaneApp(service, new ProjectService(new InMemoryProjectRepository()))
   return {
     app,
+    repository,
+    service,
     advance(milliseconds: number) {
       now = new Date(now.getTime() + milliseconds)
     },
@@ -67,7 +69,7 @@ it('reports a runner-owned library with tenant isolation and preserves it betwee
   await app.close()
 })
 
-async function connect(app: ReturnType<typeof createControlPlaneApp>) {
+async function connect(app: ReturnType<typeof createControlPlaneApp>, report = capabilities) {
   const created = await app.inject({
     method: 'POST',
     url: '/api/v1/runner-enrollments',
@@ -80,7 +82,7 @@ async function connect(app: ReturnType<typeof createControlPlaneApp>) {
   const enrolled = await app.inject({
     method: 'POST',
     url: '/runner/v1/enroll',
-    payload: { code: enrollment.code, label: 'Laptop', capabilities },
+    payload: { code: enrollment.code, label: 'Laptop', capabilities: report },
   })
   expect(enrolled.statusCode).toBe(200)
   const identity = enrolled.json<{
@@ -97,6 +99,68 @@ async function connect(app: ReturnType<typeof createControlPlaneApp>) {
   expect(status.json()).toMatchObject({ state: 'claimed', deviceId: identity.deviceId })
   return identity
 }
+
+const snapshotCapabilities = { ...capabilities, capabilities: { ...capabilities.capabilities, setupSnapshots: true } }
+const snapshotCommands = ['preview_setup_skill', 'snapshot_setup_skill'] as const
+const snapshotRequest = (command: typeof snapshotCommands[number]) => ({ command, args: { skillId: 'review' }, expectedDigest: command === 'snapshot_setup_skill' ? `sha256:${'a'.repeat(64)}` : null })
+
+it.each(snapshotCommands.flatMap(command => [undefined, false].map(supported => ({ command, supported }))))('rejects $command with setupSnapshots=$supported before inserting any job', async ({ command, supported }) => {
+  const { app, repository } = harness()
+  try {
+    const report = { ...capabilities, capabilities: { ...capabilities.capabilities, ...(supported === undefined ? {} : { setupSnapshots: supported }) } }
+    const identity = await connect(app, report)
+    const enqueue = vi.spyOn(repository, 'enqueueJob')
+    const response = await app.inject({ method: 'POST', url: `/api/v1/runners/${identity.deviceId}/library`, headers: actorHeaders, payload: snapshotRequest(command) })
+    expect(response.statusCode).toBe(409)
+    expect(enqueue).not.toHaveBeenCalled()
+    const claim = await app.inject({ method: 'POST', url: '/runner/v1/jobs/claim', headers: { authorization: `Bearer ${identity.credential}` }, payload: { capabilities: snapshotCapabilities, waitMs: 0 } })
+    expect(claim.statusCode).toBe(204)
+  } finally { await app.close() }
+})
+
+it.each([null, 'true', 1])('rejects a non-boolean setupSnapshots capability (%s) on enrollment and claim', async setupSnapshots => {
+  const { app } = harness()
+  try {
+    const report = { ...capabilities, capabilities: { ...capabilities.capabilities, setupSnapshots } }
+    const created = await app.inject({ method: 'POST', url: '/api/v1/runner-enrollments', headers: actorHeaders })
+    const enrolled = await app.inject({ method: 'POST', url: '/runner/v1/enroll', payload: { code: created.json().code, label: 'Invalid report', capabilities: report } })
+    expect(enrolled.statusCode).toBe(400)
+    const identity = await connect(app)
+    const claim = await app.inject({ method: 'POST', url: '/runner/v1/jobs/claim', headers: { authorization: `Bearer ${identity.credential}` }, payload: { capabilities: report, waitMs: 0 } })
+    expect(claim.statusCode).toBe(400)
+  } finally { await app.close() }
+})
+
+it.each(snapshotCommands.flatMap(command => ['pending', 'leased', 'acknowledged'].map(state => ({ command, state }))))('skips unsupported $state $command jobs without blocking ordinary work or losing them', async ({ command, state }) => {
+  const { app, service, repository, advance } = harness()
+  const actor = { organizationId: 'org_01', userId: 'user_01' }
+  try {
+    const identity = await connect(app, snapshotCapabilities)
+    const snapshot = await service.enqueueLibrary(actor, identity.deviceId, snapshotRequest(command))
+    let initialLease = null
+    if (state !== 'pending') {
+      initialLease = await service.claimJob(identity.credential, { capabilities: snapshotCapabilities })
+      expect(initialLease?.job.jobId).toBe(snapshot.jobId)
+      if (state === 'acknowledged') await acknowledge(app, { authorization: `Bearer ${identity.credential}` }, snapshot.jobId, initialLease!.leaseId)
+    }
+    const before = await repository.jobStatus(actor.organizationId, snapshot.jobId)
+    const ordinary = await service.enqueueLibrary(actor, identity.deviceId, { command: 'list_directories', args: { parent: null }, expectedDigest: null })
+    const legacyClaim = await service.claimJob(identity.credential, { capabilities })
+    expect(legacyClaim?.job.jobId).toBe(ordinary.jobId)
+    expect(await repository.jobStatus(actor.organizationId, snapshot.jobId)).toEqual(before)
+    const disabledClaim = await service.claimJob(identity.credential, { capabilities: { ...capabilities, capabilities: { ...capabilities.capabilities, setupSnapshots: false } } })
+    expect(disabledClaim?.job.jobId).toBe(ordinary.jobId)
+    expect(await repository.jobStatus(actor.organizationId, snapshot.jobId)).toEqual(before)
+    if (initialLease) {
+      const restored = await service.claimJob(identity.credential, { capabilities: snapshotCapabilities })
+      expect(restored?.job.jobId).toBe(snapshot.jobId)
+      expect(restored?.leaseId).toBe(initialLease.leaseId)
+    }
+    advance(1001)
+    const restored = await service.claimJob(identity.credential, { capabilities: snapshotCapabilities })
+    expect(restored?.job.jobId).toBe(snapshot.jobId)
+  } finally { await app.close() }
+})
 
 it('delivers device library actions before any project is connected and isolates their results', async () => {
   const { app } = harness()
@@ -142,7 +206,7 @@ async function acknowledge(
 it.each(['preview_setup_skill', 'snapshot_setup_skill'] as const)('persists a valid large %s manifest through HTTP result submission', async command => {
   const { app } = harness()
   try {
-    const identity = await connect(app)
+    const identity = await connect(app, snapshotCapabilities)
     const authorization = { authorization: `Bearer ${identity.credential}` }
     const contentDigest = `sha256:${'a'.repeat(64)}`
     // Three shared directories and these files fit the runner's 5,000-entry limit.
@@ -160,7 +224,7 @@ it.each(['preview_setup_skill', 'snapshot_setup_skill'] as const)('persists a va
       payload: { command, args: { skillId: 'review' }, expectedDigest: command === 'snapshot_setup_skill' ? contentDigest : null } })
     expect(queued.statusCode).toBe(200)
     const { jobId } = queued.json<{ jobId: string }>()
-    const claimed = await app.inject({ method: 'POST', url: '/runner/v1/jobs/claim', headers: authorization, payload: { capabilities, waitMs: 0 } })
+    const claimed = await app.inject({ method: 'POST', url: '/runner/v1/jobs/claim', headers: authorization, payload: { capabilities: snapshotCapabilities, waitMs: 0 } })
     expect(claimed.statusCode).toBe(200)
     const lease = claimed.json<{ leaseId: string; job: { idempotencyKey: string } }>()
     await acknowledge(app, authorization, jobId, lease.leaseId)

@@ -701,6 +701,7 @@ export const resources = {
       publishing: 'Publishing the reviewed snapshot…', saved: 'Setup version saved', savedVersion: '{{name}} · Version {{number}}',
       savedHelp: 'Open this exact version to inspect, compare, or use it on a project. No project assignment or local synchronization changed.', openSaved: 'Open saved Setup', done: 'Done', reviewAgain: 'Review again',
       runnerRequired: 'Connect the original computer to review and save this skill.', previewFailed: 'Could not review this skill. Check the runner connection, then review again. An older runner may need an update.',
+      runnerUpdateRequired: 'This computer\'s runner does not support saving skills to Setups. A runner with Setup snapshot support is required. Your existing skills and runner data are unchanged; do not reset them to enable this feature.',
       destinationFailed: 'Could not load this Setup. Review again before publishing.', publishFailed: 'Publication did not finish. The skill may have changed since review. Review again, or retry if only the connection failed.',
       setupNameTaken: 'A Setup with this name already exists. Choose it above or use another name.', setupRevisionConflict: 'A newer Setup version exists. Review again before adding this skill.',
       setupTargetConflict: 'This tool and folder name already exist in the Setup. Choose another folder name or destination; existing items will not be overwritten.',

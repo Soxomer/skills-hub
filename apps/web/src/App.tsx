@@ -33,6 +33,7 @@ export function App({ client: suppliedClient, onSignOut }: AppProps = {}) {
   }, [])
   const connected = Boolean(connection.runner?.lastSeenAt && connection.runner.capabilities?.capabilities.library && !connection.error && connectionDisplayState(connection.status, connection.runner) === 'connected')
   return <LibraryProvider client={client} deviceId={connection.runner?.deviceId ?? null} connected={connected} requestConnection={requestConnection}
+    setupSnapshotsSupported={connection.runner?.capabilities?.capabilities.setupSnapshots === true}
     onOpenSetup={(selection) => { setSetupSelection(selection); setWorkspace('setups') }}>
     <div className="library-surface">
       <SkillsHub workspacePage={workspace} skillsNavigationRequest={skillsNavigationRequest} onOpenWorkspace={setWorkspace} onCloseWorkspace={() => setWorkspace(null)} onSignOut={onSignOut}>

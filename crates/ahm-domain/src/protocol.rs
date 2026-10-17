@@ -175,6 +175,8 @@ pub fn negotiate_protocol_version(remote_versions: &[ProtocolVersion]) -> Option
 pub struct RunnerCapabilities {
     #[serde(default, skip_serializing_if = "is_false")]
     pub evaluate_setups: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub setup_snapshots: bool,
     pub library: bool,
     pub scan_project: bool,
     pub plan_setup: bool,
