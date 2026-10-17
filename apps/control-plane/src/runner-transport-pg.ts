@@ -1,4 +1,5 @@
 import { PROTOCOL_VERSION } from '@ahm/contracts'
+import { evaluationResultMatches } from './evaluation-results.js'
 import type {
   ArtifactBundle,
   JobEnvelope,
@@ -146,6 +147,8 @@ function resultMatchesJob(job: JobEnvelope, result: ResultEnvelope): boolean {
     return false
   }
   if (result.result.kind === 'error') return true
+  if (job.job.kind === 'evaluateSetups') return result.result.kind === 'evaluationResult' && result.projectInstanceId === null && evaluationResultMatches(job.job.payload, result.result.payload)
+  if (result.result.kind === 'evaluationResult') return false
   if (job.job.kind === 'libraryAction') return result.result.kind === 'libraryResponse' && result.projectInstanceId === null
   if (result.result.kind === 'libraryResponse') return false
   if (result.result.payload.projectId !== job.job.payload.projectId) return false
@@ -614,8 +617,10 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
          WHERE organization_id = $1 AND device_id = $2
            AND state IN ('leased', 'acknowledged')
            AND lease_expires_at > $3 AND job_kind = ANY($4::text[])
+           AND ($5::boolean OR job_kind <> 'libraryAction'
+                OR payload->>'command' NOT IN ('preview_setup_skill', 'snapshot_setup_skill'))
          ORDER BY issued_at LIMIT 1`,
-        [runner.organizationId, runner.deviceId, now, supportedKinds],
+        [runner.organizationId, runner.deviceId, now, supportedKinds, capabilities.capabilities.setupSnapshots === true],
       )
       if (existing.rows[0]) return this.leasedFromRow(existing.rows[0])
 
@@ -626,10 +631,12 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
                  AND (state = 'pending' OR lease_expires_at <= $3))
                 OR (state = 'acknowledged' AND lease_expires_at <= $3))
            AND job_kind = ANY($4::text[])
+           AND ($5::boolean OR job_kind <> 'libraryAction'
+                OR payload->>'command' NOT IN ('preview_setup_skill', 'snapshot_setup_skill'))
          ORDER BY issued_at
          LIMIT 1
          FOR UPDATE SKIP LOCKED`,
-        [runner.organizationId, runner.deviceId, now, supportedKinds],
+        [runner.organizationId, runner.deviceId, now, supportedKinds, capabilities.capabilities.setupSnapshots === true],
       )
       const job = selected.rows[0]
       if (!job) return null

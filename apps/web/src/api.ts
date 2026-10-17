@@ -1,5 +1,9 @@
 import type {
+  CreateEvaluationRequest,
+  EvaluationListResponse,
+  EvaluationSummary,
   ArtifactBundle,
+  AddLibrarySkillRequest,
   LibraryRequest,
   SetupLibraryResponse,
   SetupDetail,
@@ -57,6 +61,17 @@ export class ControlPlaneApiError extends Error {
 }
 
 export class ControlPlaneClient {
+  createEvaluation(request: CreateEvaluationRequest): Promise<EvaluationSummary> {
+    return this.send('/api/v1/evaluations', this.jsonRequest('POST', request))
+  }
+
+  evaluations(candidateRevisionId: string): Promise<EvaluationListResponse> {
+    return this.send(`/api/v1/evaluations?candidateRevisionId=${encodeURIComponent(candidateRevisionId)}`)
+  }
+
+  addLibrarySkillToSetup(request: AddLibrarySkillRequest): Promise<SetupRevisionSummary> {
+    return this.send('/api/v1/setups/library-skill', this.jsonRequest('POST', request))
+  }
   private readonly baseUrl: string
   private readonly request: typeof fetch
   private readonly options: ControlPlaneClientOptions

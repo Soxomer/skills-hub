@@ -1,0 +1,33 @@
+{
+  "protocolVersion": "1.0",
+  "jobId": "evaluation_01",
+  "idempotencyKey": "evaluation_request_01",
+  "organizationId": "org_01",
+  "deviceId": "device_01",
+  "projectInstanceId": null,
+  "issuedAt": "2026-10-15T08:10:00Z",
+  "expiresAt": "2026-10-15T08:30:00Z",
+  "job": {
+    "kind": "evaluateSetups",
+    "payload": {
+      "baseline": {
+        "setupId": "setup_01", "setupRevisionId": "revision_01", "revisionNumber": 1, "items": []
+      },
+      "candidate": {
+        "setupId": "setup_01", "setupRevisionId": "revision_02", "revisionNumber": 2,
+        "items": [{
+          "artifactId": "artifact_review", "artifactKind": "skill", "portableSource": null,
+          "contentDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "toolId": "codex", "targetName": "review"
+        }]
+      },
+      "suiteId": "code-review-v1",
+      "profile": {
+        "harness": "codex", "profileVersion": 1, "model": "fixture-model",
+        "reasoningEffort": "medium", "sandbox": "read-only", "timeoutSeconds": 120,
+        "contextMode": "skillInstructions"
+      },
+      "repetitions": 1
+    }
+  }
+}

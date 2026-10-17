@@ -7,8 +7,8 @@ use ahm_domain::{
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
-const RUNNER_SCHEMA_VERSION: i64 = 3;
-const RUNNER_SCHEMA_V3: &str = r#"
+const RUNNER_SCHEMA_VERSION: i64 = 4;
+const RUNNER_SCHEMA_V4: &str = r#"
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS runner_schema_migrations (
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS operation_journal (
   idempotency_key TEXT NOT NULL UNIQUE,
   request_digest TEXT NOT NULL,
   project_instance_id TEXT NULL REFERENCES project_instances(id) ON DELETE CASCADE,
-  operation_kind TEXT NOT NULL CHECK (operation_kind IN ('scanProject', 'planSetup', 'applyPlan', 'rollbackOperation', 'libraryAction')),
+  operation_kind TEXT NOT NULL CHECK (operation_kind IN ('scanProject', 'planSetup', 'applyPlan', 'rollbackOperation', 'libraryAction', 'evaluateSetups')),
   status TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'rolledBack')),
   plan_digest TEXT NULL,
   recoverability TEXT NOT NULL CHECK (recoverability IN ('notNeeded', 'rollbackAvailable', 'manualIntervention')),
@@ -101,7 +101,10 @@ VALUES (1, '2026-08-31T00:00:00Z');
 INSERT OR IGNORE INTO runner_schema_migrations (version, applied_at)
 VALUES (3, '2026-09-01T00:00:00Z');
 
-PRAGMA user_version = 3;
+INSERT OR IGNORE INTO runner_schema_migrations (version, applied_at)
+VALUES (4, '2026-10-15T00:00:00Z');
+
+PRAGMA user_version = 4;
 "#;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -125,6 +128,8 @@ pub struct ProjectInstanceRecord {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum JournalStartOutcome {
     Execute,
+    InterruptedEvaluation,
+    ArtifactPending { result_json: String },
     Completed { result_json: String },
     IdempotencyMismatch,
 }
@@ -241,9 +246,14 @@ impl RunnerStateStore {
         Ok(())
     }
 
-    /// An outbox belongs to the connection that produced it, not the next enrollment.
+    /// Pending uploads and results belong to the connection that produced them.
     pub fn ensure_reconnect_ready(&self) -> Result<(), RunnerStateError> {
-        if self.undelivered_outbox_count()? > 0 {
+        let pending_artifacts: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM operation_journal WHERE status = 'started' AND result_json IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        if self.undelivered_outbox_count()? > 0 || pending_artifacts > 0 {
             return Err(RunnerStateError::PendingResults);
         }
         Ok(())
@@ -392,7 +402,7 @@ impl RunnerStateStore {
         let transaction = self.connection.transaction()?;
         let existing = transaction
             .query_row(
-                "SELECT job_id, idempotency_key, request_digest, result_json
+                "SELECT job_id, idempotency_key, request_digest, result_json, status
                  FROM operation_journal
                  WHERE job_id = ?1 OR idempotency_key = ?2",
                 params![job.job_id.as_str(), job.idempotency_key.as_str()],
@@ -402,11 +412,12 @@ impl RunnerStateStore {
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
                     ))
                 },
             )
             .optional()?;
-        if let Some((job_id, idempotency_key, stored_digest, result_json)) = existing {
+        if let Some((job_id, idempotency_key, stored_digest, result_json, status)) = existing {
             if job_id != job.job_id.as_str()
                 || idempotency_key != job.idempotency_key.as_str()
                 || stored_digest != request_digest
@@ -414,6 +425,10 @@ impl RunnerStateStore {
                 return Ok(JournalStartOutcome::IdempotencyMismatch);
             }
             if let Some(result_json) = result_json {
+                if status == "started" {
+                    transaction.commit()?;
+                    return Ok(JournalStartOutcome::ArtifactPending { result_json });
+                }
                 transaction.execute(
                     "INSERT INTO result_outbox
                        (job_id, idempotency_key, lease_id, result_json, next_attempt_at)
@@ -437,6 +452,9 @@ impl RunnerStateStore {
                 return Ok(JournalStartOutcome::Completed { result_json });
             }
             transaction.commit()?;
+            if matches!(job.job, ahm_domain::RunnerJob::EvaluateSetups(_)) {
+                return Ok(JournalStartOutcome::InterruptedEvaluation);
+            }
             return Ok(JournalStartOutcome::Execute);
         }
 
@@ -457,6 +475,32 @@ impl RunnerStateStore {
         )?;
         transaction.commit()?;
         Ok(JournalStartOutcome::Execute)
+    }
+
+    /// Capture is durable, but success must stay out of the outbox until upload finishes.
+    pub(crate) fn checkpoint_artifact_result(
+        &self,
+        job: &JobEnvelope,
+        request_digest: &str,
+        result_json: &str,
+        result_digest: &str,
+    ) -> Result<(), RunnerStateError> {
+        let changed = self.connection.execute(
+            "UPDATE operation_journal SET result_json = ?1, result_digest = ?2
+             WHERE job_id = ?3 AND idempotency_key = ?4 AND request_digest = ?5
+               AND status = 'started' AND result_json IS NULL",
+            params![
+                result_json,
+                result_digest,
+                job.job_id.as_str(),
+                job.idempotency_key.as_str(),
+                request_digest
+            ],
+        )?;
+        if changed != 1 {
+            return Err(rusqlite::Error::QueryReturnedNoRows.into());
+        }
+        Ok(())
     }
 
     pub fn finish_job(
@@ -636,7 +680,7 @@ impl RunnerStateStore {
             .connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
         match version {
-            0 => self.connection.execute_batch(RUNNER_SCHEMA_V3)?,
+            0 => self.connection.execute_batch(RUNNER_SCHEMA_V4)?,
             RUNNER_SCHEMA_VERSION => {}
             other => return Err(RunnerStateError::UnsupportedSchema(other)),
         }
@@ -646,6 +690,7 @@ impl RunnerStateStore {
 
 fn job_kind(job: &JobEnvelope) -> &'static str {
     match job.job {
+        ahm_domain::RunnerJob::EvaluateSetups(_) => "evaluateSetups",
         ahm_domain::RunnerJob::LibraryAction(_) => "libraryAction",
         ahm_domain::RunnerJob::ScanProject(_) => "scanProject",
         ahm_domain::RunnerJob::PlanSetup(_) => "planSetup",
@@ -831,7 +876,7 @@ mod tests {
 
     #[test]
     fn old_poc_runner_state_requires_a_clean_database() {
-        for version in [1, 2] {
+        for version in [1, 2, 3] {
             let connection = Connection::open_in_memory().unwrap();
             connection
                 .pragma_update(None, "user_version", version)
@@ -840,5 +885,67 @@ mod tests {
                 matches!(RunnerStateStore::from_connection(connection), Err(RunnerStateError::UnsupportedSchema(v)) if v == version)
             );
         }
+    }
+
+    #[test]
+    fn interrupted_evaluation_is_not_executed_again() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("runner.db");
+        let job: ahm_domain::JobEnvelope = serde_json::from_str(include_str!(
+            "../../../packages/contracts/fixtures/v1/job-evaluation.json"
+        ))
+        .unwrap();
+        let mut store = open_file(&path);
+        assert_eq!(
+            store
+                .begin_job(&job, "lease_1", "request_digest", &timestamp())
+                .unwrap(),
+            JournalStartOutcome::Execute
+        );
+        drop(store);
+        let mut store = open_file(&path);
+        assert_eq!(
+            store
+                .begin_job(&job, "lease_2", "request_digest", &timestamp())
+                .unwrap(),
+            JournalStartOutcome::InterruptedEvaluation
+        );
+        assert_eq!(
+            store
+                .begin_job(&job, "lease_2", "different_digest", &timestamp())
+                .unwrap(),
+            JournalStartOutcome::IdempotencyMismatch
+        );
+    }
+
+    #[test]
+    fn completed_evaluation_replays_durable_result_without_execution() {
+        let mut store = RunnerStateStore::open_in_memory().unwrap();
+        let job: ahm_domain::JobEnvelope = serde_json::from_str(include_str!(
+            "../../../packages/contracts/fixtures/v1/job-evaluation.json"
+        ))
+        .unwrap();
+        let result = include_str!("../../../packages/contracts/fixtures/v1/result-evaluation.json");
+        store
+            .begin_job(&job, "lease_1", "request_digest", &timestamp())
+            .unwrap();
+        store
+            .finish_job(
+                &job,
+                "lease_1",
+                result,
+                "result_digest",
+                false,
+                &timestamp(),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .begin_job(&job, "lease_2", "request_digest", &timestamp())
+                .unwrap(),
+            JournalStartOutcome::Completed {
+                result_json: result.to_owned()
+            }
+        );
     }
 }

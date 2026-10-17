@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type MutableRefObject,
+  type ReactNode,
   type SetStateAction,
 } from 'react'
 import { checkForWebUpdate, getWebVersion, type WebUpdate } from './web-update'
@@ -95,7 +96,14 @@ type SkillScopeState = Record<
 
 type ActiveView = 'myskills' | 'explore' | 'detail' | 'settings' | 'manage'
 type ManagementTab = 'tags' | 'tools' | 'updates'
-function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void; onSignOut?: () => void }) {
+function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, skillsNavigationRequest = 0, children, onSignOut }: {
+  onOpenWorkspace: (page: 'projects' | 'setups' | 'skills') => void
+  onCloseWorkspace?: () => void
+  workspacePage?: 'projects' | 'setups' | 'skills' | null
+  skillsNavigationRequest?: number
+  children?: ReactNode
+  onSignOut?: () => void
+}) {
   const narrowWindow = useNarrowWindow()
   const { invokeLibrary, runnerConnected, pickDirectory, requestConnection } = useLibrary()
   const { t, i18n } = useTranslation('hub')
@@ -185,6 +193,7 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
     typeof window !== 'undefined' && window.localStorage.getItem(sidebarCollapsedStorageKey) === 'true',
   )
   const [activeView, setActiveView] = useState<ActiveView>('myskills')
+  const lastSkillsNavigation = useRef(skillsNavigationRequest)
   const [managementTab, setManagementTab] = useState<ManagementTab>('tags')
   const [detailSkill, setDetailSkill] = useState<ManagedSkill | null>(null)
   const [tags, setTags] = useState<TagWithCountDto[]>([])
@@ -1403,6 +1412,12 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
     },
     [loadFeaturedSkills],
   )
+
+  useEffect(() => {
+    if (lastSkillsNavigation.current === skillsNavigationRequest) return
+    lastSkillsNavigation.current = skillsNavigationRequest
+    handleViewChange('myskills')
+  }, [skillsNavigationRequest, handleViewChange])
 
   const handleOpenDetail = useCallback((skill: ManagedSkill) => {
     setBulkMode(false)
@@ -3534,6 +3549,7 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
 
   return (
     <div className={`skills-app${sidebarCollapsed || narrowWindow ? ' sidebar-collapsed' : ''}`}>
+      <a className="workspace-skip" href="#main-content">{t('workspaceNavigation.skip')}</a>
       <Toaster
         position="top-right"
         richColors
@@ -3549,6 +3565,7 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
 
       <Header
         onOpenWorkspace={onOpenWorkspace}
+        workspacePage={workspacePage}
         onSignOut={onSignOut}
         activeView={activeView}
         managementTab={managementTab}
@@ -3563,15 +3580,28 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
         updateDone={updateDone}
         collapsed={sidebarCollapsed || narrowWindow}
         onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
-        onOpenSettings={handleOpenSettings}
+        onOpenSettings={() => { onCloseWorkspace?.(); handleOpenSettings() }}
         onOpenUpdate={handleOpenUpdate}
         onRestart={handleRestartApp}
-        onViewChange={handleViewChange}
-        onManagementTabChange={handleManagementTabChange}
+        onViewChange={(view) => { onCloseWorkspace?.(); handleViewChange(view) }}
+        onManagementTabChange={(tab) => { onCloseWorkspace?.(); handleManagementTabChange(tab) }}
         t={t}
       />
 
-      <main className="skills-main">
+      <main id="main-content" tabIndex={-1} className="skills-main">
+        <div className="workspace-connection-bar">
+          <span className={`workspace-connection-state${runnerConnected ? ' is-connected' : ''}`}>{t(runnerConnected ? 'workspaceNavigation.connected' : 'workspaceNavigation.disconnected')}</span>
+          <button className="btn btn-secondary" type="button" onClick={() => void requestConnection?.()}>{t(runnerConnected ? 'workspaceNavigation.connection' : 'workspaceNavigation.connect')}</button>
+        </div>
+        {children}
+        <div hidden={workspacePage !== null}>
+        {!runnerConnected && activeView === 'myskills' && <section className="workspace-start" aria-labelledby="workspace-start-title">
+          <h1 id="workspace-start-title">{t('workspaceNavigation.startTitle')}</h1>
+          <p>{t('workspaceNavigation.startHelp')}</p>
+          <div className="workspace-start-actions"><button className="btn btn-primary" type="button" onClick={() => void requestConnection?.()}>{t('workspaceNavigation.connect')}</button>
+            <button className="btn btn-secondary" type="button" onClick={() => onOpenWorkspace('setups')}>{t('workspaceNavigation.savedSetups')}</button></div>
+          <p className="workspace-start-note">{t('workspaceNavigation.offlineHelp')}</p>
+        </section>}
         {pendingInstall && <div className="library-connection-notice" role="status">
           <button type="button" disabled={preparingInstall && !toolStatusFailed} onClick={() => {
             if (toolStatusFailed) setToolStatusAttempt(value => value + 1)
@@ -3591,7 +3621,7 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
             t={t}
           /></Suspense>
         ) : activeView === 'myskills' ? (
-          <div className="dashboard-stack">
+          <div className="dashboard-stack" hidden={!runnerConnected}>
             <section className="dashboard-stats" aria-label={t('navMySkills')}>
               <article>
                 <span>{t('stats.managed')}</span>
@@ -3848,6 +3878,7 @@ function SkillsHub({ onOpenWorkspace, onSignOut }: { onOpenWorkspace: () => void
             t={t}
           />
         )}
+        </div>
       </main>
 
       <RemoteSkillPreviewDrawer

@@ -234,6 +234,13 @@ pub fn execute_checked(
     );
     store.set_setting("runner_library_home", &home.to_string_lossy())?;
     let _lock = crate::project_lock::ProjectOperationLock::try_acquire(home)?;
+    if matches!(
+        request.command,
+        LibraryCommand::PreviewSetupSkill | LibraryCommand::SnapshotSetupSkill
+    ) {
+        anyhow::ensure!(!should_cancel()?, "CANCELLED|");
+        return crate::library_snapshot::snapshot(home, store, request);
+    }
     if request.command == LibraryCommand::ListDirectories {
         return directories(
             home,

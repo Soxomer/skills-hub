@@ -4,6 +4,7 @@
   "runnerVersion": "0.1.0",
   "deviceId": "device_01",
   "capabilities": {
+    "setupSnapshots": true,
     "scanProject": true,
     "planSetup": true,
     "applyPlan": true,

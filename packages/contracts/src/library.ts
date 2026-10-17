@@ -1,4 +1,6 @@
 export const LIBRARY_COMMANDS = [
+  "preview_setup_skill",
+  "snapshot_setup_skill",
   "list_directories",
   "get_tool_config",
   "set_tool_config",
@@ -62,6 +64,9 @@ export function isLibraryRequest(value: unknown): value is LibraryRequest {
   if (record.expectedDigest !== null && !(typeof record.expectedDigest === 'string' && /^sha256:[0-9a-f]{64}$/.test(record.expectedDigest))) return false
   if (!record.args || typeof record.args !== 'object' || Array.isArray(record.args)) return false
   const args = record.args as Record<string, unknown>
+  if (record.command === 'preview_setup_skill' && record.expectedDigest !== null) return false
+  if (record.command === 'snapshot_setup_skill' && record.expectedDigest === null) return false
+  if (['preview_setup_skill', 'snapshot_setup_skill'].includes(String(record.command)) && (typeof args.skillId !== 'string' || !args.skillId.trim() || args.skillId.length > 200)) return false
   const schema = LIBRARY_ARGUMENTS[record.command as LibraryCommand]
   if (Object.keys(args).some(key => !(key in schema))) return false
   for (const [key, type] of Object.entries(schema)) {
@@ -100,6 +105,8 @@ function isToolConfig(value: unknown): boolean {
     && ['auto', 'symlink', 'junction', 'copy'].includes(String(tool.sync_mode)) && typeof tool.enabled === 'boolean')
 }
 export const LIBRARY_ARGUMENTS: Record<LibraryCommand, Record<string, string>> = {
+  "preview_setup_skill": { "skillId": "String" },
+  "snapshot_setup_skill": { "skillId": "String" },
   "list_directories": { "parent": "Option<String>" },
   "get_tool_config": {},
   "set_tool_config": {

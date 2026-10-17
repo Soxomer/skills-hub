@@ -14,6 +14,9 @@ pub fn execute(
     _cancel: &Arc<CancelToken>,
 ) -> anyhow::Result<Value> {
     let value = match command {
+        LibraryCommand::PreviewSetupSkill | LibraryCommand::SnapshotSetupSkill => {
+            unreachable!("handled by library service")
+        }
         LibraryCommand::ListDirectories => unreachable!("handled by library service"),
         LibraryCommand::GetToolConfig => serde_json::to_value(
             commands::get_tool_config(store.clone()).map_err(anyhow::Error::msg)?,
@@ -308,6 +311,20 @@ pub fn execute(
 }
 
 pub fn validate(command: &LibraryCommand, args: &Map<String, Value>) -> anyhow::Result<()> {
+    if matches!(
+        command,
+        LibraryCommand::PreviewSetupSkill | LibraryCommand::SnapshotSetupSkill
+    ) {
+        anyhow::ensure!(
+            args.len() == 1
+                && args
+                    .get("skillId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| !id.is_empty() && id.len() <= 200),
+            "Invalid skill snapshot arguments"
+        );
+        return Ok(());
+    }
     match command {
         LibraryCommand::GetToolConfig => {
             anyhow::ensure!(args.is_empty(), "Unexpected library arguments");
@@ -680,6 +697,9 @@ pub fn validate(command: &LibraryCommand, args: &Map<String, Value>) -> anyhow::
             );
             let _: Option<String> =
                 serde_json::from_value(args.get("parent").cloned().unwrap_or(Value::Null))?;
+        }
+        LibraryCommand::PreviewSetupSkill | LibraryCommand::SnapshotSetupSkill => {
+            unreachable!("validated above")
         }
     }
     Ok(())

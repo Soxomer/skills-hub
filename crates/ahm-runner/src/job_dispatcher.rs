@@ -156,6 +156,13 @@ impl LocalJobExecutor {
         job: &JobEnvelope,
         now: &IsoTimestamp,
     ) -> RunnerResult {
+        if let RunnerJob::EvaluateSetups(request) = &job.job {
+            return RunnerResult::EvaluationResult(Box::new(crate::evaluation::incomplete(
+                request,
+                ahm_domain::EvaluationVariantStatus::Cancelled,
+                "Evaluation cancelled before execution.",
+            )));
+        }
         let Some(project) = project else {
             return protocol_error(ProtocolErrorCode::JobCancelled, "job was cancelled", false);
         };
@@ -283,6 +290,20 @@ impl JobExecutor for LocalJobExecutor {
             recovery_error
         } else if is_expired(&job.expires_at, now) {
             protocol_error(ProtocolErrorCode::ExpiredJob, "job has expired", false)
+        } else if let RunnerJob::EvaluateSetups(request) = &job.job {
+            if job.project_instance_id.is_some() {
+                protocol_error(
+                    ProtocolErrorCode::Conflict,
+                    "Evaluations belong to a device, not a project checkout",
+                    false,
+                )
+            } else {
+                RunnerResult::EvaluationResult(Box::new(self.runner.evaluate(
+                    &self.home,
+                    request,
+                    should_cancel,
+                )))
+            }
         } else if let RunnerJob::LibraryAction(request) = &job.job {
             if job.project_instance_id.is_some() {
                 protocol_error(
@@ -314,7 +335,9 @@ impl JobExecutor for LocalJobExecutor {
                 )
             } else {
                 match &job.job {
-                    RunnerJob::LibraryAction(_) => unreachable!("device job handled above"),
+                    RunnerJob::LibraryAction(_) | RunnerJob::EvaluateSetups(_) => {
+                        unreachable!("device job handled above")
+                    }
                     RunnerJob::ScanProject(scan) if scan.project_id == project.project_id => {
                         self.execute_scan(job, project, &scan.project_id, scan.include_unmanaged)
                     }
@@ -545,6 +568,8 @@ fn is_expired(expires_at: &IsoTimestamp, now: &IsoTimestamp) -> bool {
 
 pub fn runner_capabilities() -> RunnerCapabilities {
     RunnerCapabilities {
+        evaluate_setups: cfg!(any(windows, target_os = "linux")),
+        setup_snapshots: true,
         library: true,
         scan_project: true,
         plan_setup: true,
@@ -853,6 +878,17 @@ mod tests {
 
     fn identifier(value: &str) -> Identifier {
         Identifier::new(value).unwrap()
+    }
+
+    #[test]
+    fn runner_advertises_setup_snapshot_support() {
+        let capabilities = runner_capabilities();
+        assert!(capabilities.library);
+        assert!(capabilities.setup_snapshots);
+        assert_eq!(
+            serde_json::to_value(capabilities).unwrap()["setupSnapshots"],
+            true
+        );
     }
 
     #[test]

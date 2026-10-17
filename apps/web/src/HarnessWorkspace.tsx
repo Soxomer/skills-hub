@@ -30,10 +30,19 @@ function dateTime(value: string | null): string | null {
   }).format(new Date(value))
 }
 
-interface HarnessWorkspaceProps { client: ControlPlaneClient; connection: ReturnType<typeof useRunnerConnection>; onSignOut?: () => void; onConnect?: () => void }
-export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connection, onSignOut, onConnect }: HarnessWorkspaceProps) {
+interface HarnessWorkspaceProps {
+  client: ControlPlaneClient
+  connection: ReturnType<typeof useRunnerConnection>
+  page: 'projects' | 'setups' | 'skills' | null
+  onPageChange: (page: 'projects' | 'setups' | 'skills') => void
+  setupSelection?: { setupId: string; setupRevisionId: string }
+  onSkills?: () => void
+  onConnect?: () => void
+}
+export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connection, page, onPageChange, setupSelection, onSkills, onConnect }: HarnessWorkspaceProps) {
   const { t } = useTranslation()
-  const [page, setPage] = useState<'projects' | 'setups' | 'skills'>('projects')
+  const [visited, setVisited] = useState<Set<string>>(() => new Set(page ? [page] : []))
+  if (page && !visited.has(page)) setVisited(new Set([...visited, page]))
   const effectiveStatus =
     connection.status ??
     (connection.enrollment
@@ -46,37 +55,18 @@ export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connect
       : null)
   const displayState = connectionDisplayState(effectiveStatus, connection.runner)
   return (
-    <div className="app-shell harness-workspace" data-protocol-version={PROTOCOL_VERSION}>
-      <header className="topbar">
-        <a className="brand" href="#main-content" aria-label={t('brand.name')}>
-          <span className="brand-mark" aria-hidden="true">
-            AH
-          </span>
-          <span>
-            <strong>{t('brand.name')}</strong>
-            <small>{t('brand.eyebrow')}</small>
-          </span>
-        </a>
-        <nav className="primary-nav" aria-label={t('library.navigation')}>
-          {(['skills', 'projects', 'setups'] as const).map((area) => (
-            <button key={area} type="button" aria-current={page === area ? 'page' : undefined}
-              onClick={() => setPage(area)}>{t(`library.${area}`)}</button>
-          ))}
-        </nav>
-        {onSignOut && <button className="text-button" type="button" onClick={onSignOut}>{t('auth.signOut')}</button>}
-      </header>
-
-      <main id="main-content" className="workspace" data-page={page}>
-        {page === 'skills' ? <SkillLibrary key={connection.runner?.deviceId ?? 'unconnected'} runner={connection.runner} online={displayState === 'connected'} error={Boolean(connection.error)} onRefresh={connection.refresh} onProjects={() => setPage('projects')} /> : page === 'setups' ? <SetupLibrary client={client} onProjects={() => setPage('projects')} /> : <>
+    <div className="harness-workspace workspace-integrated" hidden={page === null} data-protocol-version={PROTOCOL_VERSION}>
+      <div className="workspace">
+        <section hidden={page !== 'skills'} data-page="skills">{visited.has('skills') && <SkillLibrary key={connection.runner?.deviceId ?? 'unconnected'} runner={connection.runner} online={displayState === 'connected'} error={Boolean(connection.error)} onRefresh={connection.refresh} onProjects={() => onPageChange('projects')} />}</section>
+        <section hidden={page !== 'setups'} data-page="setups">{visited.has('setups') && <SetupLibrary key={setupSelection?.setupRevisionId ?? 'library'} active={page === 'setups'} initialSelection={setupSelection} client={client} onSkills={onSkills} onProjects={() => onPageChange('projects')} runner={connection.runner} runnerOnline={displayState === 'connected'} />}</section>
+        <section hidden={page !== 'projects'} data-page="projects">{visited.has('projects') && <>
         <div className="page-heading">
           <div>
-            <p className="eyebrow">{t('brand.eyebrow')}</p>
             <h1>{t('page.title')}</h1>
             <p>{t('page.description')}</p>
           </div>
           <div className="heading-status" aria-label={t('status.label')}>
             <ConnectionBadge state={displayState} />
-            <span>{t('page.protocol', { version: PROTOCOL_VERSION })}</span>
           </div>
         </div>
 
@@ -215,8 +205,8 @@ export const HarnessWorkspace = memo(function HarnessWorkspace({ client, connect
             />
           </div>
         )}
-        </>}
-      </main>
+        </>}</section>
+      </div>
     </div>
   )
 })
@@ -229,7 +219,6 @@ function RunnerSummary({ runner }: { runner: RunnerStatusResponse }) {
         <ShieldCheck size={24} />
       </div>
       <div className="summary-copy">
-        <p className="eyebrow">{t('runner.step')}</p>
         <h2 id="runner-title">{t('runner.title', { label: runner.label })}</h2>
         <p>{t('runner.description')}</p>
       </div>

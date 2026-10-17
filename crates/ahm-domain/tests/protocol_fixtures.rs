@@ -24,7 +24,7 @@ fn golden_fixtures_parse_and_round_trip_without_drift() {
         .collect::<Vec<_>>();
     paths.sort();
 
-    assert_eq!(paths.len(), 13);
+    assert_eq!(paths.len(), 18);
     for path in paths {
         let source: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         let envelope: ProtocolEnvelope = serde_json::from_value(source.clone())
@@ -39,6 +39,48 @@ fn unknown_fields_are_rejected() {
     value["command"] = Value::String("rm -rf project".to_owned());
 
     assert!(serde_json::from_value::<ProtocolEnvelope>(value).is_err());
+}
+
+#[test]
+fn setup_snapshot_capability_is_explicit_and_defaults_to_false() {
+    let mut value = fixture("capabilities.json");
+    let supported: ahm_domain::CapabilityEnvelope = serde_json::from_value(value.clone()).unwrap();
+    assert!(supported.capabilities.setup_snapshots);
+    value["capabilities"]
+        .as_object_mut()
+        .unwrap()
+        .remove("setupSnapshots");
+    let legacy: ahm_domain::CapabilityEnvelope = serde_json::from_value(value.clone()).unwrap();
+    assert!(!legacy.capabilities.setup_snapshots);
+    value["capabilities"]["setupSnapshots"] = false.into();
+    let disabled: ahm_domain::CapabilityEnvelope = serde_json::from_value(value.clone()).unwrap();
+    assert!(!disabled.capabilities.setup_snapshots);
+    for invalid in [Value::Null, "true".into(), 1.into()] {
+        value["capabilities"]["setupSnapshots"] = invalid;
+        assert!(serde_json::from_value::<ahm_domain::CapabilityEnvelope>(value.clone()).is_err());
+    }
+}
+
+#[test]
+fn evaluation_profile_and_repetition_limits_are_validated() {
+    let value = fixture("job-evaluation.json");
+    let envelope: ahm_domain::JobEnvelope = serde_json::from_value(value.clone()).unwrap();
+    let ahm_domain::RunnerJob::EvaluateSetups(mut job) = envelope.job else {
+        panic!("expected evaluation fixture");
+    };
+    assert!(job.validate().is_ok());
+    job.repetitions = 2;
+    assert!(job.validate().is_err());
+    job.repetitions = 1;
+    job.profile.timeout_seconds = 121;
+    assert!(job.validate().is_err());
+    job.profile.timeout_seconds = 120;
+    job.profile.model = ahm_domain::Identifier::new("model with flags").unwrap();
+    assert!(job.validate().is_err());
+
+    let mut value = value;
+    value["job"]["payload"]["profile"]["sandbox"] = "danger-full-access".into();
+    assert!(serde_json::from_value::<ahm_domain::JobEnvelope>(value).is_err());
 }
 
 #[test]

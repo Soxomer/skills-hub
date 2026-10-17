@@ -6,6 +6,38 @@ import type {
 } from './protocol.js'
 import type { SetupRevisionSummary } from './switching.js'
 
+/** Metadata only during preview. File bytes leave the runner only after publication consent. */
+export interface LibrarySetupSnapshot {
+  artifactId: string
+  name: string
+  contentDigest: string
+  portableSource: string | null
+  supportedTools: string[]
+  files: { path: string; size: number }[]
+}
+
+export interface AddLibrarySkillRequest {
+  snapshotJobId: string
+  contentDigest: string
+  destination: { name: string } | { setupId: string; expectedRevisionNumber: number }
+  targets: { toolId: string; targetName: string }[]
+}
+
+export function isLibrarySetupSnapshot(value: unknown): value is LibrarySetupSnapshot {
+  if (!value || typeof value !== 'object') return false
+  const v = value as LibrarySetupSnapshot
+  const key = (s: unknown): s is string => typeof s === 'string' && /^[a-zA-Z0-9_-]{1,200}$/.test(s)
+  return key(v.artifactId) && typeof v.name === 'string' && v.name.length > 0 && v.name.length <= 200
+    && typeof v.contentDigest === 'string' && /^sha256:[a-f0-9]{64}$/.test(v.contentDigest)
+    && (v.portableSource === null || (typeof v.portableSource === 'string' && /^https:\/\/github\.com\/[a-zA-Z0-9_./-]+$/.test(v.portableSource)))
+    && Array.isArray(v.supportedTools) && v.supportedTools.length <= 100 && v.supportedTools.every(key)
+    && Array.isArray(v.files) && v.files.length > 0 && v.files.length <= 5000 && v.files.every(f =>
+      f && typeof f.path === 'string' && f.path.length <= 500 && f.path.length > 0
+      && !/[\\:]/.test(f.path) && ![...f.path].some(c => c.charCodeAt(0) < 32) && !f.path.split('/').some(p => !p || ['.', '..', '.git'].includes(p))
+      && Number.isSafeInteger(f.size) && f.size >= 0)
+    && v.files.some(f => f.path === 'SKILL.md') && v.files.reduce((sum, f) => sum + f.size, 0) <= 10 * 1024 * 1024
+}
+
 export interface SetupLibrarySummary {
   setupId: string
   name: string

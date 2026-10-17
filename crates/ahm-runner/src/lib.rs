@@ -6,6 +6,7 @@ pub mod cache_cleanup;
 pub mod cancel_token;
 pub mod central_repo;
 pub mod content_hash;
+pub mod evaluation;
 pub mod execution;
 pub mod featured_skills;
 pub mod git_fetcher;
@@ -58,3 +59,4 @@ mod tests {
         );
     }
 }
+mod library_snapshot;

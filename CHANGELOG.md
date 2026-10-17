@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-13
+
+### Added
+- Save a managed skill from My Skills into an existing or new Setup as an immutable, reviewed snapshot. Existing Setup contents are preserved in a new version; publishing does not assign or apply it to a project.
+- Runner preview and consented snapshot commands, portable file manifests, stale-content checks, and transactional, retry-safe Setup publication.
+
+### Changed
+- Move Add to Setup beside the skill title and separate Existing Setup and New Setup choices, with explicit confirmation labels.
+- Run the real Rust worker-to-PostgreSQL integration test in CI alongside the browser and API tests.
+
+### Fixed
+- Resume interrupted snapshot uploads from durable captured content, even after source updates or deletion.
+- Accept bounded large runner results and artifacts without exceeding HTTP body limits, and reject unuploadable snapshot paths during preview.
+
 ## [0.9.1] - 2026-08-29
 
 ### Changed

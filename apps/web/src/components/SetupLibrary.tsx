@@ -1,28 +1,32 @@
-import type { ArtifactBundle, SetupComposerItem, SetupDetail, SetupLibrarySummary, SetupRevisionDetail } from '@ahm/contracts'
+import type { ArtifactBundle, RunnerStatusResponse, SetupComposerItem, SetupDetail, SetupLibrarySummary, SetupRevisionDetail } from '@ahm/contracts'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ControlPlaneApiError, type ControlPlaneClient } from '../api'
+import { UseSetupOnProject } from './UseSetupOnProject'
+import { SetupEvaluation } from './SetupEvaluation'
+import type { SavedSetupSelection } from '../hub/library-context'
 
-interface SetupLibraryProps { client: ControlPlaneClient; onProjects: () => void }
+interface SetupLibraryProps { client: ControlPlaneClient; onProjects: () => void; onSkills?: () => void; initialSelection?: SavedSetupSelection; runner?: RunnerStatusResponse | null; runnerOnline?: boolean; active?: boolean }
 
-export function SetupLibrary({ client, onProjects }: SetupLibraryProps) {
+export function SetupLibrary({ client, onProjects, onSkills, initialSelection, runner = null, runnerOnline = false, active = true }: SetupLibraryProps) {
   const { t } = useTranslation()
   const [setups, setSetups] = useState<SetupLibrarySummary[] | null>(null)
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<{ setupId: string; setupRevisionId?: string } | null>(initialSelection ?? null)
   const [creating, setCreating] = useState(false)
   const [reload, setReload] = useState(0)
   const [error, setError] = useState(false)
   const [query, setQuery] = useState('')
   useEffect(() => {
+    if (!active) return
     let live = true
     client.setups().then((result) => { if (live) { setSetups(result.setups); setError(false) } })
       .catch(() => { if (live) setError(true) })
     return () => { live = false }
-  }, [client, reload])
-  function saved(setupId: string) { setCreating(false); setSelected(setupId); setReload((n) => n + 1) }
-  if (creating) return <SetupEditor client={client} onCancel={() => setCreating(false)} onSaved={saved} />
-  if (selected) return <SetupDetails key={selected} client={client} setupId={selected}
-    onBack={() => { setSelected(null); setReload((n) => n + 1) }} onSaved={saved} />
+  }, [client, reload, active])
+  function saved(setupId: string) { setCreating(false); setSelected({ setupId }); setReload((n) => n + 1) }
+  if (creating) return <SetupEditor client={client} active={active} onCancel={() => setCreating(false)} onSaved={saved} onSkills={onSkills} onProjects={onProjects} />
+  if (selected) return <SetupDetails key={selected.setupId} client={client} active={active} setupId={selected.setupId} initialRevisionId={selected.setupRevisionId}
+    onBack={() => { setSelected(null); setReload((n) => n + 1) }} onSaved={saved} runner={runner} runnerOnline={runnerOnline} onProjects={onProjects} />
   return <>
     <div className="page-heading">
       <div><h1>{t('library.setups')}</h1><p>{t('library.description')}</p></div>
@@ -36,7 +40,7 @@ export function SetupLibrary({ client, onProjects }: SetupLibraryProps) {
     {Boolean(setups?.length) && <>
       <label className="library-field">{t('library.search')}<input type="search" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
       <ul className="library-list">{setups!.filter((setup) => setup.name.toLowerCase().includes(query.toLowerCase())).map((setup) =>
-        <li key={setup.setupId}><button type="button" className="library-row" onClick={() => setSelected(setup.setupId)}>
+        <li key={setup.setupId}><button type="button" className="library-row" onClick={() => setSelected({ setupId: setup.setupId })}>
           <span><strong>{setup.name}</strong><small>{t(`library.kind.${setup.kind}`)}</small></span>
           <span>{t('library.version', { number: setup.latestRevision.revisionNumber })}<small>{t('library.items', { count: setup.latestRevision.itemCount })}</small></span>
           <span>{t('library.projectsCount', { count: setup.projectCount })}</span>
@@ -46,24 +50,32 @@ export function SetupLibrary({ client, onProjects }: SetupLibraryProps) {
   </>
 }
 
-interface SetupDetailsProps { client: ControlPlaneClient; setupId: string; onBack: () => void; onSaved: (id: string) => void }
+interface SetupDetailsProps { client: ControlPlaneClient; setupId: string; initialRevisionId?: string; onBack: () => void; onSaved: (id: string) => void; runner: RunnerStatusResponse | null; runnerOnline: boolean; onProjects: () => void; active: boolean }
 
-function SetupDetails({ client, setupId, onBack, onSaved }: SetupDetailsProps) {
+function SetupDetails({ client, setupId, initialRevisionId, onBack, onSaved, runner, runnerOnline, onProjects, active }: SetupDetailsProps) {
   const { t } = useTranslation()
   const [detail, setDetail] = useState<SetupDetail | null>(null)
-  const [revisionId, setRevisionId] = useState<string | null>(null)
-  const [mode, setMode] = useState<'edit' | 'clone' | null>(null)
+  const [revisionId, setRevisionId] = useState<string | null>(initialRevisionId ?? null)
+  const [mode, setMode] = useState<'edit' | 'clone' | 'use' | 'evaluate' | null>(null)
   const [error, setError] = useState(false)
   const [reload, setReload] = useState(0)
   useEffect(() => {
+    // A working editor/comparison/destination owns its exact loaded revision.
+    // Refresh details only after returning to inspection, never underneath it.
+    if (!active || mode !== null) return
     let live = true
     client.setup(setupId).then((value) => { if (live) { setDetail(value); setError(false) } })
       .catch(() => { if (live) setError(true) })
     return () => { live = false }
-  }, [client, setupId, reload])
+  }, [client, setupId, reload, active, mode])
   const revisions = detail?.revisions.toSorted((a, b) => b.revisionNumber - a.revisionNumber) ?? []
-  const revision = revisions.find((entry) => entry.setupRevisionId === revisionId) ?? revisions[0]
-  if (mode && detail && revision) return <SetupEditor key={`${mode}-${revision.setupRevisionId}`} client={client}
+  const revision = revisionId ? revisions.find((entry) => entry.setupRevisionId === revisionId) : revisions[0]
+  if (mode === 'evaluate' && revision) return <SetupEvaluation key={revision.setupRevisionId} client={client} active={active}
+    candidate={revision} runner={runner} runnerOnline={runnerOnline} onBack={() => setMode(null)} onProjects={onProjects} />
+  if (mode === 'use' && detail && revision) return <UseSetupOnProject client={client} revision={revision} active={active}
+    defaultProjectId={detail.defaultProjectId} runner={runner} runnerOnline={runnerOnline}
+    onBack={() => setMode(null)} onProjects={onProjects} />
+  if (mode && mode !== 'use' && mode !== 'evaluate' && detail && revision) return <SetupEditor key={`${mode}-${revision.setupRevisionId}`} client={client} active={active}
     base={revision} detail={mode === 'edit' ? detail : undefined} onCancel={() => { setMode(null); setDetail(null); setReload((n) => n + 1) }}
     onSaved={(id) => { setMode(null); setDetail(null); setRevisionId(null); setReload((n) => n + 1); onSaved(id) }} />
   const previous = revisions.find((entry) => entry.revisionNumber === (revision?.revisionNumber ?? 0) - 1)
@@ -72,10 +84,13 @@ function SetupDetails({ client, setupId, onBack, onSaved }: SetupDetailsProps) {
     <button type="button" className="secondary-button library-back" onClick={onBack}>{t('library.back')}</button>
     {error && <div role="alert" className="notice notice--error">{t('library.loadError')}<button type="button" className="secondary-button" onClick={() => setReload((n) => n + 1)}>{t('errors.retry')}</button></div>}
     {!detail && !error && <p role="status">{t('library.loading')}</p>}
+    {detail && revisionId && !revision && <p role="alert" className="notice notice--warning">{t('library.revisionUnavailable')}</p>}
     {detail && revision && <>
       <div className="page-heading"><div><h1>{detail.name}</h1><p>{t('library.publishSafety')}</p></div>
         <div className="library-actions"><button type="button" className="secondary-button" onClick={() => setMode('clone')}>{t('library.clone')}</button>
-          <button type="button" className="primary-button" onClick={() => setMode('edit')}>{t('library.edit')}</button></div></div>
+          <button type="button" className="secondary-button" onClick={() => setMode('edit')}>{t('library.edit')}</button>
+          <button type="button" className="secondary-button" onClick={() => setMode('evaluate')}>{t('evaluation.action')}</button>
+          <button type="button" className="primary-button" onClick={() => setMode('use')}>{t('useSetup.action')}</button></div></div>
       <label className="library-field">{t('library.history')}<select value={revision.setupRevisionId} onChange={(event) => setRevisionId(event.target.value)}>
         {revisions.map((entry) => <option key={entry.setupRevisionId} value={entry.setupRevisionId}>{t('library.version', { number: entry.revisionNumber })}{entry.setupRevisionId === detail.initialSetupRevisionId && detail.kind === 'default' ? ` — ${t('library.initialDefault')}` : ''}</option>)}
       </select></label>
@@ -84,7 +99,7 @@ function SetupDetails({ client, setupId, onBack, onSaved }: SetupDetailsProps) {
         <ChangeList changes={changes} /></section>}
       <section className="library-section"><h2>{t('library.contents')}</h2>
         {revision.items.length === 0 ? <p>{t('library.noItems')}</p> : <ul className="library-list">{revision.items.map((item) =>
-          <li key={itemKey(item)}><ArtifactInspector key={`${revision.setupRevisionId}-${itemKey(item)}`} client={client} setupId={setupId} revisionId={revision.setupRevisionId} item={item} /></li>)}</ul>}
+          <li key={itemKey(item)}><ArtifactInspector key={`${revision.setupRevisionId}-${itemKey(item)}`} client={client} active={active} setupId={setupId} revisionId={revision.setupRevisionId} item={item} /></li>)}</ul>}
       </section>
       <section className="library-section"><h2>{t('library.usage')}</h2><p className="library-muted">{t('library.usageHelp')}</p>
         {detail.projects.length === 0 ? <p>{t('library.unused')}</p> : <ul className="library-list">{detail.projects.map((project) =>
@@ -115,9 +130,9 @@ function ChangeList({ changes }: { changes: ItemChange[] }) {
   return changes.length ? <ul className="library-change-list">{changes.map((change) => <li key={`${change.kind}-${change.label}`}><strong>{t(`library.change.${change.kind}`)}</strong> {change.label}</li>)}</ul> : <p>{t('library.unchanged')}</p>
 }
 
-interface SetupEditorProps { client: ControlPlaneClient; base?: SetupRevisionDetail; detail?: SetupDetail; onCancel: () => void; onSaved: (id: string) => void }
+interface SetupEditorProps { client: ControlPlaneClient; base?: SetupRevisionDetail; detail?: SetupDetail; onCancel: () => void; onSaved: (id: string) => void; onSkills?: () => void; onProjects?: () => void; active: boolean }
 
-function SetupEditor({ client, base, detail, onCancel, onSaved }: SetupEditorProps) {
+function SetupEditor({ client, base, detail, onCancel, onSaved, onSkills, onProjects, active }: SetupEditorProps) {
   const { t } = useTranslation()
   const [items, setItems] = useState<SetupComposerItem[] | null>(null)
   const [selected, setSelected] = useState(new Set(base?.items.map(itemKey) ?? []))
@@ -127,12 +142,13 @@ function SetupEditor({ client, base, detail, onCancel, onSaved }: SetupEditorPro
   const [saving, setSaving] = useState(false)
   const [reload, setReload] = useState(0)
   useEffect(() => {
+    if (!active) return
     let live = true
     client.setupComposer().then((value) => {
       if (live) { setItems([...new Map([...(base?.items ?? []), ...value.items].map((item) => [itemKey(item), item])).values()]); setError(null) }
     }).catch(() => { if (live) setError('loadError') })
     return () => { live = false }
-  }, [client, base, reload])
+  }, [client, base, reload, active])
   const chosen = items?.filter((item) => selected.has(itemKey(item))) ?? []
   const latest = detail ? Math.max(...detail.revisions.map((revision) => revision.revisionNumber)) : null
   const comparisonBase = detail?.revisions.find((revision) => revision.revisionNumber === latest) ?? base
@@ -158,7 +174,10 @@ function SetupEditor({ client, base, detail, onCancel, onSaved }: SetupEditorPro
     {!items && !error && <p role="status">{t('library.loading')}</p>}
     {items && <>
       <label className="library-field">{t('library.filterItems')}<input type="search" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-      {items.length === 0 && <p>{t('library.emptyDescription')}</p>}
+      {items.length === 0 && <div className="library-empty"><p>{t('library.composerEmpty')}</p><div className="library-actions">
+        {onSkills && <button type="button" className="secondary-button" onClick={onSkills}>{t('library.goSkills')}</button>}
+        {onProjects && <button type="button" className="secondary-button" onClick={onProjects}>{t('library.goProjects')}</button>}
+      </div></div>}
       <ul className="library-list">{items.filter((item) => `${item.targetName} ${item.toolId} ${item.sourceSetupName}`.toLowerCase().includes(query.toLowerCase())).map((item) =>
         <li key={itemKey(item)}><label className="library-choice"><input type="checkbox" checked={selected.has(itemKey(item))} disabled={saving} onChange={(event) => {
           const next = new Set(selected)
@@ -177,8 +196,8 @@ function SetupEditor({ client, base, detail, onCancel, onSaved }: SetupEditorPro
   </form>
 }
 
-interface ArtifactInspectorProps { client: ControlPlaneClient; setupId: string; revisionId: string; item: SetupComposerItem }
-function ArtifactInspector({ client, setupId, revisionId, item }: ArtifactInspectorProps) {
+interface ArtifactInspectorProps { client: ControlPlaneClient; setupId: string; revisionId: string; item: SetupComposerItem; active: boolean }
+function ArtifactInspector({ client, setupId, revisionId, item, active }: ArtifactInspectorProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [bundle, setBundle] = useState<ArtifactBundle | null>(null)
@@ -186,12 +205,12 @@ function ArtifactInspector({ client, setupId, revisionId, item }: ArtifactInspec
   const [path, setPath] = useState<string | null>(null)
   const [reload, setReload] = useState(0)
   useEffect(() => {
-    if (!open) return
+    if (!active || !open) return
     let live = true
     client.setupArtifact(setupId, revisionId, item.contentDigest).then((value) => { if (live) { setBundle(value); setError(false) } })
       .catch(() => { if (live) setError(true) })
     return () => { live = false }
-  }, [client, setupId, revisionId, item.contentDigest, open, reload])
+  }, [client, setupId, revisionId, item.contentDigest, open, reload, active])
   const files = bundle?.entries.filter((entry) => entry.kind === 'file') ?? []
   const file = files.find((entry) => entry.path === path) ?? files.find((entry) => entry.path.endsWith('SKILL.md')) ?? files[0]
   let content: string | null = null

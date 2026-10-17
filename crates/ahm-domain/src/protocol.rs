@@ -173,12 +173,20 @@ pub fn negotiate_protocol_version(remote_versions: &[ProtocolVersion]) -> Option
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunnerCapabilities {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub evaluate_setups: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub setup_snapshots: bool,
     pub library: bool,
     pub scan_project: bool,
     pub plan_setup: bool,
     pub apply_plan: bool,
     pub rollback_operation: bool,
     pub supported_tools: Vec<Identifier>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -194,6 +202,7 @@ pub struct CapabilityEnvelope {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "payload", rename_all = "camelCase")]
 pub enum RunnerJob {
+    EvaluateSetups(crate::EvaluateSetupsJob),
     LibraryAction(crate::LibraryRequest),
     ScanProject(ScanProjectJob),
     PlanSetup(PlanSetupJob),
@@ -452,6 +461,7 @@ pub struct ErrorResult {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "payload", rename_all = "camelCase")]
 pub enum RunnerResult {
+    EvaluationResult(Box<crate::EvaluationResult>),
     LibraryResponse(crate::LibraryResponse),
     ScanResult(ScanResult),
     PlanResult(PlanResult),

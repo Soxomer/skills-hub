@@ -11,6 +11,8 @@ import { PostgresSwitchingRepository } from './switching-pg.js'
 import { SwitchingService } from './switching.js'
 import { PostgresSetupRepository } from './setups-pg.js'
 import { SetupService } from './setups.js'
+import { EvaluationService } from './evaluations.js'
+import { PostgresEvaluationRepository } from './evaluations-pg.js'
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('DATABASE_URL is required')
@@ -30,7 +32,8 @@ const projects = new ProjectService(projectRepository)
 const switching = new SwitchingService(new PostgresSwitchingRepository(pool), transport)
 const setups = new SetupService(new PostgresSetupRepository(pool))
 const app = createControlPlaneApp(transport, projects, switching, setups,
-  auth && sessions ? createHostedAuthenticator(auth, sessions) : undefined)
+  auth && sessions ? createHostedAuthenticator(auth, sessions) : undefined,
+  new EvaluationService(new PostgresEvaluationRepository(pool)))
 if (auth && sessions) registerHostedAuth(app, sessions, auth)
 
 const close = async () => {

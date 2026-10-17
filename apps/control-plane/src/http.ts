@@ -6,6 +6,7 @@ import type {
   CaptureDefaultRevisionRequest,
   CreateProjectRequest,
   CreateSetupRequest,
+  AddLibrarySkillRequest,
   PublishSetupRevisionRequest,
   RequestSetupPlanRequest,
   RollbackOperationRequest,
@@ -21,6 +22,13 @@ import {
 import { SwitchingError, type SwitchingService } from './switching.js'
 import { SetupServiceError, type SetupService } from './setups.js'
 import type { BrowserAuthenticator } from './hosted-auth.js'
+import type { EvaluationService } from './evaluations.js'
+import type { CreateEvaluationRequest } from '@ahm/contracts'
+
+// 10 MiB of artifact bytes become about 14 MiB of base64. Up to 5,000
+// 500-character paths need under 8 MiB including UTF-8/JSON escaping;
+// 32 MiB accommodates both plus entry metadata, while retaining a finite cap.
+const RUNNER_BODY_LIMIT = 32 * 1024 * 1024
 
 function requiredHeader(request: FastifyRequest, name: string): string {
   const value = request.headers[name]
@@ -51,6 +59,7 @@ export function createControlPlaneApp(
   switching?: SwitchingService,
   setups?: SetupService,
   authenticateBrowser?: BrowserAuthenticator,
+  evaluations?: EvaluationService,
 ): FastifyInstance {
   const app = Fastify({ logger: false })
   const actors = new WeakMap<FastifyRequest, RequestActor>()
@@ -68,8 +77,12 @@ export function createControlPlaneApp(
   }
 
   app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof Error && 'code' in error && error.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+      void reply.code(413).send({ error: 'Request body is too large' })
+      return
+    }
     if (error instanceof RunnerTransportError) {
-      void reply.code(error.statusCode).send({ error: error.message })
+      void reply.code(error.statusCode).send({ error: error.message, ...(error.code ? { code: error.code } : {}) })
       return
     }
     if (error instanceof ProjectServiceError) {
@@ -97,6 +110,13 @@ export function createControlPlaneApp(
 
   app.get('/health', async () => ({ status: 'ok' }))
 
+  if (evaluations) {
+    app.post<{ Body: CreateEvaluationRequest }>('/api/v1/evaluations', async (request, reply) =>
+      reply.code(201).send(await evaluations.create(actor(request), request.body)))
+    app.get<{ Querystring: { candidateRevisionId: string } }>('/api/v1/evaluations', async (request) =>
+      evaluations.list(actor(request), request.query.candidateRevisionId))
+  }
+
   app.get('/api/v1/projects', async (request) => projects.listProjects(actor(request)))
 
   app.post<{ Body: CreateProjectRequest }>('/api/v1/projects', async (request, reply) => {
@@ -117,6 +137,8 @@ export function createControlPlaneApp(
   })
 
   if (setups) {
+    app.post<{ Body: AddLibrarySkillRequest }>('/api/v1/setups/library-skill', async (request, reply) =>
+      reply.code(201).send(await setups.addLibrarySkill(actor(request), request.body)))
     app.get('/api/v1/setups', async (request) => setups.listSetups(actor(request)))
     app.get<{ Params: { setupId: string } }>('/api/v1/setups/:setupId', async (request) =>
       setups.setupDetail(actor(request), request.params.setupId),
@@ -245,7 +267,7 @@ export function createControlPlaneApp(
 
   app.put<{ Body: Parameters<RunnerTransportService['storeArtifact']>[1] }>(
     '/runner/v1/artifacts',
-    { bodyLimit: 15 * 1024 * 1024 },
+    { bodyLimit: RUNNER_BODY_LIMIT },
     async (request, reply) => {
       await transport.storeArtifact(runnerCredential(request), request.body)
       return reply.code(204).send()
@@ -279,7 +301,9 @@ export function createControlPlaneApp(
   app.post<{
     Params: { jobId: string }
     Body: Parameters<RunnerTransportService['submitResult']>[2]
-  }>('/runner/v1/jobs/:jobId/result', async (request) =>
+  }>('/runner/v1/jobs/:jobId/result', {
+    bodyLimit: RUNNER_BODY_LIMIT,
+  }, async (request) =>
     transport.submitResult(runnerCredential(request), request.params.jobId, request.body),
   )
 

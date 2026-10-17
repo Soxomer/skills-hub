@@ -3,8 +3,28 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LibrarySetupSnapshot {
+    pub artifact_id: String,
+    pub name: String,
+    pub content_digest: Digest,
+    pub portable_source: Option<String>,
+    pub supported_tools: Vec<String>,
+    pub files: Vec<SnapshotFile>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SnapshotFile {
+    pub path: String,
+    pub size: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LibraryCommand {
+    PreviewSetupSkill,
+    SnapshotSetupSkill,
     ListDirectories,
     GetToolConfig,
     SetToolConfig,

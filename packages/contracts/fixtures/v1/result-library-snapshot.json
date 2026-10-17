@@ -1,0 +1,8 @@
+{
+  "protocolVersion": "1.0", "jobId": "job_snapshot", "idempotencyKey": "library-job_snapshot", "organizationId": "org_01", "deviceId": "device_01", "projectInstanceId": null,
+  "result": { "kind": "libraryResponse", "payload": { "value": {
+    "artifactId": "library-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "name": "pdf",
+    "contentDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "portableSource": null,
+    "supportedTools": ["codex"], "files": [{ "path": "SKILL.md", "size": 10 }]
+  } } }
+}

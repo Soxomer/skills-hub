@@ -29,6 +29,8 @@ import {
   getSkillSyncState,
 } from './skillSyncStatus'
 import ToolIcon from './ToolIcon'
+import { AddToSetupDialog } from './AddToSetupDialog'
+import { useLibrary } from '../../library-context'
 import type { ManagedSkill, SkillFileEntry, ToolOption } from './types'
 
 // ─── Types ───────────────────────────────────────────
@@ -431,6 +433,8 @@ const SkillDetailView = ({
   projects,
   t,
 }: SkillDetailViewProps) => {
+  const { runnerConnected, setupSnapshotsSupported } = useLibrary()
+  const [addingToSetup, setAddingToSetup] = useState(false)
   const [files, setFiles] = useState<SkillFileEntry[]>([])
   const [activeFile, setActiveFile] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState('')
@@ -573,7 +577,9 @@ const SkillDetailView = ({
               <i aria-hidden="true" />
               {syncStatus}
             </span>
+            <button className="btn btn-secondary detail-setup-action" type="button" disabled={!runnerConnected || !setupSnapshotsSupported} aria-describedby={runnerConnected && !setupSnapshotsSupported ? 'setup-runner-prerequisite' : undefined} title={!runnerConnected ? t('addToSetup.runnerRequired') : undefined} onClick={() => setAddingToSetup(true)}>{t('addToSetup.action')}</button>
           </div>
+          {runnerConnected && !setupSnapshotsSupported && <p id="setup-runner-prerequisite" className="detail-desc" role="status">{t('addToSetup.runnerUpdateRequired')}</p>}
           {skill.description ? (
             <p className="detail-desc">{skill.description}</p>
           ) : null}
@@ -657,6 +663,7 @@ const SkillDetailView = ({
           </div>
         </div>
       </div>
+      {addingToSetup && <AddToSetupDialog skill={skill} tools={tools} onClose={() => setAddingToSetup(false)} />}
 
       <div className="detail-body">
         <div className="detail-file-list">

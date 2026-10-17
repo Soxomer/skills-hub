@@ -32,6 +32,9 @@ export interface PortableSetupRevision {
 }
 
 export interface RunnerCapabilities {
+  evaluateSetups?: boolean
+  /** Missing or false means preview/snapshot Setup skill commands are unsupported. */
+  setupSnapshots?: boolean
   library: boolean
   scanProject: boolean
   planSetup: boolean
@@ -93,6 +96,7 @@ export interface RollbackOperationJob {
 }
 
 export type RunnerJob =
+  | { kind: 'evaluateSetups'; payload: import('./evaluations.js').EvaluateSetupsPayload }
   | { kind: 'libraryAction'; payload: import('./library.js').LibraryRequest }
   | ScanProjectJob
   | PlanSetupJob
@@ -231,6 +235,7 @@ export interface ErrorResult {
 }
 
 export type RunnerResult =
+  | { kind: 'evaluationResult'; payload: import('./evaluations.js').EvaluationResultPayload }
   | { kind: 'libraryResponse'; payload: import('./library.js').LibraryResponse }
   | ScanResult
   | PlanResult

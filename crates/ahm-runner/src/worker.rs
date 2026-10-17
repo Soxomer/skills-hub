@@ -129,6 +129,33 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
             },
         )?;
         match start {
+            JournalStartOutcome::InterruptedEvaluation => {
+                let RunnerJob::EvaluateSetups(request) = &lease.job.job else {
+                    unreachable!(
+                        "only evaluation jobs can have an interrupted evaluation checkpoint"
+                    );
+                };
+                let result = ResultEnvelope {
+                    protocol_version: PROTOCOL_VERSION,
+                    job_id: lease.job.job_id.clone(), idempotency_key: lease.job.idempotency_key.clone(),
+                    organization_id: lease.job.organization_id.clone(), device_id: lease.job.device_id.clone(),
+                    project_instance_id: lease.job.project_instance_id.clone(),
+                    result: RunnerResult::EvaluationResult(Box::new(crate::evaluation::incomplete(request,
+                        ahm_domain::EvaluationVariantStatus::Interrupted,
+                        "The previous attempt was interrupted. It was not restarted automatically; start a new comparison explicitly."))),
+                };
+                let json = serde_json::to_string(&result)?;
+                self.state.finish_job(
+                    &lease.job,
+                    &lease.lease_id,
+                    &json,
+                    &sha256(&json),
+                    true,
+                    &utc_now(),
+                )?;
+                self.flush_outbox(&identity)?;
+                Ok(WorkerOutcome::Replayed)
+            }
             JournalStartOutcome::Completed { .. } => {
                 self.flush_outbox(&identity)?;
                 Ok(WorkerOutcome::Replayed)
@@ -159,7 +186,8 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
                 self.flush_outbox(&identity)?;
                 Ok(WorkerOutcome::Replayed)
             }
-            JournalStartOutcome::Execute => {
+            start
+            @ (JournalStartOutcome::Execute | JournalStartOutcome::ArtifactPending { .. }) => {
                 let transport = &self.transport;
                 let mut effective_lease = lease.clone();
                 if !effective_lease.cancel_requested {
@@ -178,52 +206,104 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
                 } else {
                     self.prepare_required_artifacts(&identity, &effective_lease)
                 };
-                let mut result = match preparation {
-                    Ok(true) => {
-                        let mut should_cancel = || {
-                            transport
-                                .job_control(
-                                    &identity,
-                                    effective_lease.job.job_id.as_str(),
-                                    &RunnerJobControlRequest {
-                                        lease_id: effective_lease.lease_id.clone(),
-                                    },
-                                )
-                                .map(|control| control.cancel_requested)
-                        };
-                        self.executor.execute(
-                            &identity,
-                            project.as_ref(),
-                            &effective_lease,
-                            &now,
-                            &mut should_cancel,
-                        )
-                    }
-                    Ok(false) => ResultEnvelope {
-                        protocol_version: PROTOCOL_VERSION,
-                        job_id: lease.job.job_id.clone(),
-                        idempotency_key: lease.job.idempotency_key.clone(),
-                        organization_id: lease.job.organization_id.clone(),
-                        device_id: lease.job.device_id.clone(),
-                        project_instance_id: lease.job.project_instance_id.clone(),
-                        result: protocol_error(
-                            ProtocolErrorCode::Conflict,
-                            "Setup artifact is not available from the local or shared cache",
+                let mut result = if let JournalStartOutcome::ArtifactPending { result_json } =
+                    &start
+                {
+                    let mut result: ResultEnvelope = serde_json::from_str(result_json)
+                        .context("Read captured snapshot checkpoint")?;
+                    anyhow::ensure!(
+                        result.protocol_version == lease.job.protocol_version
+                            && result.job_id == lease.job.job_id
+                            && result.idempotency_key == lease.job.idempotency_key
+                            && result.organization_id == identity.organization_id
+                            && result.device_id == identity.device_id
+                            && result.project_instance_id == lease.job.project_instance_id,
+                        "Captured snapshot checkpoint does not match the claimed job"
+                    );
+                    let (
+                        RunnerJob::LibraryAction(request),
+                        RunnerResult::LibraryResponse(response),
+                    ) = (&lease.job.job, &result.result)
+                    else {
+                        anyhow::bail!("Captured snapshot checkpoint has an invalid job or result");
+                    };
+                    let snapshot: ahm_domain::LibrarySetupSnapshot =
+                        serde_json::from_value(response.value.clone())?;
+                    anyhow::ensure!(
+                        request.command == ahm_domain::LibraryCommand::SnapshotSetupSkill
+                            && request.expected_digest.as_ref() == Some(&snapshot.content_digest),
+                        "Captured snapshot checkpoint does not match the approved digest"
+                    );
+                    if effective_lease.cancel_requested {
+                        result.result = protocol_error(
+                            ProtocolErrorCode::JobCancelled,
+                            "job was cancelled",
                             false,
-                        ),
-                    },
-                    Err(error) if permanent_artifact_failure(&error) => ResultEnvelope {
-                        protocol_version: PROTOCOL_VERSION,
-                        job_id: lease.job.job_id.clone(),
-                        idempotency_key: lease.job.idempotency_key.clone(),
-                        organization_id: lease.job.organization_id.clone(),
-                        device_id: lease.job.device_id.clone(),
-                        project_instance_id: lease.job.project_instance_id.clone(),
-                        result: artifact_failure_result(&error),
-                    },
-                    Err(error) => return Err(error),
+                        );
+                    }
+                    result
+                } else {
+                    match preparation {
+                        Ok(true) => {
+                            let mut should_cancel = || {
+                                transport
+                                    .job_control(
+                                        &identity,
+                                        effective_lease.job.job_id.as_str(),
+                                        &RunnerJobControlRequest {
+                                            lease_id: effective_lease.lease_id.clone(),
+                                        },
+                                    )
+                                    .map(|control| control.cancel_requested)
+                            };
+                            self.executor.execute(
+                                &identity,
+                                project.as_ref(),
+                                &effective_lease,
+                                &now,
+                                &mut should_cancel,
+                            )
+                        }
+                        Ok(false) => ResultEnvelope {
+                            protocol_version: PROTOCOL_VERSION,
+                            job_id: lease.job.job_id.clone(),
+                            idempotency_key: lease.job.idempotency_key.clone(),
+                            organization_id: lease.job.organization_id.clone(),
+                            device_id: lease.job.device_id.clone(),
+                            project_instance_id: lease.job.project_instance_id.clone(),
+                            result: protocol_error(
+                                ProtocolErrorCode::Conflict,
+                                "Setup artifact is not available from the local or shared cache",
+                                false,
+                            ),
+                        },
+                        Err(error) if permanent_artifact_failure(&error) => ResultEnvelope {
+                            protocol_version: PROTOCOL_VERSION,
+                            job_id: lease.job.job_id.clone(),
+                            idempotency_key: lease.job.idempotency_key.clone(),
+                            organization_id: lease.job.organization_id.clone(),
+                            device_id: lease.job.device_id.clone(),
+                            project_instance_id: lease.job.project_instance_id.clone(),
+                            result: artifact_failure_result(&error),
+                        },
+                        Err(error) => return Err(error),
+                    }
                 };
-                if let Err(error) = self.publish_scan_artifacts(&identity, &result) {
+                if matches!(start, JournalStartOutcome::Execute)
+                    && matches!(&lease.job.job, RunnerJob::LibraryAction(request) if request.command == ahm_domain::LibraryCommand::SnapshotSetupSkill)
+                    && matches!(&result.result, RunnerResult::LibraryResponse(_))
+                {
+                    let result_json = serde_json::to_string(&result)?;
+                    self.state.checkpoint_artifact_result(
+                        &lease.job,
+                        &request_digest,
+                        &result_json,
+                        &sha256(&result_json),
+                    )?;
+                }
+                if let Err(error) =
+                    self.publish_scan_artifacts(&identity, &result, &effective_lease.job.job)
+                {
                     if !permanent_artifact_failure(&error) {
                         return Err(error);
                     }
@@ -264,18 +344,16 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
         identity: &crate::state::RunnerIdentityRecord,
         lease: &ahm_domain::LeasedRunnerJob,
     ) -> Result<bool> {
-        let revision = match &lease.job.job {
-            RunnerJob::PlanSetup(job) => Some(&job.revision),
-            RunnerJob::ApplyPlan(job) => Some(&job.revision),
+        let revisions = match &lease.job.job {
+            RunnerJob::EvaluateSetups(job) => vec![&job.baseline, &job.candidate],
+            RunnerJob::PlanSetup(job) => vec![&job.revision],
+            RunnerJob::ApplyPlan(job) => vec![&job.revision],
             RunnerJob::LibraryAction(_)
             | RunnerJob::ScanProject(_)
-            | RunnerJob::RollbackOperation(_) => None,
-        };
-        let Some(revision) = revision else {
-            return Ok(true);
+            | RunnerJob::RollbackOperation(_) => vec![],
         };
         let mut seen = std::collections::HashSet::new();
-        for item in &revision.items {
+        for item in revisions.iter().flat_map(|revision| &revision.items) {
             if !seen.insert(item.content_digest.as_str().to_owned())
                 || self
                     .executor
@@ -301,7 +379,24 @@ impl<T: RunnerTransport, E: JobExecutor> RunnerWorker<T, E> {
         &self,
         identity: &crate::state::RunnerIdentityRecord,
         result: &ResultEnvelope,
+        job: &RunnerJob,
     ) -> Result<()> {
+        if let (RunnerJob::LibraryAction(request), RunnerResult::LibraryResponse(response)) =
+            (job, &result.result)
+        {
+            if request.command == ahm_domain::LibraryCommand::SnapshotSetupSkill {
+                let snapshot: ahm_domain::LibrarySetupSnapshot =
+                    serde_json::from_value(response.value.clone())
+                        .context(PermanentArtifactFailure)?;
+                let bundle = self
+                    .executor
+                    .artifact_bundle(&snapshot.content_digest)
+                    .context(PermanentArtifactFailure)?
+                    .context(PermanentArtifactFailure)?;
+                self.transport.store_artifact(identity, &bundle)?;
+            }
+            return Ok(());
+        }
         let RunnerResult::ScanResult(scan) = &result.result else {
             return Ok(());
         };
@@ -399,6 +494,7 @@ mod tests {
         submissions: RefCell<Vec<SubmitRunnerResultRequest>>,
         fail_submissions: RefCell<bool>,
         fail_uploads: RefCell<bool>,
+        uploads: RefCell<Vec<ahm_domain::ArtifactBundle>>,
         downloaded_artifact: RefCell<Option<ahm_domain::ArtifactBundle>>,
         cancel_requested: RefCell<bool>,
         control_checks: RefCell<u32>,
@@ -455,11 +551,12 @@ mod tests {
         fn store_artifact(
             &self,
             _identity: &RunnerIdentityRecord,
-            _bundle: &ahm_domain::ArtifactBundle,
+            bundle: &ahm_domain::ArtifactBundle,
         ) -> Result<()> {
             if *self.fail_uploads.borrow() {
                 anyhow::bail!("temporarily offline");
             }
+            self.uploads.borrow_mut().push(bundle.clone());
             Ok(())
         }
 
@@ -497,6 +594,8 @@ mod tests {
     impl JobExecutor for FakeExecutor {
         fn capabilities(&self) -> RunnerCapabilities {
             RunnerCapabilities {
+                evaluate_setups: true,
+                setup_snapshots: true,
                 scan_project: true,
                 plan_setup: false,
                 apply_plan: false,
@@ -600,6 +699,7 @@ mod tests {
                 submissions: RefCell::new(Vec::new()),
                 fail_submissions: RefCell::new(offline),
                 fail_uploads: RefCell::new(false),
+                uploads: RefCell::new(Vec::new()),
                 downloaded_artifact: RefCell::new(None),
                 cancel_requested: RefCell::new(false),
                 control_checks: RefCell::new(0),
@@ -803,6 +903,180 @@ mod tests {
             worker.transport.submissions.borrow()[0].result.result,
             RunnerResult::ScanResult(_)
         ));
+    }
+
+    struct SnapshotExecutor {
+        home: PathBuf,
+        store: crate::skill_store::SkillStore,
+        executions: std::rc::Rc<std::cell::Cell<u32>>,
+    }
+
+    impl JobExecutor for SnapshotExecutor {
+        fn capabilities(&self) -> RunnerCapabilities {
+            worker(VecDeque::new(), false).executor.capabilities()
+        }
+
+        fn execute(
+            &self,
+            _identity: &RunnerIdentityRecord,
+            _project: Option<&ProjectInstanceRecord>,
+            lease: &LeasedRunnerJob,
+            _now: &IsoTimestamp,
+            _should_cancel: &mut dyn FnMut() -> Result<bool>,
+        ) -> ResultEnvelope {
+            self.executions.set(self.executions.get() + 1);
+            let RunnerJob::LibraryAction(request) = &lease.job.job else {
+                unreachable!()
+            };
+            let result = match crate::library::execute(&self.home, &self.store, request) {
+                Ok(value) => RunnerResult::LibraryResponse(ahm_domain::LibraryResponse { value }),
+                Err(error) => protocol_error(ProtocolErrorCode::Conflict, error.to_string(), false),
+            };
+            ResultEnvelope {
+                protocol_version: PROTOCOL_VERSION,
+                job_id: lease.job.job_id.clone(),
+                idempotency_key: lease.job.idempotency_key.clone(),
+                organization_id: lease.job.organization_id.clone(),
+                device_id: lease.job.device_id.clone(),
+                project_instance_id: None,
+                result,
+            }
+        }
+
+        fn artifact_bundle(&self, digest: &Digest) -> Result<Option<ahm_domain::ArtifactBundle>> {
+            crate::artifact_cache::ArtifactCache::for_home(&self.home).bundle(digest)
+        }
+    }
+
+    #[test]
+    fn snapshot_upload_reclaim_after_restart_reuses_capture_and_fresh_jobs_check_source() {
+        use crate::skill_store::{SkillRecord, SkillStore};
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let source = home.join("managed");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("SKILL.md"), "# Approved skill").unwrap();
+        let database = root.path().join("library.db");
+        let store = SkillStore::new(database.clone());
+        store.ensure_schema().unwrap();
+        store
+            .upsert_skill(&SkillRecord {
+                id: "review".into(),
+                name: "review".into(),
+                description: None,
+                source_type: "local".into(),
+                source_ref: None,
+                source_subpath: None,
+                source_revision: None,
+                central_path: source.to_str().unwrap().into(),
+                content_hash: None,
+                created_at: 1,
+                updated_at: 1,
+                last_sync_at: None,
+                last_seen_at: 1,
+                enabled: true,
+                status: "ok".into(),
+            })
+            .unwrap();
+        let digest = Digest::new(format!(
+            "sha256:{}",
+            crate::content_hash::hash_dir(&source).unwrap()
+        ))
+        .unwrap();
+        let mut first = lease("capture_lease");
+        first.job.project_instance_id = None;
+        first.job.job = RunnerJob::LibraryAction(ahm_domain::LibraryRequest {
+            command: ahm_domain::LibraryCommand::SnapshotSetupSkill,
+            args: serde_json::json!({"skillId":"review"})
+                .as_object()
+                .unwrap()
+                .clone(),
+            expected_digest: Some(digest.clone()),
+        });
+        let executions = std::rc::Rc::new(std::cell::Cell::new(0));
+        let state_path = root.path().join("runner.db");
+        let fixture = worker(VecDeque::from([first.clone()]), false);
+        let state = RunnerStateStore::open(&state_path).unwrap();
+        let identity = fixture.state.identity().unwrap().unwrap();
+        state.save_identity(&identity).unwrap();
+        let mut first_worker = RunnerWorker::new(
+            state,
+            fixture.transport,
+            SnapshotExecutor {
+                home: home.clone(),
+                store,
+                executions: executions.clone(),
+            },
+        );
+        *first_worker.transport.fail_uploads.borrow_mut() = true;
+        assert!(first_worker.run_once().is_err());
+        assert_eq!(executions.get(), 1);
+        assert_eq!(first_worker.state.undelivered_outbox_count().unwrap(), 0);
+        assert!(first_worker.transport.submissions.borrow().is_empty());
+        let mut other_identity = identity.clone();
+        other_identity.organization_id = identifier("other_org");
+        assert!(matches!(
+            first_worker.state.save_identity(&other_identity),
+            Err(crate::state::RunnerStateError::PendingResults)
+        ));
+        assert_eq!(first_worker.state.identity().unwrap(), Some(identity));
+        assert_eq!(
+            first_worker
+                .state
+                .begin_job(
+                    &first.job,
+                    "changed_request",
+                    "different-digest",
+                    &utc_now()
+                )
+                .unwrap(),
+            JournalStartOutcome::IdempotencyMismatch
+        );
+        let request_digest = sha256(&serde_json::to_string(&first.job).unwrap());
+        assert!(matches!(
+            first_worker
+                .state
+                .begin_job(&first.job, "reclaim_probe", &request_digest, &utc_now())
+                .unwrap(),
+            JournalStartOutcome::ArtifactPending { .. }
+        ));
+        assert_eq!(first_worker.state.undelivered_outbox_count().unwrap(), 0);
+        let captured = crate::artifact_cache::ArtifactCache::for_home(&home)
+            .bundle(&digest)
+            .unwrap()
+            .unwrap();
+        drop(first_worker);
+        std::fs::remove_dir_all(&source).unwrap();
+        let mut reclaimed = first.clone();
+        reclaimed.lease_id = "reclaimed_lease".into();
+        let fixture = worker(VecDeque::from([reclaimed]), false);
+        let mut restarted = RunnerWorker::new(
+            RunnerStateStore::open(&state_path).unwrap(),
+            fixture.transport,
+            SnapshotExecutor {
+                home,
+                store: SkillStore::new(database),
+                executions: executions.clone(),
+            },
+        );
+        assert_eq!(restarted.run_once().unwrap(), WorkerOutcome::Processed);
+        assert_eq!(executions.get(), 1);
+        assert_eq!(*restarted.transport.uploads.borrow(), vec![captured]);
+        assert!(matches!(
+            restarted.transport.submissions.borrow()[0].result.result,
+            RunnerResult::LibraryResponse(_)
+        ));
+        let mut fresh = first;
+        fresh.job.job_id = identifier("fresh_job");
+        fresh.job.idempotency_key = identifier("fresh_snapshot");
+        restarted.transport.jobs.borrow_mut().push_back(fresh);
+        assert_eq!(restarted.run_once().unwrap(), WorkerOutcome::Processed);
+        assert_eq!(executions.get(), 2);
+        assert!(matches!(
+            restarted.transport.submissions.borrow()[1].result.result,
+            RunnerResult::Error(_)
+        ));
+        assert_eq!(restarted.transport.uploads.borrow().len(), 1);
     }
 
     #[test]

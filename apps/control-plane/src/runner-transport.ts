@@ -151,6 +151,7 @@ export class RunnerTransportError extends Error {
   constructor(
     readonly statusCode: number,
     message: string,
+    readonly code?: string,
   ) {
     super(message)
     this.name = 'RunnerTransportError'
@@ -240,6 +241,7 @@ export type BrowserRunnerRepository = Pick<RunnerTransportRepository,
 function supportedJobKinds(report: RunnerCapabilityReport): string[] {
   const kinds: string[] = []
   if (report.capabilities.library) kinds.push("libraryAction")
+  if (report.capabilities.evaluateSetups) kinds.push('evaluateSetups')
   if (report.capabilities.scanProject) kinds.push('scanProject')
   if (report.capabilities.planSetup) kinds.push('planSetup')
   if (report.capabilities.applyPlan) kinds.push('applyPlan')
@@ -299,7 +301,14 @@ export class JobSignal {
   }
 }
 
+export function isSetupSnapshotCommand(command: LibraryRequest['command']): boolean {
+  return command === 'preview_setup_skill' || command === 'snapshot_setup_skill'
+}
+
 function validateCapabilities(report: RunnerCapabilityReport): void {
+  if (report.capabilities.setupSnapshots !== undefined && typeof report.capabilities.setupSnapshots !== 'boolean') {
+    throw new RunnerTransportError(400, 'setupSnapshots capability must be a boolean')
+  }
   if (
     report.protocolVersion !== PROTOCOL_VERSION ||
     !report.supportedProtocolVersions.includes(PROTOCOL_VERSION)
@@ -434,6 +443,9 @@ export class RunnerTransportService {
       const runner = await repository.runnerStatus(actor.organizationId, deviceId)
       if (!runner || runner.status !== 'active') throw new RunnerTransportError(404, 'Runner not found')
       if (!runner.capabilities?.capabilities.library) throw new RunnerTransportError(409, 'Update the runner to use the skill library')
+      if (isSetupSnapshotCommand(request.command) && runner.capabilities.capabilities.setupSnapshots !== true) {
+        throw new RunnerTransportError(409, 'Update the runner to preview and capture Setup skills', 'setupSnapshotsUnsupported')
+      }
       const now = this.now(), jobId = this.randomId()
       await repository.enqueueJob({ protocolVersion: PROTOCOL_VERSION, jobId, idempotencyKey: 'library-' + jobId,
         organizationId: actor.organizationId, deviceId, projectInstanceId: null, issuedAt: now.toISOString(),

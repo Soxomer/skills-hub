@@ -49,6 +49,12 @@
         "library"
       ],
       "properties": {
+        "evaluateSetups": {
+          "type": "boolean"
+        },
+        "setupSnapshots": {
+          "type": "boolean"
+        },
         "scanProject": {
           "type": "boolean"
         },
@@ -339,8 +345,93 @@
         }
       }
     },
+    "evaluationProfile": {
+      "type": "object", "additionalProperties": false,
+      "required": ["harness", "profileVersion", "model", "reasoningEffort", "sandbox", "timeoutSeconds", "contextMode"],
+      "properties": {
+        "harness": { "const": "codex" },
+        "profileVersion": { "const": 1 },
+        "model": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$" },
+        "reasoningEffort": { "enum": ["low", "medium", "high"] },
+        "sandbox": { "const": "read-only" },
+        "timeoutSeconds": { "const": 120 },
+        "contextMode": { "const": "skillInstructions" }
+      }
+    },
+    "evaluateSetupsJob": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "payload"],
+      "properties": {
+        "kind": { "const": "evaluateSetups" },
+        "payload": {
+          "type": "object", "additionalProperties": false,
+          "required": ["baseline", "candidate", "suiteId", "profile", "repetitions"],
+          "properties": {
+            "baseline": { "$ref": "#/$defs/portableSetupRevision" },
+            "candidate": { "$ref": "#/$defs/portableSetupRevision" },
+            "suiteId": { "const": "code-review-v1" },
+            "profile": { "$ref": "#/$defs/evaluationProfile" },
+            "repetitions": { "const": 1 }
+          }
+        }
+      }
+    },
+    "evaluationVariantResult": {
+      "type": "object", "additionalProperties": false,
+      "required": ["setupRevisionId", "status", "durationMs", "checks", "summary", "error"],
+      "properties": {
+        "setupRevisionId": { "$ref": "#/$defs/identifier" },
+        "status": { "enum": ["completed", "failed", "timedOut", "cancelled", "interrupted"] },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "checks": {
+          "type": "array", "maxItems": 20,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["id", "label", "passed"],
+            "properties": {
+              "id": { "$ref": "#/$defs/identifier" },
+              "label": { "type": "string", "maxLength": 200 },
+              "passed": { "type": "boolean" }
+            }
+          }
+        },
+        "summary": { "type": "string", "maxLength": 2000 },
+        "error": { "type": ["string", "null"], "maxLength": 1000 }
+      }
+    },
+    "evaluationResult": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "payload"],
+      "properties": {
+        "kind": { "const": "evaluationResult" },
+        "payload": {
+          "type": "object", "additionalProperties": false,
+          "required": ["suiteId", "profile", "observed", "baseline", "candidate", "completedAt"],
+          "properties": {
+            "suiteId": { "const": "code-review-v1" },
+            "profile": { "$ref": "#/$defs/evaluationProfile" },
+            "observed": {
+              "type": "object", "additionalProperties": false,
+              "required": ["harnessVersion", "model", "contextMode", "nativeSkillActivation", "inheritedInstructionsDigest", "ambientContextVerified"],
+              "properties": {
+                "harnessVersion": { "type": "string", "maxLength": 200 },
+                "model": { "type": ["string", "null"], "maxLength": 200 },
+                "contextMode": { "const": "skillInstructions" },
+                "nativeSkillActivation": { "const": false },
+                "inheritedInstructionsDigest": { "oneOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+                "ambientContextVerified": { "const": false }
+              }
+            },
+            "baseline": { "$ref": "#/$defs/evaluationVariantResult" },
+            "candidate": { "$ref": "#/$defs/evaluationVariantResult" },
+            "completedAt": { "$ref": "#/$defs/timestamp" }
+          }
+        }
+      }
+    },
     "runnerJob": {
       "oneOf": [
+        {
+          "$ref": "#/$defs/evaluateSetupsJob"
+        },
         {
           "$ref": "#/$defs/scanProjectJob"
         },
@@ -831,6 +922,9 @@
     "runnerResult": {
       "oneOf": [
         {
+          "$ref": "#/$defs/evaluationResult"
+        },
+        {
           "$ref": "#/$defs/scanResult"
         },
         {
@@ -898,6 +992,24 @@
     },
     "libraryRequest": {
       "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["command", "args", "expectedDigest"],
+          "properties": {
+            "command": { "const": "preview_setup_skill" },
+            "args": { "type": "object", "additionalProperties": false, "required": ["skillId"], "properties": { "skillId": { "type": "string", "minLength": 1, "maxLength": 200 } } },
+            "expectedDigest": { "type": "null" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["command", "args", "expectedDigest"],
+          "properties": {
+            "command": { "const": "snapshot_setup_skill" },
+            "args": { "type": "object", "additionalProperties": false, "required": ["skillId"], "properties": { "skillId": { "type": "string", "minLength": 1, "maxLength": 200 } } },
+            "expectedDigest": { "$ref": "#/$defs/digest" }
+          }
+        },
         {
           "type": "object",
           "additionalProperties": false,

@@ -1,7 +1,7 @@
 {
   "name": "@ahm/web",
   "private": true,
-  "version": "0.9.1",
+  "version": "0.10.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port 5173 --strictPort",
@@ -9,7 +9,7 @@
     "test": "vitest run src"
   },
   "dependencies": {
-    "@ahm/contracts": "0.9.1",
+    "@ahm/contracts": "0.10.0",
     "better-auth": "1.7.5",
     "i18next": "^25.10.10",
     "lucide-react": "^0.562.0",
