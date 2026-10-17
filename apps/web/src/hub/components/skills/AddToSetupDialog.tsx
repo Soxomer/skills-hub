@@ -9,7 +9,7 @@ interface AddToSetupDialogProps { skill: ManagedSkill; tools: ToolOption[]; onCl
 
 export function AddToSetupDialog({ skill, tools, onClose }: AddToSetupDialogProps) {
   const { t } = useTranslation('hub')
-  const { client, deviceId, runnerConnected, previewSetupSkill, snapshotSetupSkill } = useLibrary()
+  const { client, deviceId, runnerConnected, previewSetupSkill, snapshotSetupSkill, onOpenSetup } = useLibrary()
   const dialog = useRef<HTMLDialogElement>(null)
   const originalDevice = useRef(deviceId)
   const [snapshot, setSnapshot] = useState<LibrarySetupSnapshot | null>(null)
@@ -82,7 +82,10 @@ export function AddToSetupDialog({ skill, tools, onClose }: AddToSetupDialogProp
     {saved ? <>
       <p role="status">{t('addToSetup.savedVersion', { name: saved.name, number: saved.revisionNumber })}</p>
       <p>{t('addToSetup.savedHelp')}</p>
-      <div className="library-dialog-actions"><button className="btn btn-primary" onClick={onClose}>{t('addToSetup.done')}</button></div>
+      <div className="library-dialog-actions">
+        <button className={onOpenSetup ? 'btn btn-secondary' : 'btn btn-primary'} onClick={onClose}>{t('addToSetup.done')}</button>
+        {onOpenSetup && <button className="btn btn-primary" onClick={() => { onClose(); onOpenSetup({ setupId: saved.setupId, setupRevisionId: saved.setupRevisionId }) }}>{t('addToSetup.openSaved')}</button>}
+      </div>
     </> : <>
       <p>{t('addToSetup.description')}</p>
       {loading && <p role="status">{t('addToSetup.loading')}</p>}

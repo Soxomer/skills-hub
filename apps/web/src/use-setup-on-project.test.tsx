@@ -30,8 +30,8 @@ let root: Root
 let container: HTMLDivElement
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container) })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
-async function mount(client = mockClient(), device: RunnerStatusResponse | null = runner, online = true, onProjects = vi.fn()) {
-  await act(async () => root.render(<SetupLibrary client={client as unknown as ControlPlaneClient} runner={device} runnerOnline={online} onProjects={onProjects} />))
+async function mount(client = mockClient(), device: RunnerStatusResponse | null = runner, online = true, onProjects = vi.fn(), active = true) {
+  await act(async () => root.render(<SetupLibrary client={client as unknown as ControlPlaneClient} runner={device} runnerOnline={online} onProjects={onProjects} active={active} />))
   return client
 }
 function button(text: string) {
@@ -69,6 +69,21 @@ it('hands the exact historical version and explicitly selected checkout to revie
 it('keeps the historical selection on returning to the Setup', async () => {
   await mount(); await openHistorical(); await destination(); await click('Back to this Setup')
   expect(container.querySelector('select')?.value).toBe('v1')
+})
+
+it('refreshes destinations on reentry without losing the selected project, checkout, or exact version', async () => {
+  const client = await mount(); await openHistorical(); await destination()
+  await mount(client, runner, true, vi.fn(), false)
+  client.projects.mockResolvedValue({ projects: [...projects, { ...projects[0], projectId: 'C', name: 'Project C' }] })
+  expect(client.projects).toHaveBeenCalledOnce()
+  await mount(client)
+  expect(client.projects).toHaveBeenCalledTimes(2)
+  expect(container.querySelectorAll('select')[0].value).toBe('A')
+  expect(container.querySelectorAll('select')[1].value).toBe('A-2')
+  expect(container.textContent).toContain('Project C')
+  expect(container.textContent).toContain('Daily · Version 1')
+  expect(client.prepareSetupPlan).not.toHaveBeenCalled()
+  expect(client.applySetupPlan).not.toHaveBeenCalled()
 })
 
 it('clears checkout selection when choosing another project', async () => {

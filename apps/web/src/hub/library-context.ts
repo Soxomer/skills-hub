@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react'
 import type { LibrarySetupSnapshot } from '@ahm/contracts'
 import type { ControlPlaneClient } from '../api'
+export interface SavedSetupSelection { setupId: string; setupRevisionId: string }
 interface LibraryContextValue {
   client: ControlPlaneClient
   deviceId: string | null
@@ -8,6 +9,7 @@ interface LibraryContextValue {
   snapshotSetupSkill: (skillId: string, contentDigest: string) => Promise<string>
   runnerConnected: boolean
   requestConnection?: () => Promise<boolean>
+  onOpenSetup?: (selection: SavedSetupSelection) => void
   invokeLibrary: <T>(command: string, args?: Record<string, unknown>) => Promise<T>
   pickDirectory: (options: { title?: string; directory?: boolean; multiple?: boolean }) => Promise<string | null>
 }

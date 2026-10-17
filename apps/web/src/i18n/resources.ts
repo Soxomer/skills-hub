@@ -684,7 +684,13 @@ const originalResources = {
 
 export const resources = {
   en: {
-    hub: { ...originalResources.en.translation, addToSetup: {
+    hub: { ...originalResources.en.translation, workspaceNavigation: {
+      skip: 'Skip to workspace', setups: 'Setups', projects: 'Projects', inventory: 'Computer inventory',
+      connected: 'Computer connected', disconnected: 'No computer connected', connection: 'Connection', connect: 'Connect computer',
+      startTitle: 'Your skills, ready for your agents',
+      startHelp: 'Connect a computer to import and manage skills. Save them in a Setup, compare versions, then review changes before using them on a project.',
+      savedSetups: 'Browse saved Setups', offlineHelp: 'Saved Setups and previous comparisons are available without a connected computer.',
+    }, addToSetup: {
       action: 'Add to Setup', title: 'Add {{name}} to a Setup', description: 'Save an exact copy of this skill. This does not install it or change a project.',
       loading: 'Reviewing skill files on your computer…', destination: 'Destination Setup', existing: 'Existing Setup', new: 'New Setup', choose: 'Choose a Setup', name: 'Setup name', version: 'Version {{number}}',
       create: 'Create Setup', createHelp: 'Created only when you confirm below.', noSetups: 'No saved Setups yet. Choose New Setup to create one.', digest: 'Snapshot digest',
@@ -693,7 +699,7 @@ export const resources = {
       files: '{{count}} files to share', bytes: '{{count}} bytes', consent: 'Share these files with my hosted workspace and save them in this Setup.',
       immutable: 'Future library updates will not change this saved content. Applying it to a project requires a separate reviewed plan.',
       publishing: 'Publishing the reviewed snapshot…', saved: 'Setup version saved', savedVersion: '{{name}} · Version {{number}}',
-      savedHelp: 'Find this version under Projects & runner → Setups. No project assignment or local synchronization changed.', done: 'Done', reviewAgain: 'Review again',
+      savedHelp: 'Open this exact version to inspect, compare, or use it on a project. No project assignment or local synchronization changed.', openSaved: 'Open saved Setup', done: 'Done', reviewAgain: 'Review again',
       runnerRequired: 'Connect the original computer to review and save this skill.', previewFailed: 'Could not review this skill. Check the runner connection, then review again. An older runner may need an update.',
       destinationFailed: 'Could not load this Setup. Review again before publishing.', publishFailed: 'Publication did not finish. The skill may have changed since review. Review again, or retry if only the connection failed.',
       setupNameTaken: 'A Setup with this name already exists. Choose it above or use another name.', setupRevisionConflict: 'A newer Setup version exists. Review again before adding this skill.',
@@ -714,7 +720,7 @@ export const resources = {
         unavailable: 'Your workspace could not be reached. Try again shortly.',
       },
       skills: {
-        title: 'My Skills', description: 'The managed skill library on your connected runner, separate from saved Setups.',
+        title: 'Computer inventory', description: 'The last reported library on your computer. Use My Skills to import and manage skills.',
         refresh: 'Refresh report', refreshing: 'Refreshing…', error: 'The runner report could not be refreshed. Try Refresh report again.',
         connectTitle: 'Connect a runner to view its skills', connectDescription: 'Open Projects to connect the workstation that holds your managed library.',
         device: 'Library on {{label}}.', reported: 'Last reported {{date}}.', offline: 'Runner offline. This is its last reported library, not a live scan.',
@@ -723,7 +729,7 @@ export const resources = {
         search: 'Search skills, tags, or tools', tag: 'Tags', allTags: 'All tags', state: 'Enabled state', all: 'All states', enabled: 'Enabled', disabled: 'Disabled',
         count: '{{count}} of {{total}} skills', noResults: 'No skills match these filters.', clear: 'Clear filters', name: 'Skill', source: 'Source', targets: 'Tool targets',
         noTags: 'No tags', noTargets: 'No targets', sources: { git: 'Git repository', local: 'Local folder', other: 'Other' }, scopes: { global: 'Global', project: 'Project' },
-        readOnly: 'Read-only library report. Import, editing, and bulk management are being restored. Viewing this list does not change skills or project assignments.',
+        readOnly: 'Read-only library report. Open My Skills for import and bulk management. Viewing this report does not change skills or project assignments.',
       },
       library: {
         navigation: 'Main navigation', projects: 'Projects', setups: 'Setups', skills: 'My Skills',
@@ -731,7 +737,10 @@ export const resources = {
         create: 'Create Setup', loading: 'Loading saved configurations…',
         loadError: 'Saved Setups could not be loaded. Try again.',
         emptyTitle: 'No saved Setups yet',
-        emptyDescription: 'Scan a project and capture its Default to make its configuration available here.',
+        emptyDescription: 'Add a skill to a Setup from My Skills, or scan a project and capture its Default. Then assemble reusable versions here.',
+        composerEmpty: 'No captured configuration yet. Add a skill to a Setup from My Skills, or scan a project to capture its configuration.',
+        goSkills: 'Open My Skills',
+        revisionUnavailable: 'This saved version is unavailable. Return to Setups to choose an available version.',
         goProjects: 'Go to Projects', search: 'Find a Setup', noResults: 'No Setups match your search.',
         kind: { default: 'Project Default', custom: 'Reusable Setup' },
         version: 'Version {{number}}', items_one: '{{count}} item', items_other: '{{count}} items',
@@ -774,9 +783,9 @@ export const resources = {
         eyebrow: 'Local runner',
       },
       page: {
-        title: 'Connect your local runner',
+        title: 'Projects',
         description:
-          'Keep project files on this machine while controlling scans and setups from the browser.',
+          'Manage checkouts on your connected computer. Capture a starting Default, then review and apply a saved Setup.',
         controlPlane: 'Web control plane',
         protocol: 'Protocol {{version}}',
       },
@@ -809,7 +818,7 @@ export const resources = {
       },
       runner: {
         step: 'Step 1 complete',
-        title: '{{label}} is connected',
+        title: 'Computer: {{label}}',
         description:
           'The credential is stored locally. Only declared runner capabilities are accepted.',
         device: 'Device ID',
@@ -1178,6 +1187,13 @@ export const resources = {
         copyLabel: 'Copy {{name}}',
       },
       evaluation: {
+        versionsTitle: 'Choose the versions', baselineHelp: 'The reference version to compare against.', candidateHelp: 'The exact version you opened for evaluation.',
+        instructions: 'Captured instructions: {{count}}', settingsTitle: 'Use the same settings for both runs', harnessLabel: 'Harness', harnessValue: 'Codex · fixed for this pilot',
+        contextLabel: 'Context', contextValue: 'Captured SKILL.md instructions', sandboxLabel: 'Sandbox', sandboxValue: 'Read-only · tools restricted',
+        trialLabel: 'Trial', trialValue: 'One per version · 120 seconds each', runTitle: 'Review and start', conditionsTitle: 'Execution details and limitations',
+        diagnosticsTitle: 'Run details', prerequisiteTitle: 'Before you can start', prerequisiteBaseline: 'Choose a baseline version.', prerequisiteModel: 'Enter a valid Codex model identifier.',
+        prerequisiteConsent: 'Confirm use of your Codex allowance.', ready: 'Ready to run both versions on {{computer}}.', checksSummary: '{{passed}} of {{total}} task checks passed',
+        noChecks: 'No task checks were recorded.', historyProfile: 'Requested model: {{model}} · {{effort}} reasoning',
         action: 'Evaluate instructions', back: 'Back to this Setup', title: 'Compare skill instructions',
         candidate: 'Candidate: {{name}} · Version {{version}}',
         scope: 'Pilot: compare the captured SKILL.md instructions from two exact Setup versions on a fixed code-review task. This does not test native skill discovery, supporting files, tool use, or performance on your project.',

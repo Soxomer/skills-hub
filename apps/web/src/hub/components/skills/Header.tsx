@@ -10,13 +10,17 @@ import {
   Settings,
   Tag,
   Wrench,
+  FolderOpen,
+  Package,
+  Laptop,
 } from 'lucide-react'
 import type { TFunction } from 'i18next'
 
 type ManagementTab = 'tags' | 'tools' | 'updates'
 
 type HeaderProps = {
-  onOpenWorkspace: () => void
+  onOpenWorkspace: (page: 'projects' | 'setups' | 'skills') => void
+  workspacePage?: 'projects' | 'setups' | 'skills' | null
   onSignOut?: () => void
   activeView: 'myskills' | 'explore' | 'detail' | 'settings' | 'manage'
   managementTab: ManagementTab
@@ -41,6 +45,7 @@ type HeaderProps = {
 
 const Header = ({
   onOpenWorkspace,
+  workspacePage,
   onSignOut,
   activeView,
   managementTab,
@@ -147,7 +152,9 @@ const Header = ({
       <nav className="sidebar-nav" aria-label={t('workspace')}>
 
         <button
-          className={activeView === 'myskills' || activeView === 'detail' ? 'active' : ''}
+          className={!workspacePage && (activeView === 'myskills' || activeView === 'detail') ? 'active' : ''}
+          aria-current={!workspacePage && (activeView === 'myskills' || activeView === 'detail') ? 'page' : undefined}
+          aria-label={t('navMySkills')}
           type="button"
           onClick={() => onViewChange('myskills')}
           title={collapsed ? t('navMySkills') : undefined}
@@ -157,7 +164,9 @@ const Header = ({
           <em>{skillCount}</em>
         </button>
         <button
-          className={activeView === 'explore' ? 'active' : ''}
+          className={!workspacePage && activeView === 'explore' ? 'active' : ''}
+          aria-current={!workspacePage && activeView === 'explore' ? 'page' : undefined}
+          aria-label={t('addSkills')}
           type="button"
           onClick={() => onViewChange('explore')}
           title={collapsed ? t('addSkills') : undefined}
@@ -165,14 +174,17 @@ const Header = ({
           <Compass size={18} />
           <span>{t('addSkills')}</span>
         </button>
-        <button type="button" onClick={onOpenWorkspace} title={t('runnerWorkspace')} aria-label={t('runnerWorkspace')}><Layers3 size={18} /><span>{t('runnerWorkspace')}</span></button>
+        <button type="button" className={workspacePage === 'setups' ? 'active' : ''} aria-current={workspacePage === 'setups' ? 'page' : undefined} onClick={() => onOpenWorkspace('setups')} title={t('workspaceNavigation.setups')} aria-label={t('workspaceNavigation.setups')}><Package size={18} /><span>{t('workspaceNavigation.setups')}</span></button>
+        <button type="button" className={workspacePage === 'projects' ? 'active' : ''} aria-current={workspacePage === 'projects' ? 'page' : undefined} onClick={() => onOpenWorkspace('projects')} title={t('workspaceNavigation.projects')} aria-label={t('workspaceNavigation.projects')}><FolderOpen size={18} /><span>{t('workspaceNavigation.projects')}</span></button>
         {onSignOut && <button type="button" onClick={onSignOut} title={t('auth.signOut', { ns: 'translation' })} aria-label={t('auth.signOut', { ns: 'translation' })}><LogOut size={18} /><span>{t('auth.signOut', { ns: 'translation' })}</span></button>}
       </nav>
 
       <div className="sidebar-section-label">{t('navManageCenter')}</div>
       <nav className="sidebar-nav" aria-label={t('navManageCenter')}>
         <button
-          className={activeView === 'manage' && managementTab === 'tags' ? 'active' : ''}
+          className={!workspacePage && activeView === 'manage' && managementTab === 'tags' ? 'active' : ''}
+          aria-label={t('manageTabs.tags')}
+          aria-current={!workspacePage && activeView === 'manage' && managementTab === 'tags' ? 'page' : undefined}
           type="button"
           onClick={() => onManagementTabChange('tags')}
           title={collapsed ? t('manageTabs.tags') : undefined}
@@ -182,7 +194,9 @@ const Header = ({
           <em>{tagCount}</em>
         </button>
         <button
-          className={activeView === 'manage' && managementTab === 'tools' ? 'active' : ''}
+          className={!workspacePage && activeView === 'manage' && managementTab === 'tools' ? 'active' : ''}
+          aria-label={t('manageTabs.tools')}
+          aria-current={!workspacePage && activeView === 'manage' && managementTab === 'tools' ? 'page' : undefined}
           type="button"
           onClick={() => onManagementTabChange('tools')}
           title={collapsed ? t('manageTabs.tools') : undefined}
@@ -192,7 +206,9 @@ const Header = ({
           <em>{toolCount}</em>
         </button>
         <button
-          className={activeView === 'manage' && managementTab === 'updates' ? 'active' : ''}
+          className={!workspacePage && activeView === 'manage' && managementTab === 'updates' ? 'active' : ''}
+          aria-label={t('manageTabs.updates')}
+          aria-current={!workspacePage && activeView === 'manage' && managementTab === 'updates' ? 'page' : undefined}
           type="button"
           onClick={() => onManagementTabChange('updates')}
           title={collapsed ? t('manageTabs.updates') : undefined}
@@ -201,11 +217,14 @@ const Header = ({
           <span>{t('manageTabs.updates')}</span>
           <em>{updateCount}</em>
         </button>
+        <button type="button" className={workspacePage === 'skills' ? 'active' : ''} aria-current={workspacePage === 'skills' ? 'page' : undefined} onClick={() => onOpenWorkspace('skills')} title={t('workspaceNavigation.inventory')} aria-label={t('workspaceNavigation.inventory')}><Laptop size={18} /><span>{t('workspaceNavigation.inventory')}</span></button>
       </nav>
 
       <div className="sidebar-spacer" />
       <button
-        className={`sidebar-settings${activeView === 'settings' ? ' active' : ''}`}
+        className={`sidebar-settings${!workspacePage && activeView === 'settings' ? ' active' : ''}`}
+        aria-label={t('settings')}
+        aria-current={!workspacePage && activeView === 'settings' ? 'page' : undefined}
         type="button"
         onClick={onOpenSettings}
         title={collapsed ? t('settings') : undefined}

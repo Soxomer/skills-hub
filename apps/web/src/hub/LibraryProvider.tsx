@@ -2,12 +2,13 @@ import { LIBRARY_COMMANDS, isLibrarySetupSnapshot, type LibraryCommand } from '@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ControlPlaneClient } from '../api'
-import { LibraryContext } from './library-context'
+import { LibraryContext, type SavedSetupSelection } from './library-context'
 
 interface Directory { name: string; handle: string }
 interface DirectoryListing extends Directory { parent: string | null; children: Directory[]; roots: Directory[] }
-export function LibraryProvider({ client, deviceId, connected, children, requestConnection }: {
+export function LibraryProvider({ client, deviceId, connected, children, requestConnection, onOpenSetup }: {
   client: ControlPlaneClient; deviceId: string | null; connected: boolean; children: ReactNode; requestConnection?: () => Promise<boolean>
+  onOpenSetup?: (selection: SavedSetupSelection) => void
 }) {
   const { t } = useTranslation('hub')
   const jobs = useRef(new Set<string>())
@@ -95,7 +96,7 @@ export function LibraryProvider({ client, deviceId, connected, children, request
     if (!isLibrarySetupSnapshot(value) || value.contentDigest !== contentDigest) throw new Error(t('libraryTransport.invalidResult'))
     return jobId
   }, [request, t])
-  const context = useMemo(() => ({ client, deviceId, previewSetupSkill, snapshotSetupSkill, runnerConnected: connected, invokeLibrary, pickDirectory, requestConnection }), [client, deviceId, previewSetupSkill, snapshotSetupSkill, connected, invokeLibrary, pickDirectory, requestConnection])
+  const context = useMemo(() => ({ client, deviceId, previewSetupSkill, snapshotSetupSkill, runnerConnected: connected, invokeLibrary, pickDirectory, requestConnection, onOpenSetup }), [client, deviceId, previewSetupSkill, snapshotSetupSkill, connected, invokeLibrary, pickDirectory, requestConnection, onOpenSetup])
   return <LibraryContext.Provider value={context}>
     {children}
     <dialog ref={dialog} className="library-dialog" aria-labelledby="library-dialog-title" onCancel={event => { event.preventDefault(); close() }}>

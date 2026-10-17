@@ -12,11 +12,12 @@ interface UseSetupOnProjectProps {
   runnerOnline: boolean
   onBack: () => void
   onProjects: () => void
+  active?: boolean
 }
 
 // Extend the incumbent utility UI: exact saved version, explicit destination,
 // then the existing reviewed workflow. Navigation never queues local work.
-export function UseSetupOnProject({ client, revision, defaultProjectId, runner, runnerOnline, onBack, onProjects }: UseSetupOnProjectProps) {
+export function UseSetupOnProject({ client, revision, defaultProjectId, runner, runnerOnline, onBack, onProjects, active = true }: UseSetupOnProjectProps) {
   const { t } = useTranslation()
   const [projectList, setProjectList] = useState<{ client: ControlPlaneClient; values: ProjectSummary[] } | null>(null)
   const projects = projectList?.client === client ? projectList.values : null
@@ -27,11 +28,12 @@ export function UseSetupOnProject({ client, revision, defaultProjectId, runner, 
   const instanceId = checkout?.deviceId === runner?.deviceId ? checkout?.id ?? '' : ''
   const [destination, setDestination] = useState<{ deviceId: string; projectId: string; instanceId: string } | null>(null)
   useEffect(() => {
+    if (!active) return
     let live = true
     client.projects().then(value => { if (live) { setProjectList({ client, values: value.projects }); setError(false) } })
       .catch(() => { if (live) setError(true) })
     return () => { live = false }
-  }, [client, reload])
+  }, [client, reload, active])
   const allowedProjects = projects?.filter(project => revision.kind !== 'default' || project.projectId === defaultProjectId) ?? []
   const project = allowedProjects.find(value => value.projectId === projectId)
   const instances = runner?.projectInstances.filter(instance => instance.projectId === projectId) ?? []

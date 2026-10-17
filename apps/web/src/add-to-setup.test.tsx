@@ -19,7 +19,7 @@ beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container=do
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
 function fixture() {
   const client = { setups:vi.fn().mockResolvedValue({setups:[{setupId:'daily',name:'Daily',latestRevision:revision}]}), setup:vi.fn().mockResolvedValue(detail), addLibrarySkillToSetup:vi.fn().mockResolvedValue({...revision,setupRevisionId:'v2',revisionNumber:2}) }
-  return { client, context:{client:client as unknown as ControlPlaneClient, deviceId:'device', runnerConnected:true, previewSetupSkill:vi.fn().mockResolvedValue(snapshot), snapshotSetupSkill:vi.fn().mockResolvedValue('snapshot-job'), invokeLibrary:vi.fn(), pickDirectory:vi.fn()}, close:vi.fn() }
+  return { client, context:{client:client as unknown as ControlPlaneClient, deviceId:'device', runnerConnected:true, previewSetupSkill:vi.fn().mockResolvedValue(snapshot), snapshotSetupSkill:vi.fn().mockResolvedValue('snapshot-job'), invokeLibrary:vi.fn(), pickDirectory:vi.fn(), onOpenSetup:vi.fn()}, close:vi.fn() }
 }
 async function mount(f=fixture()) { await act(async () => root.render(<LibraryContext.Provider value={f.context}><AddToSetupDialog skill={skill} tools={[{id:'codex',label:'Codex'},{id:'claude_code',label:'Claude Code'}]} onClose={f.close} /></LibraryContext.Provider>)); return f }
 async function click(label:string) { const button=[...container.querySelectorAll('button')].find(b=>b.textContent===label); expect(button).toBeDefined(); await act(async()=>button!.click()) }
@@ -51,6 +51,15 @@ it('keeps existing items, prevents a collision, and publishes against the review
   expect(container.querySelector<HTMLButtonElement>('.btn-primary')!.disabled).toBe(true)
   await tick(0); await tick(1); await tick(2); await click('Add to Setup')
   expect(f.client.addLibrarySkillToSetup).toHaveBeenCalledWith(expect.objectContaining({destination:{setupId:'daily',expectedRevisionNumber:1},targets:[{toolId:'claude_code',targetName:'review'}]}))
+})
+it('opens the exact saved revision only after the user chooses the saved Setup handoff', async()=>{
+  const f=await mount(); await tick(1); await tick(2); await click('Add to Setup')
+  expect(f.context.onOpenSetup).not.toHaveBeenCalled()
+  await click('Open saved Setup')
+  expect(f.close).toHaveBeenCalledOnce()
+  expect(f.context.onOpenSetup).toHaveBeenCalledWith({setupId:'daily',setupRevisionId:'v2'})
+  expect(f.close.mock.invocationCallOrder[0]).toBeLessThan(f.context.onOpenSetup.mock.invocationCallOrder[0])
+  expect(f.client.addLibrarySkillToSetup).toHaveBeenCalledOnce()
 })
 it('preserves the draft and snapshot job after a failed response so retry does not snapshot twice', async()=>{
   const f=fixture(); f.client.addLibrarySkillToSetup.mockRejectedValueOnce(new Error('offline'))

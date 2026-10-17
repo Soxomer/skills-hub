@@ -1,21 +1,21 @@
 ---
 name: Agent Harness Manager
-description: The restored Skills Hub browser library and its Projects and Setups workspace.
+description: A compact Skills Hub workspace for managed skills, versioned Setups, and projects.
 colors:
   background: "#fafafa"
   surface: "#ffffff"
-  surface-subtle: "#f5f5f6"
+  surface-subtle: "#f4f4f5"
   text: "#18181b"
   text-secondary: "#6b6b72"
   border: "#dedee1"
-  border-strong: "#c8c8cd"
+  border-strong: "#c9c9ce"
   accent: "#2f6fed"
-  accent-hover: "#255fd3"
-  accent-soft: "#edf3ff"
+  accent-hover: "#245ed3"
+  accent-soft: "#eff6ff"
   success: "#059669"
   success-soft: "#ecfdf5"
   warning: "#d97706"
-  warning-soft: "#fff7ed"
+  warning-soft: "#fffbeb"
   error: "#dc2626"
   error-soft: "#fef2f2"
   hub-element: "#f4f4f5"
@@ -25,9 +25,9 @@ colors:
 typography:
   headline:
     fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-    fontSize: "clamp(28px, 4vw, 38px)"
-    lineHeight: 1.12
-    letterSpacing: "-0.035em"
+    fontSize: "24px"
+    lineHeight: 1.3
+    letterSpacing: "-0.02em"
   title:
     fontSize: "18px"
     lineHeight: 1.3
@@ -118,14 +118,14 @@ components:
 
 The established interface is neutral, calm, and quietly confident. Alignment, readable task hierarchy, and compact controls carry the design; color identifies action or operational state. This name describes the existing implementation rather than introducing a brand direction.
 
-This records the restored Skills Hub browser experience and the preserved Projects and Setups workspace. It is grounded in `PRODUCT.md`, `docs/UI-DESIGN-GUIDELINES.md`, the runtime styles, and the restored React components. The restoration follows the original compact sidebar and management interface, including preview before installation; it introduces no new visual direction.
+This records one Skills Hub browser workspace for the managed library, saved Setups, Projects, and Computer inventory. The existing compact sidebar and management interface continue across these destinations, including preview before installation and deliberate review before Apply. It is grounded in `PRODUCT.md`, the runtime styles, and the integrated React components; the visual identity remains unchanged.
 
-Runtime CSS remains the implementation authority. Frontmatter records the light baseline. Skills Hub uses the `App.css` semantic variables and its system/light/dark preference; the Projects and Setups workspace retains the `index.css` variables. The `hub-` entries capture observed differences between these existing component families. Existing headline, button, input, and panel tokens remain applicable to the Projects and Setups workspace.
+Runtime CSS remains the implementation authority. Frontmatter records the light baseline. The shared system/light/dark preference controls the entire workspace through `App.css` semantic variables. Integrated Projects and Setups alias their surface, text, border, accent, and status roles to these same variables. The `hub-` entries preserve component-family names; they do not define a separate theme. Workflow buttons, fields, and panels retain their established dimensions, with compact workspace headings.
 
 **Key Characteristics:**
 
 - Flat surfaces, subtle boundaries, and restrained rounding.
-- Compact sidebar navigation, structured skill lists, and optional card views.
+- One persistent sidebar, structured skill lists, and optional card views.
 - One blue action accent and semantic status colors.
 - Visible prerequisites and honest operation states.
 - Contextual skill previews before an explicit installation action.
@@ -150,7 +150,7 @@ Success green, warning amber, and error red are operational signals with corresp
 
 ## Typography
 
-Use the UI sans-serif stack for interface text. Skills Hub management titles use the hub-title role, compact controls use the hub-label role, and sidebar labels use (14px). Compact operational copy commonly uses (12–14px); metadata commonly uses (11–12px). Summary values use (26px), reducing to (22px) on narrower layouts. Projects and Setups retain the headline, title, and body roles; do not apply their large page headings to compact library rows.
+Use the UI sans-serif stack for interface text. Skills Hub management titles use the hub-title role, compact controls use the hub-label role, and sidebar labels use (14px). Compact operational copy commonly uses (12–14px); metadata commonly uses (11–12px). Summary values use (26px), reducing to (22px) on narrower layouts. Projects, Setups, and evaluation use the compact headline role (24px); section headings and supporting copy remain subordinate. Evaluation section headings use (17px), field and comparison labels use (13px), and version identities use weight (600).
 
 Use the monospace stack for paths, commands, versions, and digests. Establish hierarchy through weight, contrast, and spacing. Lucide icons clarify actions and objects; icon-only controls need accessible labels.
 
@@ -160,11 +160,13 @@ Skills Hub uses a persistent left sidebar and an independently scrolling content
 
 At (600px) and below, the sidebar automatically becomes the (64px) icon rail without changing the saved desktop collapse preference. The main content uses (12px) padding, summary tiles form two columns, and filters wrap. List rows reflow identity, metadata, enable control, tool targets, and actions across separate lines; action buttons become (36px). Card and catalogue grids reduce to one column. Keep primary actions reachable and allow long skill names to wrap.
 
-The Projects & runner navigation opens the separate preserved workspace for project connection, inspection, and Setup workflows. That workspace retains its sticky top bar and centered content capped at (960px), with (24px) side clearance and (54px) top padding. At (720px), side clearance becomes (14px), top padding becomes (34px), and headings stack. This workspace pattern does not replace the Skills Hub sidebar.
+Projects and Setups open directly within the same sidebar and scrolling main region. A shared connection strip remains above every destination. Workflow content is left-aligned, fills available width up to (1200px), and has (40px) bottom clearance; it adds no second top bar or nested navigation shell. At (720px), workflow headings and actions stack. Evaluation pairs versions, model settings, and fixed settings in two columns with (20px) row and (32px) column gaps, stacking at (640px); result columns adapt to available width with a (260px) minimum where space allows.
+
+**The One Workspace Rule.** Keep global navigation and connection status in the shared shell; use contextual Back controls inside a task.
 
 ## Elevation & Depth
 
-Resting content uses borders and tonal layering. The restored sidebar selection and card hover use a small shadow; primary actions have a restrained accent shadow. Temporary drawers, menus, and dialogs carry stronger elevation. The Projects and Setups top bar retains a nearly opaque surface mix and backdrop blur (12px). Keep the existing subtle exceptions without adding elevated containers around ordinary content.
+Resting content uses borders and tonal layering. The restored sidebar selection and card hover use a small shadow; primary actions have a restrained accent shadow. Temporary drawers, menus, and dialogs carry stronger elevation. The shared connection strip uses a bottom border; integrated workflow sections remain flat. Keep the existing subtle exceptions without adding elevated containers around ordinary content.
 
 The light-theme small shadow is `0 1px 2px 0 rgb(0 0 0 / 0.05)`; the overlay shadow is `0 10px 20px -6px rgb(0 0 0 / 0.15)`. Dialogs also use `0 18px 48px rgb(0 0 0 / .24)`. Dark bindings and component-specific motion are recorded in the sidecar or runtime CSS.
 
@@ -184,7 +186,7 @@ Fields use neutral surfaces and borders with visible accent focus. The Hub searc
 
 ### Navigation
 
-The sidebar groups My Skills, Add Skills, and Projects & runner above Tags, Tools, and Updates, with Settings anchored below. Resting labels are muted; hover uses a subtle neutral fill. Selection uses a bordered panel surface, stronger text, and a blue icon. Expanded navigation shows labels and useful counts. Collapsed navigation keeps icons, active state, and accessible names while hiding labels and counts. The saved desktop preference resumes when leaving the narrow viewport.
+The sidebar exposes My Skills, Add Skills, Setups, and Projects directly. Its management group contains Tags, Tools, Updates, and Computer inventory, with Settings anchored below. Resting labels are muted; hover uses a subtle neutral fill. Selection uses a bordered panel surface, stronger text, and a blue icon. Expanded navigation shows labels and useful counts. Collapsed navigation keeps icons, active state, and accessible names while hiding labels and counts. The saved desktop preference resumes when leaving the narrow viewport. Current destinations expose `aria-current`, and a keyboard skip link targets the main content. Setups and Projects remain mounted once visited so navigation retains drafts and task selections; relevant server reads refresh on reentry, while an active editor, evaluation, or destination flow keeps its exact loaded revision.
 
 ### Chips and panels
 
@@ -200,7 +202,15 @@ Add Skills exposes catalogue discovery and import entry points. A catalogue prev
 
 ### Management and Setup workflows
 
-Tags, Tools, Updates, and Settings retain the original compact management layouts and direct action labels. Projects and Setups remain additional workflows with review, immutable history, and deliberate Apply actions. A runner report may be read-only within those workflows, but that does not make the managed My Skills library read-only. Show connection prerequisites next to affected actions. The browser experience has no Tauri dependency or direct filesystem mutation.
+Tags, Tools, Updates, and Settings retain compact management layouts and direct action labels. Computer inventory is a read-only runner report; My Skills remains the managed library with its existing actions. Saved Setups are browsable without an online computer. Their version selector, content inspection, edit/clone, comparison, and project-use actions retain visible identity and immutable history. Returning from an added skill opens the exact saved Setup revision. Publishing and evaluation leave project assignments unchanged; using a Setup on a project leads to a separate reviewed Apply. Show connection prerequisites next to affected actions. The browser experience has no Tauri dependency or direct filesystem mutation.
+
+### Setup evaluation
+
+Comparison is a contextual task under Setups, with a Back control, exact candidate identity, a selectable baseline version, and plainly labeled sections for versions, shared settings, and execution. The fixed-settings inset shows Codex, captured SKILL.md instructions, a read-only sandbox, and one trial per version with a (120-second) timeout. Model and reasoning effort are editable fields; fixed conditions are readable metadata. Show the instructions-only scope before the form, place fixture and execution details in disclosures, and keep consent and a specific prerequisite list beside the Start action.
+
+History uses a readable run heading, timestamp, execution status, shared profile, and paired baseline/candidate results. Each side shows version identity, outcome, duration, and check totals; technical identifiers and observed runtime details sit in a disclosure. Failures and timeouts remain distinct from task checks. Preserve the preliminary-evidence limitation and the separate Apply action; the interface must not imply a general ranking or project-level test.
+
+**The Exact Version Rule.** Keep the selected Setup revision visible and stable through inspection, comparison, and project handoff; a refresh must not silently substitute a newer version.
 
 ## Do's and Don'ts
 
@@ -209,6 +219,8 @@ Tags, Tools, Updates, and Settings retain the original compact management layout
 - **Do** reuse semantic CSS variables in both themes.
 - **Do** preserve compact scanning, visible labels, and keyboard focus.
 - **Do** keep state explanations next to the data or action they qualify.
+- **Do** preserve task drafts across navigation while refreshing relevant server data on reentry.
+- **Do** show exact versions and separate publication, evaluation, and reviewed Apply.
 - **Do** keep English product copy in the resource bundle and respect reduced motion.
 
 ### Don't:
@@ -216,6 +228,8 @@ Tags, Tools, Updates, and Settings retain the original compact management layout
 - **Don't** replace management density with oversized marketing cards.
 - **Don't** use status color as decoration or the sole state indicator.
 - **Don't** add containers without a meaningful grouping boundary.
-- **Don't** replace the managed library with a read-only report or conflate it with saved Setups.
+- **Don't** replace the managed library with Computer inventory or conflate it with saved Setups.
+- **Don't** add a second navigation shell or independent theme for Projects and Setups.
+- **Don't** present the fixed instructions-only comparison as native skill discovery or a general performance ranking.
 - **Don't** install a catalogue skill merely because its preview was opened.
 - **Don't** reintroduce Tauri window controls or browser filesystem mutation.
