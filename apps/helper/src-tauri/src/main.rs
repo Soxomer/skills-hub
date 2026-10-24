@@ -20,7 +20,11 @@ use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
 
-const WEBSITE: &str = "https://skill-manager.omarjetti.dev/";
+const WEBSITE: &str = if cfg!(debug_assertions) {
+    "http://localhost:5173/"
+} else {
+    "https://skill-manager.omarjetti.dev/"
+};
 type Result<T> = std::result::Result<T, String>;
 
 #[derive(Default)]
@@ -274,13 +278,12 @@ fn set_startup(app: AppHandle, enabled: bool) -> Result<()> {
 
 #[tauri::command]
 fn open_website(app: AppHandle, connect: bool) -> Result<()> {
-    let url = if connect {
-        "https://skill-manager.omarjetti.dev/?connect=helper"
-    } else {
-        WEBSITE
-    };
+    let mut url = url::Url::parse(WEBSITE).map_err(|_| "browserFailed")?;
+    if connect {
+        url.set_query(Some("connect=helper"));
+    }
     app.opener()
-        .open_url(url, None::<&str>)
+        .open_url(url.as_str(), None::<&str>)
         .map_err(|_| "browserFailed".into())
 }
 

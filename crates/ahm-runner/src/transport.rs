@@ -73,7 +73,7 @@ impl HttpRunnerTransport {
         }
         let loopback = matches!(
             server_url.host_str(),
-            Some("localhost" | "127.0.0.1" | "::1")
+            Some("localhost" | "127.0.0.1" | "::1" | "[::1]")
         );
         if server_url.scheme() != "https" && !loopback {
             bail!("runner server URL must use HTTPS except on localhost");

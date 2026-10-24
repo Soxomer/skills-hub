@@ -11,10 +11,11 @@ let root: Root
 let container: HTMLDivElement
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
   sessionStorage.clear()
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 function connection(overrides: Partial<ReturnType<typeof useRunnerConnection>> = {}): ReturnType<typeof useRunnerConnection> {
   return { enrollment: null, status: null, runner: null, creating: false, error: null, createEnrollment: vi.fn(), refresh: vi.fn(), reset: vi.fn(), ...overrides }
 }
@@ -31,7 +32,6 @@ it('guides install then connect, keeps codes out of the main flow, and waits for
   expect(container.querySelectorAll('option')).toHaveLength(4)
   expect(value.createEnrollment).not.toHaveBeenCalled()
   await click('I have installed the helper')
-  await click('Connect helper')
   expect(value.createEnrollment).toHaveBeenCalledOnce()
   const enrolled = connection({ enrollment: { enrollmentId: 'fixture', code: 'abcdefghijklmnop', command: 'ahm connect abcdefghijklmnop --server https://example.com', expiresAt: '2099-01-01T00:00:00Z' } })
   await act(async () => root.render(<HelperOnboarding connection={enrolled} connected={false} onFinish={finish} />))
@@ -46,11 +46,52 @@ it('guides install then connect, keeps codes out of the main flow, and waits for
 it('recovers from expired enrollment without opening the stale link', async () => {
   const value = connection({ enrollment: { enrollmentId: 'old', code: 'abcdefghijklmnop', command: 'ahm connect abcdefghijklmnop --server https://example.com', expiresAt: '2020-01-01T00:00:00Z' } })
   await act(async () => root.render(<HelperOnboarding connection={value} connected={false} onFinish={vi.fn()} />))
-  await click('I have installed the helper')
   expect(container.querySelector('a[href^="ahm://connect"]')).toBeNull()
   expect(container.textContent).toContain('The connection link expired')
   await act(async () => container.querySelector<HTMLButtonElement>('button.primary-button')!.click())
   expect(value.createEnrollment).toHaveBeenCalledOnce()
+})
+
+it('skips installation when opened from the installed desktop app and prepares once', async () => {
+  const value = connection()
+  await act(async () => root.render(<HelperOnboarding connection={value} connected={false} initialInstalled onFinish={vi.fn()} />))
+  expect(container.textContent).toContain('Connect to this workspace')
+  expect(container.textContent).not.toContain('I have installed the helper')
+  expect(value.createEnrollment).toHaveBeenCalledOnce()
+  await act(async () => root.render(<HelperOnboarding connection={value} connected={false} initialInstalled onFinish={vi.fn()} />))
+  expect(value.createEnrollment).toHaveBeenCalledOnce()
+})
+
+it('explains an invalid server address instead of generating links that never open', async () => {
+  const value = connection({ enrollment: { enrollmentId: 'bad', code: 'abcdefghijklmnop', command: 'ahm connect abcdefghijklmnop --server http://remote.example.com', expiresAt: '2099-01-01T00:00:00Z' } })
+  await act(async () => root.render(<HelperOnboarding connection={value} connected={false} onFinish={vi.fn()} />))
+  expect(container.querySelector('[role=alert]')?.textContent).toContain('unsupported connection address')
+  expect(container.querySelector('a[href^="ahm://connect"]')).toBeNull()
+  expect(value.createEnrollment).not.toHaveBeenCalled()
+  await click('Try the updated workspace address')
+  expect(value.createEnrollment).toHaveBeenCalledOnce()
+})
+
+it('prepares a local connection without requiring HTTPS or a tunnel', async () => {
+  const value = connection({ enrollment: { enrollmentId: 'local', code: 'abcdefghijklmnop', command: 'ahm connect abcdefghijklmnop --server http://127.0.0.1:8787', expiresAt: '2099-01-01T00:00:00Z' } })
+  await act(async () => root.render(<HelperOnboarding connection={value} connected={false} onFinish={vi.fn()} />))
+  expect(container.querySelector('a[href^="ahm://connect"]')?.getAttribute('href')).toContain('127.0.0.1')
+  expect(container.textContent).toContain('No public tunnel is needed')
+})
+
+it('offers the matching local installer instead of the older published helper', async () => {
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
+  vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ windows: '/__ahm/helper-installers/windows' }) } as Response)
+  await act(async () => root.render(<HelperOnboarding connection={connection()} connected={false} onFinish={vi.fn()} />))
+  expect(container.querySelector<HTMLSelectElement>('#helper-platform')?.value).toBe('windows')
+  expect(container.querySelector('a.primary-button')?.getAttribute('href')).toBe('/__ahm/helper-installers/windows')
+  expect(container.textContent).not.toContain('not ready yet')
+})
+
+it('does not offer an older published installer when the local build is unavailable', async () => {
+  await act(async () => root.render(<HelperOnboarding connection={connection()} connected={false} onFinish={vi.fn()} />))
+  expect(container.querySelector('a.primary-button')).toBeNull()
+  expect(container.textContent).toContain('installer for this local workspace is not ready')
 })
 
 it('cancelling keeps browsing available and never confirms a connection', async () => {

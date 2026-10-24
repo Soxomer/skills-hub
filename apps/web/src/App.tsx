@@ -41,6 +41,7 @@ export function App({ client: suppliedClient, onSignOut }: AppProps = {}) {
           setupSelection={setupSelection} onSkills={() => { setSkillsNavigationRequest(value => value + 1); setWorkspace(null) }} onConnect={() => void requestConnection()} />
       </SkillsHub>
     </div>
-    {onboarding && <HelperOnboarding connection={connection} connected={connected} onFinish={finishConnection} />}
+    {onboarding && <HelperOnboarding connection={connection} connected={connected}
+      initialInstalled={new URLSearchParams(window.location.search).get('connect') === 'helper'} onFinish={finishConnection} />}
   </LibraryProvider>
 }

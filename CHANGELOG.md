@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-24
+
+### Changed
+- Guide first use through install, connect, and managing skills, with automatic connection preparation and clear import or browse actions after connection.
+- Offer the matching locally built desktop installer during development; debug helpers return to the local workspace.
+
+### Fixed
+- Connect directly to loopback workspaces without a public tunnel while continuing to reject insecure remote pairing addresses.
+- Explain unsupported connection addresses and retain explicit retry after configuration repairs.
+- Recover failed initial library loads with a persistent retry, and preserve selected imports when search hides them.
+
 ## [0.10.0] - 2026-10-13
 
 ### Added
