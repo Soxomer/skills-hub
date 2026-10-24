@@ -15,7 +15,7 @@ beforeEach(() => {
   sessionStorage.clear()
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 function connection(overrides: Partial<ReturnType<typeof useRunnerConnection>> = {}): ReturnType<typeof useRunnerConnection> {
   return { enrollment: null, status: null, runner: null, creating: false, error: null, createEnrollment: vi.fn(), refresh: vi.fn(), reset: vi.fn(), ...overrides }
 }
@@ -80,8 +80,10 @@ it('prepares a local connection without requiring HTTPS or a tunnel', async () =
 })
 
 it('offers the matching local installer instead of the older published helper', async () => {
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
   vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ windows: '/__ahm/helper-installers/windows' }) } as Response)
   await act(async () => root.render(<HelperOnboarding connection={connection()} connected={false} onFinish={vi.fn()} />))
+  expect(container.querySelector<HTMLSelectElement>('#helper-platform')?.value).toBe('windows')
   expect(container.querySelector('a.primary-button')?.getAttribute('href')).toBe('/__ahm/helper-installers/windows')
   expect(container.textContent).not.toContain('not ready yet')
 })
