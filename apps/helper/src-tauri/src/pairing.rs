@@ -40,11 +40,12 @@ pub fn parse(value: &str) -> Result<Pairing, &'static str> {
         return Err(invalid);
     }
     let server = Url::parse(&server[0].1).map_err(|_| invalid)?;
-    if server.scheme() != "https"
+    let local = matches!(server.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    if (server.scheme() != "https" && !(server.scheme() == "http" && local))
         || server.host_str().is_none()
         || !server.username().is_empty()
         || server.password().is_some()
-        || server.port().is_some()
+        || (server.port().is_some() && !local)
         || server.path() != "/"
         || server.query().is_some()
         || server.fragment().is_some()
@@ -78,6 +79,29 @@ mod tests {
             valid.replace("connect?", "connect/path?"),
         ] {
             assert!(parse(&bad).is_err());
+        }
+    }
+
+    #[test]
+    fn local_workspaces_do_not_need_a_public_tunnel() {
+        for origin in [
+            "http://localhost:8787",
+            "http://127.0.0.1:8787",
+            "http://[::1]:8787",
+        ] {
+            let link = format!("ahm://connect?code=abcdefghijklmnop&server={origin}");
+            assert_eq!(parse(&link).unwrap().server, origin);
+        }
+        for origin in [
+            "http://192.168.1.2:8787",
+            "http://localhost.evil.test:8787",
+            "http://127.0.0.1@evil.test:8787",
+            "http://localhost:8787/path",
+        ] {
+            assert!(parse(&format!(
+                "ahm://connect?code=abcdefghijklmnop&server={origin}"
+            ))
+            .is_err());
         }
     }
 }

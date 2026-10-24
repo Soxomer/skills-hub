@@ -126,6 +126,8 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
   const [appVersion, setAppVersion] = useState('')
   const [systemTheme, setSystemTheme] = useState<'light' | 'dark'>('light')
   const [plan, setPlan] = useState<OnboardingPlan | null>(null)
+  const [managedSkillsLoaded, setManagedSkillsLoaded] = useState(false)
+  const [managedSkillsLoadFailed, setManagedSkillsLoadFailed] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Record<string, boolean>>({})
@@ -375,7 +377,9 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
     }
   }
 
+  const planRequestSequence = useRef(0)
   const loadPlan = useCallback(async (showLoading = true) => {
+    const requestSequence = ++planRequestSequence.current
     if (showLoading) {
       setLoading(true)
       setLoadingStartAt(Date.now())
@@ -383,6 +387,7 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
     setError(null)
     try {
       const result = await invokeLibrary<OnboardingPlan>('get_onboarding_plan')
+      if (requestSequence !== planRequestSequence.current) return null
       setPlan(result)
       const defaultSelected: Record<string, boolean> = {}
       const defaultChoice: Record<string, string> = {}
@@ -397,7 +402,7 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
       setVariantChoice(defaultChoice)
       return result
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (requestSequence === planRequestSequence.current) setError(err instanceof Error ? err.message : String(err))
       return null
     } finally {
       if (showLoading) {
@@ -422,10 +427,13 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
   }, [invokeLibrary, runnerConnected])
 
   const loadManagedSkills = useCallback(async () => {
+    setManagedSkillsLoadFailed(false)
     try {
       const result = await invokeLibrary<ManagedSkill[]>('get_managed_skills')
       setManagedSkills(result)
+      setManagedSkillsLoaded(true)
     } catch (err) {
+      setManagedSkillsLoadFailed(true)
       setError(err instanceof Error ? err.message : String(err))
     }
   }, [invokeLibrary])
@@ -443,7 +451,7 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
     if (runnerConnected) {
       loadManagedSkills()
       loadTags()
-    }
+    } else { setManagedSkillsLoaded(false); setManagedSkillsLoadFailed(false) }
   }, [runnerConnected, loadManagedSkills, loadTags])
 
   useEffect(() => {
@@ -3598,9 +3606,18 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
         {!runnerConnected && activeView === 'myskills' && <section className="workspace-start" aria-labelledby="workspace-start-title">
           <h1 id="workspace-start-title">{t('workspaceNavigation.startTitle')}</h1>
           <p>{t('workspaceNavigation.startHelp')}</p>
-          <div className="workspace-start-actions"><button className="btn btn-primary" type="button" onClick={() => void requestConnection?.()}>{t('workspaceNavigation.connect')}</button>
-            <button className="btn btn-secondary" type="button" onClick={() => onOpenWorkspace('setups')}>{t('workspaceNavigation.savedSetups')}</button></div>
+          <ol className="workspace-start-steps"><li>{t('workspaceNavigation.installStep')}</li><li>{t('workspaceNavigation.connectStep')}</li><li>{t('workspaceNavigation.importStep')}</li></ol>
+          <div className="workspace-start-actions"><button className="btn btn-primary" type="button" onClick={() => void requestConnection?.()}>{t('workspaceNavigation.setup')}</button>
+            <button className="btn btn-secondary" type="button" onClick={() => handleViewChange('explore')}>{t('workspaceNavigation.browse')}</button></div>
           <p className="workspace-start-note">{t('workspaceNavigation.offlineHelp')}</p>
+        </section>}
+        {runnerConnected && activeView === 'myskills' && !managedSkillsLoaded && !managedSkillsLoadFailed && <p role="status">{t('workspaceNavigation.loadingSkills')}</p>}
+        {runnerConnected && activeView === 'myskills' && managedSkillsLoadFailed && <div className="notice notice--error" role="alert"><p>{t('workspaceNavigation.loadFailed')}</p>
+          <button className="btn btn-secondary" type="button" onClick={() => void loadManagedSkills()}>{t('workspaceNavigation.retryLibrary')}</button></div>}
+        {runnerConnected && managedSkillsLoaded && managedSkills.length === 0 && activeView === 'myskills' && <section className="workspace-start" aria-labelledby="workspace-ready-title">
+          <h1 id="workspace-ready-title">{t('workspaceNavigation.readyTitle')}</h1><p>{t('workspaceNavigation.readyHelp')}</p>
+          <div className="workspace-start-actions"><button className="btn btn-primary" type="button" disabled={loading} onClick={() => void handleReviewImport()}>{t('workspaceNavigation.findExisting')}</button>
+            <button className="btn btn-secondary" type="button" onClick={() => handleViewChange('explore')}>{t('workspaceNavigation.browse')}</button></div>
         </section>}
         {pendingInstall && <div className="library-connection-notice" role="status">
           <button type="button" disabled={preparingInstall && !toolStatusFailed} onClick={() => {
@@ -3621,7 +3638,7 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
             t={t}
           /></Suspense>
         ) : activeView === 'myskills' ? (
-          <div className="dashboard-stack" hidden={!runnerConnected}>
+          <div className="dashboard-stack" hidden={!runnerConnected || managedSkills.length === 0}>
             <section className="dashboard-stats" aria-label={t('navMySkills')}>
               <article>
                 <span>{t('stats.managed')}</span>
@@ -3975,6 +3992,7 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
       {showImportModal && plan ? (
         <ImportModal
           open={showImportModal}
+          onBrowseSkills={() => { setShowImportModal(false); handleViewChange('explore') }}
           loading={loading}
           plan={plan}
           selected={selected}

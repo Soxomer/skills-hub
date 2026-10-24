@@ -5,8 +5,8 @@ The product has four runtime boundaries: the browser UI, the Tauri helper, the R
 ## User experience
 
 - Browse, search and preview skills on the web without installing the helper.
-- Selecting Install while disconnected opens **Connect this computer**, preserving the selected source (including a preview's pinned revision). The first step offers the platform installer; the user can choose Windows x64, macOS Apple silicon/Intel or Linux x64.
-- After installation, **I have installed the helper → Connect helper → Open Skills Hub helper** creates a fresh enrollment and opens the registered `ahm:` link. The helper shows the HTTPS workspace origin and requires an explicit Connect. Codes, expiry details and CLI instructions are not part of the normal onboarding path.
+- Selecting Install while disconnected opens **Set up this computer**, preserving the selected source (including a preview's pinned revision). The first step offers the platform installer; the user can choose Windows x64, macOS Apple silicon/Intel or Linux x64.
+- After installation, **I have installed the helper → Open Skills Hub helper** prepares enrollment automatically. The helper shows the workspace origin and requires an explicit Connect. Arriving from the installed app skips the download step. Codes and CLI instructions stay in Connection help.
 - The browser only offers Continue once the worker reports with library capability. Continue resumes the selected install. Cancelling returns to browsing. A pending skill selection survives reload in session storage, but requires another user action before executing.
 - On first launch without a saved connection, the helper offers **Connect to Skills Hub**, opening the website's connection flow. After pairing it runs the worker, offers Return to Skills Hub, and retains the connection across restarts. Startup at sign-in is opt-in on every OS.
 - Closing the helper hides it in the tray. Pause/Quit let the current worker cycle finish. The worker retries transient network failures. If the tray cannot be created, the window remains the control surface and closing it requests a graceful quit.
@@ -15,7 +15,7 @@ The browser cannot reliably detect a registered protocol handler, so “installe
 
 ## Native boundaries
 
-The Tauri frontend is bundled local content with a restrictive CSP and no remote-origin capability. Custom Rust commands accept bounded lifecycle actions, not arbitrary executables or command lines. The colocated `ahm` is invoked directly without a shell. Pairing accepts exactly one bounded code and one HTTPS origin, rejects duplicate/extra parameters and credentials, and keeps the code out of snapshots and logs. A confirmation is bound to the pending request ID, preventing a replacement link from silently changing the confirmed request.
+The Tauri frontend is bundled local content with a restrictive CSP and no remote-origin capability. Custom Rust commands accept bounded lifecycle actions, not arbitrary executables or command lines. The colocated `ahm` is invoked directly without a shell. Pairing accepts exactly one bounded code and one HTTPS origin, or HTTP on `localhost`, `127.0.0.1`, or `[::1]` for a workspace on the same computer. Local origins may include a port; remote HTTP and remote nonstandard ports remain rejected. Duplicate/extra parameters and credentials are rejected, and codes stay out of snapshots and logs. A confirmation is bound to the pending request ID, preventing a replacement link from silently changing the confirmed request.
 
 Single-instance and deep-link plugins deliver links to the existing helper, including the platform-specific macOS event flow. Autostart uses the Tauri plugin's native implementation with `--background`. First launch stays visible; subsequent sign-in startup uses the saved connection.
 
@@ -45,7 +45,9 @@ Release CI builds the runner for each target, prepares its target-suffixed sidec
 
 Each artifact contains the corresponding runner; users do not need Cargo or a source checkout. Windows release binaries statically link the MSVC runtime. Manual release workflow dispatch builds artifacts; only version tags publish a release.
 
-Set the following web environment variables **only after assets are published**: `VITE_HELPER_WINDOWS_URL`, `VITE_HELPER_MAC_ARM_URL`, `VITE_HELPER_MAC_INTEL_URL`, `VITE_HELPER_LINUX_URL`. Values must be HTTPS URLs. Until then, onboarding states that the selected installer is unpublished instead of showing a broken download. `VITE_RUNNER_INSTALLER_URL` remains the existing Windows setting fallback.
+Override the hosted installer defaults with these web environment variables **only after assets are published**: `VITE_HELPER_WINDOWS_URL`, `VITE_HELPER_MAC_ARM_URL`, `VITE_HELPER_MAC_INTEL_URL`, `VITE_HELPER_LINUX_URL`. Values must be HTTPS URLs. An explicitly invalid override shows installer unavailability instead of a broken download. `VITE_RUNNER_INSTALLER_URL` remains the existing Windows setting fallback.
+
+Without overrides, hosted web builds use the published v0.10.0 installer assets. Local Vite development instead offers only a native debug installer matching the current workspace version. Build it with `npm run build:runner`, `node scripts/prepare-helper.mjs --local`, and `npm run tauri --workspace @ahm/helper -- build --debug --bundles nsis` on Windows (`dmg` on macOS, `deb` on Linux). Vite serves the matching bundle through a fixed development-only download route; older local bundles and the older hosted installer are not offered for a local workspace. Debug helpers return to `http://localhost:5173/`; release helpers open the hosted website. No tunnel is required for loopback pairing.
 
 ## Verification and release limits
 

@@ -8902,6 +8902,19 @@ a {
 .helper-onboarding details { margin: 20px 0; }
 .helper-onboarding summary { cursor: pointer; }
 .helper-onboarding h3 { font-size: 16px; font-weight: 600; }
+.onboarding-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.onboarding-heading h2 { margin: 0; }
+.onboarding-close { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; color: var(--text-secondary); background: var(--bg-element); border: 1px solid var(--border-subtle); border-radius: 6px; cursor: pointer; }
+.onboarding-progress { display: flex; gap: 12px; list-style: none; padding: 0; margin: 24px 0; counter-reset: onboarding-step; }
+.onboarding-progress li { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-secondary); font-size: 12px; }
+.onboarding-progress li::before { counter-increment: onboarding-step; content: counter(onboarding-step); display: inline-grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; border: 1px solid var(--border-subtle); border-radius: 50%; font-variant-numeric: tabular-nums; }
+.onboarding-progress li[aria-current="step"] { color: var(--text-primary); font-weight: 650; }
+.onboarding-progress li[aria-current="step"]::before { background: var(--accent-primary); color: var(--accent-primary-fg); border-color: var(--accent-primary); }
+.onboarding-progress .is-complete::before { color: var(--status-success); border-color: var(--status-success); }
+.helper-onboarding .onboarding-next-action, .helper-onboarding .onboarding-local-help { font-size: 13px; }
+.helper-onboarding .onboarding-waiting { margin-top: 16px; font-size: 13px; }
+.workspace-start-steps { display: grid; gap: 10px; padding-left: 22px; margin: 0 0 24px; color: var(--text-secondary); font-size: 14px; line-height: 1.5; }
+@media (max-width: 420px) { .onboarding-progress { gap: 8px; } .onboarding-progress li { flex-direction: column; align-items: start; gap: 6px; } }
 .helper-onboarding .primary-button, .helper-desktop .primary-button,
 .helper-onboarding .secondary-button, .helper-desktop .secondary-button { display: inline-flex; align-items: center; justify-content: center; padding: 10px 16px; border: 1px solid var(--border-subtle); border-radius: 8px; text-decoration: none; font-weight: 600; cursor: pointer; }
 .helper-onboarding .primary-button, .helper-desktop .primary-button { background: var(--accent-primary); color: var(--accent-primary-fg); border-color: var(--accent-primary); }

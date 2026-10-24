@@ -13,6 +13,7 @@ type ImportModalProps = {
   onToggleGroup: (groupName: string, checked: boolean) => void
   onSelectVariant: (groupName: string, path: string) => void
   onImport: () => void
+  onBrowseSkills?: () => void
   t: TFunction
 }
 
@@ -26,6 +27,7 @@ const ImportModal = ({
   onToggleGroup,
   onSelectVariant,
   onImport,
+  onBrowseSkills,
   t,
 }: ImportModalProps) => {
   const [query, setQuery] = useState('')
@@ -45,7 +47,8 @@ const ImportModal = ({
       return fields.some((value) => value.toLowerCase().includes(normalizedQuery))
     })
   }, [normalizedQuery, plan.groups])
-  const selectedCount = filteredGroups.filter((group) => selected[group.name]).length
+  const selectedCount = plan.groups.filter((group) => selected[group.name]).length
+  const visibleSelectedCount = filteredGroups.filter((group) => selected[group.name]).length
   const allVisibleSelected =
     filteredGroups.length > 0 &&
     filteredGroups.every((group) => selected[group.name])
@@ -60,10 +63,13 @@ const ImportModal = ({
     <div className="modal-backdrop" onClick={onRequestClose}>
       <div
         className="modal modal-lg modal-discovered"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="import-skills-title"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <div className="modal-title">{t('importTitle')}</div>
+          <div className="modal-title" id="import-skills-title">{t('importTitle')}</div>
           <button
             className="modal-close"
             type="button"
@@ -102,14 +108,14 @@ const ImportModal = ({
             </label>
             <span className="pick-toolbar-count">
               {t('selectedCount', {
-                selected: selectedCount,
+                selected: visibleSelectedCount,
                 total: filteredGroups.length,
               })}
             </span>
           </div>
           <div className="groups discovered-list">
             {filteredGroups.length === 0 ? (
-              <div className="empty">{t('importSearchEmpty')}</div>
+              <div className="empty">{t(plan.groups.length === 0 ? 'importNoneFound' : 'importSearchEmpty')}</div>
             ) : null}
             {filteredGroups.map((group) => (
               <div className="group-card" key={group.name}>
@@ -182,14 +188,14 @@ const ImportModal = ({
           </div>
         </div>
         <div className="modal-footer">
-          <button
+          {plan.groups.length === 0 && onBrowseSkills ? <button className="btn btn-primary" onClick={onBrowseSkills}>{t('workspaceNavigation.browse')}</button> : <button
             className="btn btn-primary"
             onClick={onImport}
             disabled={loading || selectedCount === 0}
           >
             <Download size={14} />
-            {t('importAndSync')}
-          </button>
+            {t('importSelected', { count: selectedCount })}
+          </button>}
           <button
             className="btn btn-secondary"
             onClick={onRequestClose}

@@ -112,8 +112,18 @@ it('Open My Skills from an empty composer navigates to My Skills instead of the 
   await click('Settings'); await click('Setups'); await click('Create Setup')
   await click('Open My Skills')
   expect(activeNavigation()).toEqual([button('My Skills')])
-  expect([...container.querySelectorAll('h1')].filter(visible).map(element => element.textContent)).toContain('Your skills, ready for your agents')
+  expect([...container.querySelectorAll('h1')].filter(visible).map(element => element.textContent)).toContain('Manage your skills in one place')
   expect(connection.createEnrollment).not.toHaveBeenCalled()
+})
+
+it('shows an ordered first-run path and lets users browse skills before connecting', async () => {
+  const { client } = await mount()
+  expect(container.querySelector('.workspace-start-steps')?.textContent).toContain('Import or install skills')
+  expect(button('Set up this computer')).toBeDefined()
+  await click('Browse skills')
+  expect(client.catalogue).toHaveBeenCalledWith({ command: 'get_featured_skills', args: {}, expectedDigest: null })
+  expect(connection.createEnrollment).not.toHaveBeenCalled()
+  expect(client.library).not.toHaveBeenCalled()
 })
 
 it('keeps original library, management, settings, inventory and sign-out destinations reachable', async () => {

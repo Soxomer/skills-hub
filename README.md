@@ -42,6 +42,8 @@ The web application runs on `http://localhost:5173` and proxies `/api` to the co
 
 ## Install and connect the runner
 
+For the desktop app, follow the [install, connect, and first-use guide](docs/DESKTOP-HELPER.md). It includes local development installers and connection recovery.
+
 For a local source installation:
 
 ```bash
