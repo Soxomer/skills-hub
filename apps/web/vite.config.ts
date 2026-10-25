@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 
 const productVersion = (JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string }).version
 
@@ -40,12 +40,16 @@ function localHelperInstaller(): Plugin {
   }
 }
 
-export default defineConfig({
-  plugins: [react(), tailwindcss(), localHelperInstaller(), { name: "web-version", generateBundle() { this.emitFile({ type: "asset", fileName: "version.json", source: JSON.stringify({ version: productVersion, revision: process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? null, builtAt: new Date().toISOString() }) }) } }],
-  server: {
-    host: '127.0.0.1',
-    proxy: {
-      '/api': 'http://127.0.0.1:8787',
+export default defineConfig(({ mode }) => {
+  const apiPort = loadEnv(mode, fileURLToPath(new URL('.', import.meta.url)), 'AHM_').AHM_DEV_API_PORT ?? '8787'
+  if (!/^\d+$/.test(apiPort) || Number(apiPort) < 1 || Number(apiPort) > 65535) throw new Error('AHM_DEV_API_PORT must be a valid local TCP port')
+  return {
+    plugins: [react(), tailwindcss(), localHelperInstaller(), { name: "web-version", generateBundle() { this.emitFile({ type: "asset", fileName: "version.json", source: JSON.stringify({ version: productVersion, revision: process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? null, builtAt: new Date().toISOString() }) }) } }],
+    server: {
+      host: '127.0.0.1',
+      proxy: {
+        '/api': `http://127.0.0.1:${apiPort}`,
+      },
     },
-  },
+  }
 })

@@ -17,7 +17,7 @@ beforeEach(() => {
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 function connection(overrides: Partial<ReturnType<typeof useRunnerConnection>> = {}): ReturnType<typeof useRunnerConnection> {
-  return { enrollment: null, status: null, runner: null, creating: false, error: null, createEnrollment: vi.fn(), refresh: vi.fn(), reset: vi.fn(), ...overrides }
+  return { enrollment: null, status: null, runner: null, creating: false, error: null, createEnrollment: vi.fn(), refresh: vi.fn(), reset: vi.fn(), availableRunners: [], loadingRunners: false, runnersError: false, selecting: false, refreshRunners: vi.fn(), selectRunner: vi.fn(), ...overrides }
 }
 async function click(label: string) {
   const button = [...container.querySelectorAll('button')].find(value => value.textContent === label)

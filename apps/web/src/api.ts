@@ -94,6 +94,10 @@ export class ControlPlaneClient {
     return this.send(`/api/v1/runners/${encodeURIComponent(deviceId)}`)
   }
 
+  runners(): Promise<RunnerStatusResponse[]> {
+    return this.send('/api/v1/runners')
+  }
+
   catalogue(request: LibraryRequest): Promise<unknown> {
     return this.send('/api/v1/library/catalogue', this.jsonRequest('POST', request))
   }

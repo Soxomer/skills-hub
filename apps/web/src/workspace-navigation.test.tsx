@@ -10,6 +10,7 @@ import './i18n'
 const connection = vi.hoisted(() => ({
   enrollment: null, status: null, runner: null, creating: false, error: null,
   createEnrollment: vi.fn(), refresh: vi.fn().mockResolvedValue(undefined), reset: vi.fn(),
+  availableRunners: [], loadingRunners: false, runnersError: false, selecting: false, refreshRunners: vi.fn(), selectRunner: vi.fn(),
 }))
 vi.mock('./useRunnerConnection', () => ({ useRunnerConnection: () => connection }))
 vi.mock('./hub/web-update', () => ({

@@ -603,12 +603,6 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
     void loadDiscoveryScanSettings()
   }, [loadDiscoveryScanSettings])
 
-  useEffect(() => {
-    if (runnerConnected) {
-      void loadPlan(false)
-    }
-  }, [runnerConnected, loadPlan])
-
   const handleDismissUpdate = useCallback(() => {
     setShowAppUpdateModal(false)
   }, [])
@@ -2602,7 +2596,7 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
       setActionMessage(t('status.importCompleted'))
       setActionMessage(null)
       await loadManagedSkills()
-      await loadPlan()
+      setPlan(null)
       if (collectedErrors.length > 0) {
         showActionErrors(collectedErrors)
       } else if (successCount > 0) {

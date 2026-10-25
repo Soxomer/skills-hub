@@ -208,6 +208,7 @@ export function createControlPlaneApp(
     async (request) => transport.enrollmentStatus(actor(request), request.params.enrollmentId),
   )
 
+  app.get('/api/v1/runners', async request => transport.runners(actor(request)))
   app.get<{ Params: { deviceId: string } }>('/api/v1/runners/:deviceId', async (request) =>
     transport.runnerStatus(actor(request), request.params.deviceId),
   )

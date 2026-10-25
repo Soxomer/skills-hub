@@ -100,6 +100,22 @@ async function connect(app: ReturnType<typeof createControlPlaneApp>, report = c
   return identity
 }
 
+it('lists workspace computers without exposing credentials or another workspace', async () => {
+  const { app, repository } = harness()
+  try {
+    const first = await connect(app)
+    const second = await connect(app)
+    repository.seedMembership({ organizationId: 'other', userId: 'user_01' }, 'owner')
+    const response = await app.inject({ method: 'GET', url: '/api/v1/runners', headers: actorHeaders })
+    expect(response.statusCode).toBe(200)
+    expect(response.json().map((runner: { deviceId: string }) => runner.deviceId).sort()).toEqual([first.deviceId, second.deviceId].sort())
+    expect(response.body).not.toContain(first.credential)
+    expect(response.body).not.toContain('credentialHash')
+    expect((await app.inject({ method: 'GET', url: '/api/v1/runners', headers: { ...actorHeaders, 'x-ahm-organization-id': 'other' } })).json()).toEqual([])
+    expect((await app.inject({ method: 'GET', url: '/api/v1/runners', headers: { ...actorHeaders, 'x-ahm-user-id': 'stranger' } })).statusCode).toBe(403)
+  } finally { await app.close() }
+})
+
 const snapshotCapabilities = { ...capabilities, capabilities: { ...capabilities.capabilities, setupSnapshots: true } }
 const snapshotCommands = ['preview_setup_skill', 'snapshot_setup_skill'] as const
 const snapshotRequest = (command: typeof snapshotCommands[number]) => ({ command, args: { skillId: 'review' }, expectedDigest: command === 'snapshot_setup_skill' ? `sha256:${'a'.repeat(64)}` : null })

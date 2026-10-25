@@ -44,6 +44,7 @@ describe('Better Auth hosted sessions', () => {
     const h = await harness()
     try {
       expect((await h.app.inject('/api/v1/projects')).statusCode).toBe(401)
+      expect((await h.app.inject('/api/v1/runners')).statusCode).toBe(401)
       const libraryPayload = { command: 'get_featured_skills', args: {}, expectedDigest: null }
       expect((await h.app.inject({ method: 'POST', url: '/api/v1/library/catalogue', payload: libraryPayload })).statusCode).toBe(401)
       expect((await h.app.inject({ method: 'POST', url: '/api/v1/runners/private-device/library', payload: libraryPayload })).statusCode).toBe(401)

@@ -9018,3 +9018,9 @@ a {
   .evaluation-version-pair, .evaluation-profile-fields, .evaluation-fixed-settings { grid-template-columns: 1fr; }
   .evaluation-run-heading { flex-direction: column; gap: 8px; }
 }
+.onboarding-computers {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}

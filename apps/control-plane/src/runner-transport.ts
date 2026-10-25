@@ -92,6 +92,7 @@ export interface RunnerTransportRepository {
   ): Promise<RunnerAuthentication | null>
   authenticateRunner(credentialHash: string): Promise<RunnerAuthentication | null>
   runnerStatus(organizationId: string, deviceId: string): Promise<RunnerStatusResponse | null>
+  runners(organizationId: string): Promise<RunnerStatusResponse[]>
   registerProjectInstance(
     runner: RunnerAuthentication,
     request: RegisterProjectInstanceRequest,
@@ -235,7 +236,7 @@ function validateArtifactBundle(bundle: ArtifactBundle): void {
 }
 
 export type BrowserRunnerRepository = Pick<RunnerTransportRepository,
-  'createEnrollment' | 'enrollmentStatus' | 'runnerStatus' | 'projectInstance' |
+  'createEnrollment' | 'enrollmentStatus' | 'runnerStatus' | 'runners' | 'projectInstance' |
   'enqueueJob' | 'jobStatus' | 'requestCancellation' | 'revokeRunner'>
 
 function supportedJobKinds(report: RunnerCapabilityReport): string[] {
@@ -416,6 +417,10 @@ export class RunnerTransportService {
     const runner = await this.repository.withActor(actor, 'read', (repository) => repository.runnerStatus(actor.organizationId, deviceId))
     if (!runner) throw new RunnerTransportError(404, 'runner not found')
     return runner
+  }
+
+  async runners(actor: RequestActor): Promise<RunnerStatusResponse[]> {
+    return this.repository.withActor(actor, 'read', repository => repository.runners(actor.organizationId))
   }
 
   async registerProjectInstance(
