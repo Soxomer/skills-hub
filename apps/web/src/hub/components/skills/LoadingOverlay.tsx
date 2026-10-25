@@ -3,6 +3,7 @@ import type { TFunction } from 'i18next'
 
 type LoadingOverlayProps = {
   loading: boolean
+  scanning?: boolean
   actionMessage: string | null
   loadingStartAt: number | null
   onCancel?: () => void
@@ -11,6 +12,7 @@ type LoadingOverlayProps = {
 
 const LoadingOverlay = ({
   loading,
+  scanning = false,
   actionMessage,
   loadingStartAt,
   onCancel,
@@ -23,11 +25,11 @@ const LoadingOverlay = ({
       <div className="modal loading-modal" role="dialog" aria-modal="true">
         <div className="loading-content">
           <div className="loader-spinner" />
-          <div className="loading-text">{t('processingTitle')}</div>
+          <div className="loading-text">{t(scanning ? 'discoveryScan.scanning' : 'processingTitle')}</div>
           <div className="loading-stage">
-            {actionMessage ?? t('processingTipShort')}
+            {scanning ? t('discoveryScan.scanningHelp') : actionMessage ?? t('processingTipShort')}
           </div>
-          {loadingStartAt ? (
+          {loadingStartAt && !scanning ? (
             <div className="loading-subtext loading-subtext-delayed">
               {t('processingTipLong')}
             </div>

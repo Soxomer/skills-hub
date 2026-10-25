@@ -9024,3 +9024,6 @@ a {
   display: grid;
   gap: 12px;
 }
+
+.skills-library-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.skills-page-content { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
