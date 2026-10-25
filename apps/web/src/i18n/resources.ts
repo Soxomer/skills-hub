@@ -67,6 +67,8 @@ const originalResources = {
       "settingsSectionUpdates": "App updates",
       "settingsSectionUpdatesDesc": "Check the current version and install updates.",
       "discoveryScan": {
+        "scanning": "Scanning for existing skills...",
+        "scanningHelp": "Checking skill folders on your computer. Review the results before importing anything.",
         "action": "Scan settings",
         "title": "Scan settings",
         "description": "Choose which sources are scanned for importable Skills. Turning a source off does not delete managed Skills.",
@@ -694,7 +696,7 @@ export const resources = {
       setup: 'Set up this computer', browse: 'Browse skills',
       installStep: 'Install the desktop app', connectStep: 'Connect this computer', importStep: 'Import or install skills',
       readyTitle: 'Add your first skills', readyHelp: 'Already have skills in Codex, Claude Code, or another tool? Find them on this computer and choose which ones to manage. You can also browse new skills to install.',
-      findExisting: 'Find existing skills', loadingSkills: 'Loading skills on this computer…',
+      findExisting: 'Find existing skills', scanExisting: 'Scan for existing skills', loadingSkills: 'Loading skills on this computer…',
       loadFailed: 'Your skills could not be loaded. Check that the desktop app is running, then retry.', retryLibrary: 'Retry loading skills',
       savedSetups: 'Browse saved Setups', offlineHelp: 'Saved Setups and previous comparisons are available without a connected computer.',
     }, addToSetup: {

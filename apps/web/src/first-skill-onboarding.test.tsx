@@ -6,7 +6,7 @@ import type { ControlPlaneClient } from './api'
 import { HelperOnboarding } from './components/HelperOnboarding'
 import { LibraryProvider } from './hub/LibraryProvider'
 import SkillsHub from './hub/SkillsHub'
-import type { OnboardingPlan } from './hub/components/skills/types'
+import type { ManagedSkill, OnboardingPlan } from './hub/components/skills/types'
 import { useRunnerConnection } from './useRunnerConnection'
 import './i18n'
 
@@ -27,7 +27,7 @@ const libraryResponses: Record<string, unknown> = {
   import_existing_skill: { skill_id: 'beta', central_path: 'folder-beta' },
 }
 
-function libraryClient(failFirstLibraryRead = false, discoveryResponses: (OnboardingPlan | Promise<OnboardingPlan>)[] = []) {
+function libraryClient(failFirstLibraryRead = false, discoveryResponses: (OnboardingPlan | Promise<OnboardingPlan>)[] = [], managedSkills: ManagedSkill[] = []) {
   let libraryReads = 0
   let discoveryReads = 0
   const commands = new Map<string, string>()
@@ -43,7 +43,7 @@ function libraryClient(failFirstLibraryRead = false, discoveryResponses: (Onboar
     job: vi.fn(async (jobId: string) => {
       const command = commands.get(jobId)!
       if (!(command in libraryResponses)) throw new Error(`Unexpected fixture command: ${command}`)
-      const value = command === 'get_onboarding_plan' && discoveryReads < discoveryResponses.length
+      const value = command === 'get_managed_skills' ? managedSkills : command === 'get_onboarding_plan' && discoveryReads < discoveryResponses.length
         ? await discoveryResponses[discoveryReads++] : libraryResponses[command]
       return { result: { result: { kind: 'libraryResponse', payload: { value } } } }
     }),
@@ -169,4 +169,38 @@ it('requires an explicit retry after connection preparation fails and then offer
   expect(client.createRunnerEnrollment).toHaveBeenCalledTimes(2)
   expect(container.querySelector('[role=alert]')).toBeNull()
   expect(container.querySelector('a[href^="ahm://connect"]')?.getAttribute('href')).toContain('example.com')
+})
+
+it('keeps scanning available in a populated library and reads fresh results after closing each review', async () => {
+  const managed: ManagedSkill = { id: 'managed', name: 'managed', source_type: 'local', central_path: 'folder-managed', created_at: 1, updated_at: 1, enabled: true, status: 'ok', tags: [], targets: [] }
+  const plan = (name: string): OnboardingPlan => ({ total_tools_scanned: 1, total_skills_found: 1,
+    groups: [{ name, has_conflict: false, variants: [{ tool: 'codex', name, path: `folder-${name}`, is_link: false }] }] })
+  let finishScan!: (value: OnboardingPlan) => void
+  const firstScan = new Promise<OnboardingPlan>(resolve => { finishScan = resolve })
+  const client = libraryClient(false, [firstScan, plan('newly-added'), emptyPlan], [managed])
+  const scans = () => client.library.mock.calls.filter(([, request]) => request.command === 'get_onboarding_plan')
+  const closeReview = async () => act(async () => container.querySelector<HTMLButtonElement>('[aria-labelledby="import-skills-title"] button[aria-label="Close"]')!.click())
+  await mountLibrary(client)
+  expect(scans()).toHaveLength(0)
+  expect(button('Scan for existing skills').disabled).toBe(false)
+  await act(async () => button('Scan for existing skills').click())
+  expect(scans()).toHaveLength(1)
+  expect(button('Scan for existing skills').disabled).toBe(true)
+  expect(container.textContent).toContain('Scanning for existing skills...')
+  expect(container.textContent).not.toContain('Installing Skills...')
+  await act(async () => finishScan(plan('first-found')))
+  expect(container.querySelector('[aria-labelledby="import-skills-title"]')?.textContent).toContain('first-found')
+  await closeReview()
+  await act(async () => button('Scan for existing skills').click())
+  expect(scans()).toHaveLength(2)
+  const review = container.querySelector('[aria-labelledby="import-skills-title"]')!
+  expect(review.textContent).toContain('newly-added')
+  expect(review.textContent).not.toContain('first-found')
+  await closeReview()
+  await act(async () => button('Scan for existing skills').click())
+  expect(scans()).toHaveLength(3)
+  expect(container.querySelector('[aria-labelledby="import-skills-title"]')?.textContent).toContain('No existing skills were found')
+  await closeReview()
+  expect(button('Scan for existing skills').disabled).toBe(false)
+  expect(client.library.mock.calls.some(([, request]) => request.command === 'import_existing_skill')).toBe(false)
 })

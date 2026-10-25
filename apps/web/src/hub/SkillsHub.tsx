@@ -129,6 +129,7 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
   const [managedSkillsLoaded, setManagedSkillsLoaded] = useState(false)
   const [managedSkillsLoadFailed, setManagedSkillsLoadFailed] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [scanning, setScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [variantChoice, setVariantChoice] = useState<Record<string, string>>({})
@@ -382,6 +383,7 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
     const requestSequence = ++planRequestSequence.current
     if (showLoading) {
       setLoading(true)
+      setScanning(true)
       setLoadingStartAt(Date.now())
     }
     setError(null)
@@ -407,6 +409,7 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
     } finally {
       if (showLoading) {
         setLoading(false)
+        setScanning(false)
         setLoadingStartAt(null)
       }
     }
@@ -2454,6 +2457,11 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
     }
   }, [loadPlan, plan])
 
+  const handleScanExisting = useCallback(async () => {
+    const result = await loadPlan()
+    if (result) setShowImportModal(true)
+  }, [loadPlan])
+
   useEffect(() => {
     let active = true
     const load = async () => {
@@ -3559,6 +3567,7 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
       />
       <LoadingOverlay
         loading={loading}
+        scanning={scanning}
         actionMessage={actionMessage}
         loadingStartAt={loadingStartAt}
         onCancel={handleCancelLoading}
@@ -3596,7 +3605,7 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
           <button className="btn btn-secondary" type="button" onClick={() => void requestConnection?.()}>{t(runnerConnected ? 'workspaceNavigation.connection' : 'workspaceNavigation.connect')}</button>
         </div>
         {children}
-        <div hidden={workspacePage !== null}>
+        <div className="skills-page-content" hidden={workspacePage !== null}>
         {!runnerConnected && activeView === 'myskills' && <section className="workspace-start" aria-labelledby="workspace-start-title">
           <h1 id="workspace-start-title">{t('workspaceNavigation.startTitle')}</h1>
           <p>{t('workspaceNavigation.startHelp')}</p>
@@ -3610,7 +3619,7 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
           <button className="btn btn-secondary" type="button" onClick={() => void loadManagedSkills()}>{t('workspaceNavigation.retryLibrary')}</button></div>}
         {runnerConnected && managedSkillsLoaded && managedSkills.length === 0 && activeView === 'myskills' && <section className="workspace-start" aria-labelledby="workspace-ready-title">
           <h1 id="workspace-ready-title">{t('workspaceNavigation.readyTitle')}</h1><p>{t('workspaceNavigation.readyHelp')}</p>
-          <div className="workspace-start-actions"><button className="btn btn-primary" type="button" disabled={loading} onClick={() => void handleReviewImport()}>{t('workspaceNavigation.findExisting')}</button>
+          <div className="workspace-start-actions"><button className="btn btn-primary" type="button" disabled={loading} onClick={() => void handleScanExisting()}>{t('workspaceNavigation.findExisting')}</button>
             <button className="btn btn-secondary" type="button" onClick={() => handleViewChange('explore')}>{t('workspaceNavigation.browse')}</button></div>
         </section>}
         {pendingInstall && <div className="library-connection-notice" role="status">
@@ -3671,6 +3680,9 @@ function SkillsHub({ onOpenWorkspace, onCloseWorkspace, workspacePage = null, sk
                 </button>
               </article>
             </section>
+            <div className="skills-library-actions">
+              <button className="btn btn-secondary" type="button" disabled={loading} onClick={() => void handleScanExisting()}>{t('workspaceNavigation.scanExisting')}</button>
+            </div>
             <FilterBar
               sortBy={sortBy}
               searchQuery={searchQuery}
