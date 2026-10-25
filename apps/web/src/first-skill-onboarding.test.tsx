@@ -24,6 +24,7 @@ const libraryResponses: Record<string, unknown> = {
   get_tool_config: { disabled_builtin_tools: [], custom_tools: [] },
   get_tool_status: { tools: [], installed: [], newly_installed: [] },
   get_discovery_scan_settings: { sources: [], disabled_source_keys: [] },
+  import_existing_skill: { skill_id: 'beta', central_path: 'folder-beta' },
 }
 
 function libraryClient(failFirstLibraryRead = false, discoveryResponses: (OnboardingPlan | Promise<OnboardingPlan>)[] = []) {
@@ -111,7 +112,7 @@ it('keeps a failed first library load recoverable after transient feedback disap
   expect(container.querySelector('#workspace-ready-title')?.textContent).toBe('Add your first skills')
 })
 
-it('preserves reviewed import selections and conflict choices when an older background scan finishes', async () => {
+it('scans only on request, preserves reviewed choices, and finishes importing without a redundant full scan', async () => {
   const plan: OnboardingPlan = { total_tools_scanned: 2, total_skills_found: 3, groups: [
     { name: 'alpha', has_conflict: false, variants: [
       { name: 'alpha', tool: 'codex', path: 'codex-alpha', is_link: false, link_target: null },
@@ -121,14 +122,12 @@ it('preserves reviewed import selections and conflict choices when an older back
       { name: 'beta', tool: 'claude', path: 'claude-beta', is_link: false, link_target: null },
     ] },
   ] }
-  let releaseBackground: (value: OnboardingPlan) => void = () => { throw new Error('Background scan was not started') }
-  const background = new Promise<OnboardingPlan>(resolve => { releaseBackground = resolve })
-  const client = libraryClient(false, [background, plan])
+  const client = libraryClient(false, [plan, plan])
   await mountLibrary(client)
-  expect(client.library.mock.calls.filter(([, request]) => request.command === 'get_onboarding_plan')).toHaveLength(1)
+  expect(client.library.mock.calls.filter(([, request]) => request.command === 'get_onboarding_plan')).toHaveLength(0)
 
   await act(async () => button('Find existing skills').click())
-  expect(client.library.mock.calls.filter(([, request]) => request.command === 'get_onboarding_plan')).toHaveLength(2)
+  expect(client.library.mock.calls.filter(([, request]) => request.command === 'get_onboarding_plan')).toHaveLength(1)
   const dialog = container.querySelector('[aria-labelledby="import-skills-title"]')!
   const alpha = [...dialog.querySelectorAll('.group-card')].find(group => group.querySelector('.group-select span')?.textContent === 'alpha')!
   const alphaSelected = alpha.querySelector<HTMLInputElement>('input[type=checkbox]')!
@@ -137,16 +136,23 @@ it('preserves reviewed import selections and conflict choices when an older back
   expect(alphaSelected.checked).toBe(false)
   expect(betaChoice[1].checked).toBe(true)
 
-  await act(async () => releaseBackground(plan))
+  await act(async () => vi.advanceTimersByTimeAsync(3000))
   expect(alphaSelected.checked).toBe(false)
   expect(betaChoice[0].checked).toBe(false)
   expect(betaChoice[1].checked).toBe(true)
+  await act(async () => button('Import 1 selected skills').click())
+  expect(client.library).toHaveBeenCalledWith('fixture-device', expect.objectContaining({ command: 'import_existing_skill', args: { sourcePath: 'claude-beta', name: 'beta' } }))
+  expect(client.library.mock.calls.filter(([, request]) => request.command === 'get_onboarding_plan')).toHaveLength(1)
+  expect(container.querySelector('[aria-labelledby="import-skills-title"]')).toBeNull()
+  await act(async () => button('Find existing skills').click())
+  expect(client.library.mock.calls.filter(([, request]) => request.command === 'get_onboarding_plan')).toHaveLength(2)
 })
 
 it('requires an explicit retry after connection preparation fails and then offers the new link', async () => {
   const enrollment = { enrollmentId: 'fixture-enrollment', code: 'abcdefghijklmnop',
     command: 'ahm connect abcdefghijklmnop --server https://example.com', expiresAt: '2099-01-01T00:00:00Z' }
   const client = {
+    runners: vi.fn().mockResolvedValue([]),
     createRunnerEnrollment: vi.fn().mockRejectedValueOnce(new Error('Temporary connection failure')).mockResolvedValue(enrollment),
     runnerEnrollment: vi.fn().mockResolvedValue({ enrollmentId: enrollment.enrollmentId, state: 'waiting', deviceId: null, expiresAt: enrollment.expiresAt }),
   }

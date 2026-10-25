@@ -40,9 +40,13 @@ npm run dev
 
 The web application runs on `http://localhost:5173` and proxies `/api` to the control plane at `http://127.0.0.1:8787` by default.
 
+For a different local API port, set `PORT` when starting the control plane and set the same port as `AHM_DEV_API_PORT` in `apps/web/.env.local`.
+
 ## Install and connect the runner
 
 For the desktop app, follow the [install, connect, and first-use guide](docs/DESKTOP-HELPER.md). It includes local development installers and connection recovery.
+
+If the desktop app is already connected to this workspace, choose **Connect computer** and **Use [computer name]**. A new browser or local web address can reuse the existing computer connection. Use **Connect another computer** to pair a new one.
 
 For a local source installation:
 

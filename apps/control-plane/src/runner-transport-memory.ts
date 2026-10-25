@@ -142,6 +142,13 @@ export class InMemoryRunnerTransportRepository implements RunnerTransportReposit
       : null
   }
 
+  async runners(organizationId: string): Promise<RunnerStatusResponse[]> {
+    const devices = [...this.devices.values()]
+      .filter(device => device.organizationId === organizationId)
+      .sort((left, right) => left.label.localeCompare(right.label) || left.deviceId.localeCompare(right.deviceId))
+    return Promise.all(devices.map(async device => (await this.runnerStatus(organizationId, device.deviceId))!))
+  }
+
   async runnerStatus(
     organizationId: string,
     deviceId: string,

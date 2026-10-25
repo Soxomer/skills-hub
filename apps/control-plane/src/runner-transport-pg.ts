@@ -60,6 +60,7 @@ interface RunnerStatusRow extends QueryResultRow {
 }
 
 interface ProjectInstanceStatusRow extends QueryResultRow {
+  device_id: string
   id: string
   project_id: string
   registered_at: Date
@@ -428,47 +429,56 @@ export class PostgresRunnerTransportRepository implements RunnerTransportReposit
     organizationId: string,
     deviceId: string,
   ): Promise<RunnerStatusResponse | null> {
+    return (await this.runnerStatuses(organizationId, deviceId))[0] ?? null
+  }
+
+  async runners(organizationId: string): Promise<RunnerStatusResponse[]> {
+    return this.runnerStatuses(organizationId, null)
+  }
+
+  private async runnerStatuses(organizationId: string, deviceId: string | null): Promise<RunnerStatusResponse[]> {
     const [deviceResult, projectInstancesResult] = await Promise.all([
       this.browserDatabase.query<RunnerStatusRow>(
         `SELECT id, label, status, enrolled_at, last_seen_at, runner_version,
                 supported_protocol_versions, capabilities, skill_library
-         FROM runner_devices WHERE organization_id = $1 AND id = $2`,
+         FROM runner_devices WHERE organization_id = $1 AND ($2::text IS NULL OR id = $2)
+         ORDER BY label, id`,
         [organizationId, deviceId],
       ),
       this.browserDatabase.query<ProjectInstanceStatusRow>(
-        `SELECT id, project_id, registered_at, last_seen_at
+        `SELECT id, device_id, project_id, registered_at, last_seen_at
          FROM project_instances
-         WHERE organization_id = $1 AND device_id = $2
+         WHERE organization_id = $1 AND ($2::text IS NULL OR device_id = $2)
          ORDER BY registered_at, id`,
         [organizationId, deviceId],
       ),
     ])
-    const device = deviceResult.rows[0]
-    if (!device) return null
-    const capabilities =
-      device.runner_version && device.supported_protocol_versions && device.capabilities
-        ? {
-            protocolVersion: PROTOCOL_VERSION,
-            supportedProtocolVersions: device.supported_protocol_versions,
-            runnerVersion: device.runner_version,
-            capabilities: device.capabilities,
-          }
-        : null
-    return {
-      deviceId: device.id,
-      label: device.label,
-      status: device.status,
-      enrolledAt: iso(device.enrolled_at),
-      lastSeenAt: device.last_seen_at ? iso(device.last_seen_at) : null,
-      skillLibrary: device.skill_library ?? null,
-      capabilities,
-      projectInstances: projectInstancesResult.rows.map((instance) => ({
-        projectInstanceId: instance.id,
-        projectId: instance.project_id,
-        registeredAt: iso(instance.registered_at),
-        lastSeenAt: instance.last_seen_at ? iso(instance.last_seen_at) : null,
-      })),
-    }
+    return deviceResult.rows.map(device => {
+      const capabilities =
+        device.runner_version && device.supported_protocol_versions && device.capabilities
+          ? {
+              protocolVersion: PROTOCOL_VERSION,
+              supportedProtocolVersions: device.supported_protocol_versions,
+              runnerVersion: device.runner_version,
+              capabilities: device.capabilities,
+            }
+          : null
+      return {
+        deviceId: device.id,
+        label: device.label,
+        status: device.status,
+        enrolledAt: iso(device.enrolled_at),
+        lastSeenAt: device.last_seen_at ? iso(device.last_seen_at) : null,
+        skillLibrary: device.skill_library ?? null,
+        capabilities,
+        projectInstances: projectInstancesResult.rows.filter(instance => instance.device_id === device.id).map((instance) => ({
+          projectInstanceId: instance.id,
+          projectId: instance.project_id,
+          registeredAt: iso(instance.registered_at),
+          lastSeenAt: instance.last_seen_at ? iso(instance.last_seen_at) : null,
+        })),
+      }
+    })
   }
 
   async registerProjectInstance(

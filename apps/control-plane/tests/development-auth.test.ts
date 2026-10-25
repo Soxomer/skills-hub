@@ -31,6 +31,7 @@ async function harness() {
     { method: 'POST' as const, url: '/api/v1/runner-enrollments', write: true },
     { method: 'GET' as const, url: `/api/v1/runner-enrollments/${enrollment.enrollmentId}`, write: false },
     { method: 'GET' as const, url: `/api/v1/runners/${runner.deviceId}`, write: false },
+    { method: 'GET' as const, url: '/api/v1/runners', write: false },
     { method: 'POST' as const, url: '/api/v1/project-instances/instance/scan', write: true },
     { method: 'GET' as const, url: `/api/v1/jobs/${job.jobId}`, write: false },
     { method: 'POST' as const, url: `/api/v1/jobs/${job.jobId}/cancel`, write: true },
@@ -79,7 +80,10 @@ describe('development actor authorization', () => {
         const response = await app.inject({ method, url, headers: {
           'x-ahm-organization-id': 'other', 'x-ahm-user-id': 'owner',
         } })
-        expect(response.statusCode, `${method} ${url}`).toBe(404)
+        if (url === '/api/v1/runners') {
+          expect(response.statusCode).toBe(200)
+          expect(response.json()).toEqual([])
+        } else expect(response.statusCode, `${method} ${url}`).toBe(404)
       }
     } finally { await app.close() }
   })

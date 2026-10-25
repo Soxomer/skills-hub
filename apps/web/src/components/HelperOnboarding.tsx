@@ -4,6 +4,7 @@ import { X } from 'lucide-react'
 import type { useRunnerConnection } from '../useRunnerConnection'
 import { helperConnectionLink, installerFor, suggestedHelperPlatform, type HelperPlatform } from '../helper-connection'
 import { CommandBlock } from './CommandBlock'
+import { RUNNER_OFFLINE_AFTER_MS } from '../runner-status'
 
 interface HelperOnboardingProps {
   connection: ReturnType<typeof useRunnerConnection>
@@ -16,6 +17,7 @@ export function HelperOnboarding({ connection, connected, initialInstalled = fal
   const { t } = useTranslation()
   const dialog = useRef<HTMLDialogElement>(null)
   const [installed, setInstalled] = useState(() => initialInstalled || Boolean(connection.enrollment) || connected)
+  const [connectAnother, setConnectAnother] = useState(false)
   const [now, setNow] = useState(Date.now)
   const [platform, setPlatform] = useState<HelperPlatform>(() => suggestedHelperPlatform(navigator.userAgent))
   const localWorkspace = import.meta.env.DEV && ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
@@ -27,6 +29,10 @@ export function HelperOnboarding({ connection, connected, initialInstalled = fal
   const invalid = Boolean(connection.enrollment && !expired && !link)
   const local = Boolean(link && new URL(link).searchParams.get('server')?.startsWith('http:'))
   const requested = useRef(false)
+  const computers = connection.availableRunners.filter(runner => runner.status === 'active' && runner.capabilities?.capabilities.library)
+  const choosingComputer = !connectAnother && (connection.loadingRunners || connection.runnersError || computers.length > 0)
+  const refreshRunners = connection.refreshRunners
+  useEffect(() => { void refreshRunners() }, [refreshRunners])
   useEffect(() => {
     if (!localWorkspace) return
     const abort = new AbortController()
@@ -49,10 +55,10 @@ export function HelperOnboarding({ connection, connected, initialInstalled = fal
     return () => { window.clearInterval(timer); element?.close(); focused?.focus() }
   }, [])
   useEffect(() => {
-    if (!installed || connected || connection.enrollment || connection.creating || requested.current) return
+    if (!installed || connected || choosingComputer || connection.enrollment || connection.creating || requested.current) return
     requested.current = true
     void connection.createEnrollment()
-  }, [installed, connected, connection])
+  }, [installed, connected, choosingComputer, connection])
   return <dialog ref={dialog} className="library-dialog helper-onboarding" aria-labelledby="helper-onboarding-title" aria-describedby="helper-onboarding-description" onCancel={event => { event.preventDefault(); onFinish(false) }}>
     <div className="onboarding-heading"><h2 id="helper-onboarding-title">{t(connected ? 'onboarding.success' : 'onboarding.title')}</h2>
       <button className="onboarding-close" type="button" aria-label={t('onboarding.close')} onClick={() => onFinish(false)}><X size={18} aria-hidden="true" /></button></div>
@@ -61,7 +67,20 @@ export function HelperOnboarding({ connection, connected, initialInstalled = fal
       {(['installStep', 'connectStep', 'manageStep'] as const).map((step, index) => <li key={step} aria-current={index === (connected ? 2 : installed ? 1 : 0) ? 'step' : undefined} className={index < (connected ? 2 : installed ? 1 : 0) ? 'is-complete' : undefined}>{t(`onboarding.${step}`)}</li>)}
     </ol>
     {connected ? <><p>{t('onboarding.nextHelp')}</p><button className="primary-button" onClick={() => onFinish(true)}>{t('onboarding.continue')}</button></> : <>
-      {!installed ? <section aria-labelledby="helper-install-title">
+      {choosingComputer ? <section aria-labelledby="helper-computers-title" aria-busy={connection.loadingRunners || connection.selecting}>
+        <h3 id="helper-computers-title">{t('onboarding.computers')}</h3>
+        <p>{t('onboarding.computersHelp')}</p>
+        {connection.loadingRunners && <p role="status">{t('onboarding.checkingComputers')}</p>}
+        {connection.runnersError && <p className="notice notice--error" role="alert">{t('onboarding.computersError')}</p>}
+        {connection.error === 'select' && <p className="notice notice--error" role="alert">{t('onboarding.selectError')}</p>}
+        <ul className="onboarding-computers">{computers.map(computer => {
+          const online = Boolean(computer.lastSeenAt && now - Date.parse(computer.lastSeenAt) <= RUNNER_OFFLINE_AFTER_MS)
+          return <li key={computer.deviceId}><button className="primary-button" disabled={!online || connection.selecting || connection.loadingRunners} onClick={() => void connection.selectRunner(computer.deviceId)}>{t('onboarding.useComputer', { name: computer.label })}</button>
+            {!online && <p>{t('onboarding.computerOffline')}</p>}</li>
+        })}</ul>
+        <div className="runner-helper-actions"><button className="secondary-button" disabled={connection.loadingRunners || connection.selecting} onClick={() => void connection.refreshRunners()}>{t('onboarding.checkComputers')}</button>
+          <button className="text-button" disabled={connection.selecting} onClick={() => setConnectAnother(true)}>{t('onboarding.connectAnother')}</button></div>
+      </section> : !installed ? <section aria-labelledby="helper-install-title">
         <h3 id="helper-install-title">{t('onboarding.install')}</h3><p>{t('onboarding.installHelp')}</p>
         <label htmlFor="helper-platform">{t('onboarding.platform')}</label>
         <select id="helper-platform" value={platform} onChange={event => setPlatform(event.target.value as HelperPlatform)}>
