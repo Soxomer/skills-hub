@@ -72,6 +72,8 @@ Always run `npm run check` before committing.
 
 ## Workflow
 
+Before opening a PR, put a short, evidence-backed before/after in its description. Use the `pr-evidence` skill when available. Otherwise, show the same scenario with proof that fits the change (capture, test, API response, or state), and state any verification limits. For changes that preserve behavior, say what you checked. Link evidence reviewers can open from the PR.
+
 1. Before implementing, briefly state the approach and files likely to change, then wait for confirmation.
 2. Implement all affected boundaries in one pass: contract, API, persistence, runner, browser, and tests as applicable.
 3. Keep changes minimal and avoid unrelated refactors.
